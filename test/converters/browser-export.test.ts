@@ -200,6 +200,46 @@ describe("explicit browser export adapter", () => {
     expect(JSON.stringify(credentials)).not.toContain("password");
   });
 
+  test("rejects case-variant sensitive JSON and invalid child shapes", async () => {
+    for (const source of [
+      JSON.stringify({ Cookies: [{ name: "session", value: "secret" }] }),
+      JSON.stringify({ history: "not-an-array" }),
+      JSON.stringify({
+        items: [
+          {
+            url: "https://example.com",
+            Cookies: [{ name: "session", value: "secret" }],
+          },
+        ],
+      }),
+    ]) {
+      const result = await runRecordAdapter(
+        browserExportAdapter,
+        input(source)
+      );
+      expect(result.records).toEqual([]);
+      expect(result.failures.length).toBeGreaterThan(0);
+      expect(result.authoritative).toBe(false);
+      expect(JSON.stringify(result)).not.toContain("secret");
+    }
+  });
+
+  test("rejects truncated or non-export bookmark HTML", async () => {
+    for (const source of [
+      "<DL><p>truncated",
+      "<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p>truncated",
+      "<html><body><DL></DL></body></html>",
+    ]) {
+      const result = await runRecordAdapter(
+        browserExportAdapter,
+        input(source, { mime: "text/x-gno-browser-bookmarks+html" })
+      );
+      expect(result.records).toEqual([]);
+      expect(result.failures.length).toBeGreaterThan(0);
+      expect(result.authoritative).toBe(false);
+    }
+  });
+
   test("bounds record count and treats malformed JSON as partial", async () => {
     const bounded = await runRecordAdapter(
       browserExportAdapter,

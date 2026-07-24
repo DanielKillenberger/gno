@@ -238,4 +238,33 @@ describe("transcript record adapter", () => {
     expect(result.stoppedByCap).toBe(true);
     expect(closed).toBe(true);
   });
+
+  test("treats an unterminated WebVTT header as a partial snapshot", async () => {
+    const bytes = new TextEncoder().encode(
+      "WEBVTT\ncue\n00:00:01.000 --> 00:00:02.000\nNot a terminated header\n"
+    );
+    const result = await runRecordAdapter(
+      transcriptAdapter,
+      input(bytes, { ext: ".vtt", mime: "text/vtt" })
+    );
+
+    expect(result.records).toEqual([]);
+    expect(result.failures[0]?.code).toBe("MALFORMED_RECORD");
+    expect(result.failures[0]?.retryable).toBe(true);
+    expect(result.authoritative).toBe(false);
+  });
+
+  test("keeps transcript Markdown links and remote images inert", async () => {
+    const bytes = new TextEncoder().encode(
+      "WEBVTT\n\ncue\n00:00:01.000 --> 00:00:02.000\n![remote](https://example.com/pixel)\n"
+    );
+    const result = await runRecordAdapter(
+      transcriptAdapter,
+      input(bytes, { ext: ".vtt", mime: "text/vtt" })
+    );
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records[0]?.markdown).not.toContain("![remote]");
+    expect(result.records[0]?.markdown).toContain("\\!\\[remote\\]");
+  });
 });

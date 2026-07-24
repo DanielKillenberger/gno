@@ -28,7 +28,7 @@ const SENSITIVE_JSON_KEYS = new Set([
   "passwords",
   "logins",
   "sessions",
-  "creditCards",
+  "creditcards",
 ]);
 const SUPPORTED_JSON_KEYS = new Set([
   "roots",
@@ -39,6 +39,8 @@ const SUPPORTED_JSON_KEYS = new Set([
   "readingList",
   "reading_list",
 ]);
+const BOOKMARK_EXPORT_DOCUMENT_PATTERN =
+  /<!DOCTYPE\s+(?:NETSCAPE-Bookmark-file-1\b[^>]*|html\s*)>/i;
 
 const decodeEntities = (value: string): string =>
   value
@@ -63,6 +65,28 @@ const attributes = (value: string): Map<string, string> => {
     if (key && item !== undefined) result.set(key, decodeEntities(item));
   }
   return result;
+};
+
+const hasSensitiveJsonKey = (value: Record<string, unknown>): boolean =>
+  Object.keys(value).some((key) => SENSITIVE_JSON_KEYS.has(key.toLowerCase()));
+
+const tagCount = (source: string, pattern: RegExp): number =>
+  source.match(pattern)?.length ?? 0;
+
+const hasCompleteNetscapeStructure = (source: string): boolean => {
+  if (!BOOKMARK_EXPORT_DOCUMENT_PATTERN.test(source)) return false;
+  const openingDl = tagCount(source, /<DL\b[^>]*>/gi);
+  const closingDl = tagCount(source, /<\/DL\s*>/gi);
+  const openingAnchors = tagCount(source, /<A\b[^>]*>/gi);
+  const closingAnchors = tagCount(source, /<\/A\s*>/gi);
+  const openingHeadings = tagCount(source, /<H3\b[^>]*>/gi);
+  const closingHeadings = tagCount(source, /<\/H3\s*>/gi);
+  return (
+    openingDl > 0 &&
+    openingDl === closingDl &&
+    openingAnchors === closingAnchors &&
+    openingHeadings === closingHeadings
+  );
 };
 
 const exportDate = (value: string | undefined): string | undefined => {
@@ -94,16 +118,20 @@ export function parseNetscapeBookmarks(
   const folders: string[] = [];
   let pendingFolder: string | undefined;
   let anchorNumber = 0;
+  let failureCapReached = false;
   const addFailure = (locator: string): boolean => {
+    if (failureCapReached) return true;
     if (failures.length < maxFailures) failures.push(locator);
     if (failures.length < maxFailures) return false;
     failures.push("failure-limit");
-    return true;
+    failureCapReached = true;
+    return failureCapReached;
   };
-  if (!/<DL\b/i.test(source)) {
+  if (!hasCompleteNetscapeStructure(source)) {
     addFailure("unsupported-html");
     return { records, failures };
   }
+  let dlDepth = 0;
   for (const token of source.matchAll(HTML_TOKEN_PATTERN)) {
     const raw = token[0].toLowerCase();
     if (token[1] !== undefined) {
@@ -111,11 +139,17 @@ export function parseNetscapeBookmarks(
       continue;
     }
     if (raw.startsWith("<dl")) {
+      dlDepth += 1;
       if (pendingFolder) folders.push(pendingFolder);
       pendingFolder = undefined;
       continue;
     }
     if (raw.startsWith("</dl")) {
+      if (dlDepth === 0) {
+        addFailure("html-structure");
+        break;
+      }
+      dlDepth -= 1;
       folders.pop();
       continue;
     }
@@ -158,6 +192,7 @@ export function parseNetscapeBookmarks(
       sourceLocator: `bookmark:${anchorNumber}`,
     });
   }
+  if (dlDepth !== 0 && !failureCapReached) addFailure("html-structure");
   return { records, failures };
 }
 
@@ -236,7 +271,7 @@ export function parseBrowserJson(
   }
   if (!Array.isArray(parsed)) {
     const rootKeys = Object.keys(parsed as Record<string, unknown>);
-    if (rootKeys.some((key) => SENSITIVE_JSON_KEYS.has(key))) {
+    if (hasSensitiveJsonKey(parsed as Record<string, unknown>)) {
       return { records: [], failures: ["sensitive-json"] };
     }
     if (!rootKeys.some((key) => SUPPORTED_JSON_KEYS.has(key))) {
@@ -246,10 +281,13 @@ export function parseBrowserJson(
   const records: BrowserExportRecord[] = [];
   const failures: string[] = [];
   let capReached = false;
+  let failureCapReached = false;
   const addFailure = (locator: string): boolean => {
+    if (failureCapReached) return true;
     if (failures.length < maxFailures) failures.push(locator);
     if (failures.length < maxFailures) return false;
     failures.push("failure-limit");
+    failureCapReached = true;
     capReached = true;
     return true;
   };
@@ -279,7 +317,7 @@ export function parseBrowserJson(
     }
     if (!value || typeof value !== "object") return;
     const object = value as Record<string, unknown>;
-    if (Object.keys(object).some((key) => SENSITIVE_JSON_KEYS.has(key))) {
+    if (hasSensitiveJsonKey(object)) {
       addFailure(`${locator}/sensitive`);
       return;
     }
@@ -291,25 +329,26 @@ export function parseBrowserJson(
     const folderName =
       !record && typeof object.name === "string" ? object.name : undefined;
     const nextFolders = folderName ? [...folders, folderName] : folders;
-    const hasSupportedChild = [...SUPPORTED_JSON_KEYS].some(
-      (key) => object[key] !== undefined
+    const supportedChildren = [...SUPPORTED_JSON_KEYS].filter((key) =>
+      Object.hasOwn(object, key)
     );
-    if (!record && !hasSupportedChild) {
+    if (!record && supportedChildren.length === 0) {
       addFailure(locator);
       return;
     }
-    for (const key of [
-      "roots",
-      "children",
-      "items",
-      "bookmarks",
-      "history",
-      "readingList",
-      "reading_list",
-    ]) {
+    for (const key of supportedChildren) {
       const child = object[key];
-      if (child === undefined) continue;
-      if (key === "roots" && child && typeof child === "object") {
+      const validRoots =
+        key === "roots" &&
+        child !== null &&
+        typeof child === "object" &&
+        !Array.isArray(child);
+      const validItems = key !== "roots" && Array.isArray(child);
+      if (!(validRoots || validItems)) {
+        if (addFailure(`${locator}/${key}`)) break;
+        continue;
+      }
+      if (validRoots) {
         for (const [rootName, root] of Object.entries(
           child as Record<string, unknown>
         )) {

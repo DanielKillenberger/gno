@@ -32,7 +32,8 @@ export const safeMarkdownText = (value: string): string =>
     .normalize("NFC")
     .replace(CONTROL_PATTERN, "")
     .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll(">", "&gt;")
+    .replace(/([\\`*_[\]#!])/g, "\\$1");
 
 export const safeInlineText = (value: string): string =>
   safeMarkdownText(value).replaceAll(/\s+/g, " ").trim();

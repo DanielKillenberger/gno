@@ -247,4 +247,20 @@ describe("JSONL record adapter", () => {
     expect(JSON.stringify(result.failures)).not.toContain(privateValue);
     expect(JSON.stringify(result.failures)).not.toContain("/private/export");
   });
+
+  test("keeps mapped Markdown links and remote images inert", async () => {
+    const result = await runRecordAdapter(
+      createJsonlAdapter({ id: "/id", body: "/text", title: "/title" }),
+      input(
+        new TextEncoder().encode(
+          '{"id":"safe","title":"[link](javascript:alert(1))","text":"![remote](https://example.com/pixel)"}\n'
+        )
+      )
+    );
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records[0]?.markdown).not.toContain("[link]");
+    expect(result.records[0]?.markdown).not.toContain("![remote]");
+    expect(result.records[0]?.markdown).toContain("\\!\\[remote\\]");
+  });
 });

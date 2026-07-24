@@ -120,6 +120,18 @@ describe("iCalendar export adapter", () => {
     expect(unbalancedResult.authoritative).toBe(false);
   });
 
+  test("rejects malformed top-level content instead of authorizing tombstones", async () => {
+    for (const source of [
+      "BEGIN:VCALENDAR\nthis is not a property\nEND:VCALENDAR\n",
+      "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Europe/Zurich\nEND:VCALENDAR\n",
+    ]) {
+      const result = await runRecordAdapter(icalAdapter, input(source));
+      expect(result.records).toEqual([]);
+      expect(result.failures.length).toBeGreaterThan(0);
+      expect(result.authoritative).toBe(false);
+    }
+  });
+
   test("rejects invalid recurrence IDs and keeps Markdown source inert", async () => {
     const invalidId = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:series\nRECURRENCE-ID:20260722T100000+0200\nSUMMARY:Bad\nEND:VEVENT\nEND:VCALENDAR\n`;
     const markdown = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:safe\nSUMMARY:![remote](https://example.com/pixel)\nDESCRIPTION:[click](javascript:alert(1)) # heading\nEND:VEVENT\nEND:VCALENDAR\n`;
@@ -184,6 +196,51 @@ describe("iCalendar export adapter", () => {
     expect(unsupported.truncated).toBe(true);
     expect(modifiedWeekly.occurrenceAnchors).toEqual([]);
     expect(modifiedWeekly.truncated).toBe(true);
+  });
+
+  test("fails closed for malformed or empty recurrence rule parts", () => {
+    for (const rrule of [
+      "FREQ=DAILY;BOGUS;COUNT=3",
+      "FREQ=DAILY;BYDAY=;COUNT=3",
+      "FREQ=DAILY;COUNT=2;COUNT=3",
+    ]) {
+      const recurrence = summarizeRecurrence(
+        [{ name: "RRULE", value: rrule }],
+        "20260722T100000Z"
+      );
+      expect(recurrence.occurrenceAnchors).toEqual([]);
+      expect(recurrence.truncated).toBe(true);
+    }
+  });
+
+  test("is invariant to source chunk boundaries below the line cap", async () => {
+    const source = `BEGIN:VCALENDAR\n${Array.from(
+      { length: 20 },
+      (_, index) => `X-PROP-${index}:value`
+    ).join(
+      "\n"
+    )}\nBEGIN:VEVENT\nUID:chunked\nSUMMARY:Chunk safe\nEND:VEVENT\nEND:VCALENDAR\n`;
+    const limits = { maxRecordChars: 100, maxMetadataChars: 1_000 };
+    const smallChunks = await runRecordAdapter(
+      icalAdapter,
+      input(source, 5, limits)
+    );
+    const oneChunk = await runRecordAdapter(
+      icalAdapter,
+      input(source, source.length, limits)
+    );
+
+    expect(smallChunks.authoritative).toBe(true);
+    expect(oneChunk).toEqual(smallChunks);
+  });
+
+  test("keeps recurrence source Markdown inert", async () => {
+    const source = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:safe-rule\nDTSTART:20260722T100000Z\nRRULE:FREQ=DAILY;X-IMAGE=![remote](https://example.com/pixel)\nEND:VEVENT\nEND:VCALENDAR\n`;
+    const result = await runRecordAdapter(icalAdapter, input(source));
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records[0]?.markdown).not.toContain("![remote]");
+    expect(result.records[0]?.markdown).toContain("\\!\\[remote\\]");
   });
 
   test("matches only explicit iCalendar MIME or extension", () => {

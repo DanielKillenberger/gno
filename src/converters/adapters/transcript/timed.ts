@@ -90,6 +90,7 @@ export async function* parseTimedTranscript(
   let vttHeaderChecked = format !== "vtt";
   let vttHeaderEnded = format !== "vtt";
   let headerInvalid = false;
+  let lastLineNumber = 0;
 
   const flush = (): TranscriptParseEvent | undefined => {
     const event = parseCueBlock(block, format);
@@ -98,6 +99,7 @@ export async function* parseTimedTranscript(
   };
 
   for await (const line of source) {
+    lastLineNumber = line.lineNumber;
     if (!line.ok) {
       const pending = flush();
       if (pending) yield pending;
@@ -134,6 +136,14 @@ export async function* parseTimedTranscript(
       continue;
     }
     block.push({ lineNumber: line.lineNumber, text: line.text });
+  }
+  if (!headerInvalid && !vttHeaderEnded) {
+    yield {
+      ok: false,
+      sourceLocator: `lines:1-${Math.max(1, lastLineNumber)}`,
+      retryable: true,
+    };
+    return;
   }
   if (!headerInvalid) {
     const event = flush();

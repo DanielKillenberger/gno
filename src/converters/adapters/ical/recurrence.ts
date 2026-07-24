@@ -60,14 +60,18 @@ const formatBasicDate = (parts: BasicDateParts, date: Date): string => {
   return `${datePart}T${timePart}${parts.utc ? "Z" : ""}`;
 };
 
-const parseRule = (value: string): Map<string, string> =>
-  new Map(
-    value
-      .split(";")
-      .map((part) => part.split("=", 2))
-      .filter((part): part is [string, string] => Boolean(part[0] && part[1]))
-      .map(([key, item]) => [key.toUpperCase(), item])
-  );
+const parseRule = (value: string): Map<string, string> | undefined => {
+  const rule = new Map<string, string>();
+  for (const part of value.split(";")) {
+    const equals = part.indexOf("=");
+    if (equals <= 0 || equals === part.length - 1) return undefined;
+    const key = part.slice(0, equals).toUpperCase();
+    const item = part.slice(equals + 1);
+    if (!/^[A-Z-]+$/.test(key) || rule.has(key)) return undefined;
+    rule.set(key, item);
+  }
+  return rule.size > 0 ? rule : undefined;
+};
 
 const recurrenceAnchor = (value: string, timezone?: string): string =>
   timezone ? `TZID=${timezone}:${value}` : value;
@@ -82,6 +86,7 @@ const expandSimpleRule = (
   const startParts = parseBasicDate(start);
   if (!startParts) return { anchors: [], truncated: true };
   const rule = parseRule(ruleValue);
+  if (!rule) return { anchors: [], truncated: true };
   const supportedKeys = new Set(["FREQ", "COUNT", "INTERVAL"]);
   if ([...rule.keys()].some((key) => !supportedKeys.has(key))) {
     return { anchors: [], truncated: true };
