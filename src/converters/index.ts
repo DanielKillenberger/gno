@@ -47,5 +47,15 @@ export type {
   ConvertResult,
   ConvertWarning,
   PipelineResult,
+  RecordAdapter,
+  RecordAdapterEvent,
+  RecordAdapterFailure,
+  RecordAdapterFailureCode,
+  RecordAdapterInput,
+  RecordAdapterLimits,
+  RecordAdapterRecord,
+  RecordAnchor,
+  RecordAttachmentInventoryItem,
+  RecordMetadata,
 } from "./types";
-export { DEFAULT_LIMITS } from "./types";
+export { DEFAULT_LIMITS, DEFAULT_RECORD_ADAPTER_LIMITS } from "./types";

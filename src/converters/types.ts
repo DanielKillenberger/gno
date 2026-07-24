@@ -94,6 +94,105 @@ export interface Converter {
   convert(input: ConvertInput): Promise<ConvertResult>;
 }
 
+/** Declarative limits applied to every multi-record container adapter. */
+export interface RecordAdapterLimits {
+  /** Maximum bytes an adapter may read from the container source. */
+  maxSourceBytes: number;
+  /** Maximum canonical characters accepted for one logical record. */
+  maxRecordChars: number;
+  /** Maximum canonical metadata characters accepted for one logical record. */
+  maxMetadataChars: number;
+  /** Maximum canonical characters retained across the whole snapshot. */
+  maxTotalChars: number;
+  /** Maximum logical records retained from one snapshot. */
+  maxRecords: number;
+  /** Maximum isolated failures retained before consumption stops. */
+  maxFailures: number;
+}
+
+/** Input for a streaming adapter. The opener is wrapped with the source cap. */
+export interface RecordAdapterInput {
+  sourcePath: string;
+  relativePath: string;
+  collection: string;
+  mime: string;
+  ext: string;
+  open: () => AsyncIterable<Uint8Array>;
+  limits: RecordAdapterLimits;
+}
+
+export interface RecordAnchor {
+  kind: "line" | "cue" | "timestamp" | "message" | "event" | "record";
+  value: string;
+  endValue?: string;
+}
+
+export interface RecordAttachmentInventoryItem {
+  name: string;
+  mime?: string;
+  bytes?: number;
+  disposition?: "inline" | "attachment";
+}
+
+/** Metadata shared by export adapters and later search/get projections. */
+export interface RecordMetadata {
+  author?: string;
+  participants?: string[];
+  categories?: string[];
+  dateFields?: Record<string, string>;
+  threadId?: string;
+  eventId?: string;
+  sessionId?: string;
+  attachments?: RecordAttachmentInventoryItem[];
+}
+
+/** One raw logical record yielded by a container adapter. */
+export interface RecordAdapterRecord {
+  stableId: string;
+  sourceLocator: string;
+  markdown: string;
+  /** Optional exact source-item hash. Derived deterministically when omitted. */
+  sourceHash?: string;
+  title?: string;
+  languageHint?: string;
+  metadata?: RecordMetadata;
+  anchors?: RecordAnchor[];
+}
+
+export type RecordAdapterFailureCode =
+  | "MALFORMED_RECORD"
+  | "MISSING_ID"
+  | "DUPLICATE_ID"
+  | "RECORD_TOO_LARGE"
+  | "SOURCE_TOO_LARGE"
+  | "RECORD_LIMIT"
+  | "FAILURE_LIMIT"
+  | "INVALID_LOCATOR"
+  | "INVALID_SOURCE_HASH"
+  | "ADAPTER_FAILURE"
+  | "INVALID_SNAPSHOT";
+
+export interface RecordAdapterFailure {
+  code: RecordAdapterFailureCode;
+  message: string;
+  retryable: boolean;
+  stableId?: string;
+  sourceLocator?: string;
+}
+
+export type RecordAdapterEvent =
+  | { type: "record"; record: RecordAdapterRecord }
+  | { type: "failure"; failure: RecordAdapterFailure }
+  | { type: "snapshot"; state: "complete" | "partial" };
+
+/** Separate lane from one-file converters so byte-oriented behavior is stable. */
+export interface RecordAdapter {
+  readonly id: string;
+  readonly version: string;
+  canHandle(mime: string, ext: string): boolean;
+  records(input: RecordAdapterInput): AsyncIterable<RecordAdapterEvent>;
+}
+
 /**
  * Pipeline output after canonicalization and hash computation.
  * This is what consumers receive from the conversion pipeline.
@@ -121,3 +220,12 @@ export const DEFAULT_LIMITS = {
   timeoutMs: 60_000, // 60 seconds
   maxOutputChars: 50_000_000, // 50M chars (zip bomb protection)
 } as const;
+
+export const DEFAULT_RECORD_ADAPTER_LIMITS: RecordAdapterLimits = {
+  maxSourceBytes: 100 * 1024 * 1024,
+  maxRecordChars: 2_000_000,
+  maxMetadataChars: 100_000,
+  maxTotalChars: 50_000_000,
+  maxRecords: 100_000,
+  maxFailures: 1_000,
+};

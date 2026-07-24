@@ -112,6 +112,23 @@ describe("ConverterRegistry", () => {
       expect(result.error.code).toBe("UNSUPPORTED");
     }
   });
+
+  test("streaming adapters do not change legacy converter selection", () => {
+    const registry = new ConverterRegistry();
+    registry.register(mockConverter);
+    registry.registerRecordAdapter({
+      id: "test/records",
+      version: "1.0.0",
+      canHandle: () => true,
+      records: async function* () {
+        yield { type: "snapshot", state: "complete" };
+      },
+    });
+
+    expect(registry.select("test/mock", ".mock")).toBe(mockConverter);
+    expect(registry.listConverters()).toEqual(["test/mock"]);
+    expect(registry.listRecordAdapters()).toEqual(["test/records"]);
+  });
 });
 
 describe("createDefaultRegistry", () => {

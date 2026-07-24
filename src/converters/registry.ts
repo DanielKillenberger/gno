@@ -3,12 +3,18 @@
  * PRD §8.6 - Converter registry
  */
 
-import type { Converter, ConvertInput, ConvertResult } from "./types";
+import type {
+  Converter,
+  ConvertInput,
+  ConvertResult,
+  RecordAdapter,
+} from "./types";
 
 import { unsupportedError } from "./errors";
 
 export class ConverterRegistry {
   private readonly converters: Converter[] = [];
+  private readonly recordAdapters: RecordAdapter[] = [];
 
   /**
    * Register a converter. Order matters - first match wins.
@@ -32,6 +38,25 @@ export class ConverterRegistry {
    */
   listConverters(): string[] {
     return this.converters.map((c) => c.id);
+  }
+
+  /** Register a streaming container adapter without changing converter routing. */
+  registerRecordAdapter(adapter: RecordAdapter): void {
+    this.recordAdapters.push(adapter);
+  }
+
+  /** Select the first streaming adapter that handles a MIME/extension pair. */
+  selectRecordAdapter(mime: string, ext: string): RecordAdapter | undefined {
+    const normalizedMime = mime.toLowerCase();
+    const normalizedExt = ext.toLowerCase();
+    return this.recordAdapters.find((adapter) =>
+      adapter.canHandle(normalizedMime, normalizedExt)
+    );
+  }
+
+  /** List streaming adapters independently of byte-oriented converters. */
+  listRecordAdapters(): string[] {
+    return this.recordAdapters.map((adapter) => adapter.id);
   }
 
   /**

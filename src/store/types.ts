@@ -132,6 +132,15 @@ export interface DocumentRow {
   updatedAt: string;
 }
 
+/** Minimal persisted record identity used by export snapshot reconciliation. */
+export interface StoredRecordState {
+  recordKey: string;
+  sourceHash: string;
+  adapterVersion: string;
+  active: boolean;
+  relativePath: string;
+}
+
 /** Chunk row from DB */
 export interface ChunkRow {
   mirrorHash: string;
