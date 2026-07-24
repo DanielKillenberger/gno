@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-07-21T22:04:35.319652Z",
   "depends_on": [],
   "id": "fn-110-file-and-export-first-source-adapters.1",
@@ -10,5 +7,5 @@
   "spec_path": ".flow/tasks/fn-110-file-and-export-first-source-adapters.1.md",
   "status": "todo",
   "title": "Add the streaming multi-record ingestion adapter contract",
-  "updated_at": "2026-07-21T22:08:28.444765Z"
+  "updated_at": "2026-07-24T22:07:29.590252Z"
 }
