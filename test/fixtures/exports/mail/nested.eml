@@ -1,0 +1,34 @@
+From: "Alice Example" <alice@example.com>
+To: Bob Example <bob@example.com>
+Cc: team@example.com
+Date: Tue, 21 Jul 2026 14:30:00 +0200
+Message-ID: <quarterly-1@example.com>
+In-Reply-To: <planning@example.com>
+References: <root@example.com> <planning@example.com>
+Subject: =?UTF-8?Q?Quarterly_=C3=9C?=
+ =?UTF-8?Q?berblick?=
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer-safe"
+
+--outer-safe
+Content-Type: multipart/alternative; boundary="inner-safe"
+
+--inner-safe
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hello Bob,
+
+Der Gr=C3=BCndungsbericht ist fertig.
+--inner-safe
+Content-Type: text/html; charset=utf-8
+
+<p>HTML fallback<script>fetch('https://evil.example')</script><a href="javascript:alert(1)">unsafe link</a></p>
+--inner-safe--
+--outer-safe
+Content-Type: application/pdf; name="../../invoice.pdf"
+Content-Disposition: attachment; filename="../../invoice.pdf"
+Content-Transfer-Encoding: base64
+
+c2VjcmV0IGF0dGFjaG1lbnQ=
+--outer-safe--

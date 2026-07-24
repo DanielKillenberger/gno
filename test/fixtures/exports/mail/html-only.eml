@@ -1,0 +1,14 @@
+From: Web Sender <sender@example.com>
+To: reader@example.com
+Date: Wed, 22 Jul 2026 09:00:00 +0000
+Message-ID: <html-only@example.com>
+Subject: HTML only
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><head><style>body { display: none }</style></head><body>
+<p>Visible <a href="javascript:alert(1)">link</a>.</p>
+&lt;script&gt;fetch('https://encoded-evil.example')&lt;/script&gt;
+<img src="https://tracker.example/pixel" onerror="fetch('file:///etc/passwd')">
+<iframe src="file:///private/secret">private</iframe>
+</body></html>
