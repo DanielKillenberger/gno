@@ -87,7 +87,7 @@ describe("iCalendar export adapter", () => {
     );
 
     expect(first.records[0]?.stableId).toContain(
-      "series::recurrence:TZID=Europe/Zurich:20261025T090000"
+      "series::recurrence:TZID=Europe/Zurich:2026-10-25T09:00:00"
     );
     expect(first.records[0]?.recordKey).toBe(edited.records[0]?.recordKey);
     expect(first.records[0]?.sourceHash).not.toBe(
@@ -103,6 +103,44 @@ describe("iCalendar export adapter", () => {
       "ical:good",
     ]);
     expect(result.failures).toHaveLength(2);
+    expect(result.authoritative).toBe(false);
+  });
+
+  test("rejects events outside the calendar and unbalanced components", async () => {
+    const afterEnd = `BEGIN:VCALENDAR\nEND:VCALENDAR\nBEGIN:VEVENT\nUID:late\nSUMMARY:Late\nEND:VEVENT\n`;
+    const unbalanced = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:one\nBEGIN:VALARM\nEND:VTODO\nEND:VEVENT\nEND:VCALENDAR\n`;
+    const lateResult = await runRecordAdapter(icalAdapter, input(afterEnd));
+    const unbalancedResult = await runRecordAdapter(
+      icalAdapter,
+      input(unbalanced)
+    );
+
+    expect(lateResult.authoritative).toBe(false);
+    expect(lateResult.records).toEqual([]);
+    expect(unbalancedResult.authoritative).toBe(false);
+  });
+
+  test("rejects invalid recurrence IDs and keeps Markdown source inert", async () => {
+    const invalidId = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:series\nRECURRENCE-ID:20260722T100000+0200\nSUMMARY:Bad\nEND:VEVENT\nEND:VCALENDAR\n`;
+    const markdown = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:safe\nSUMMARY:![remote](https://example.com/pixel)\nDESCRIPTION:[click](javascript:alert(1)) # heading\nEND:VEVENT\nEND:VCALENDAR\n`;
+    const invalidResult = await runRecordAdapter(icalAdapter, input(invalidId));
+    const safeResult = await runRecordAdapter(icalAdapter, input(markdown));
+
+    expect(invalidResult.records).toEqual([]);
+    expect(invalidResult.authoritative).toBe(false);
+    expect(safeResult.records[0]?.markdown).not.toContain("![remote]");
+    expect(safeResult.records[0]?.markdown).not.toContain("[click]");
+    expect(safeResult.records[0]?.markdown).toContain("\\# heading");
+  });
+
+  test("bounds physical and folded logical lines before buffering the source", async () => {
+    const source = `BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:one\nDESCRIPTION:${"x".repeat(100)}\nEND:VEVENT\nEND:VCALENDAR\n`;
+    const result = await runRecordAdapter(
+      icalAdapter,
+      input(source, source.length, { maxRecordChars: 20 })
+    );
+
+    expect(result.records).toEqual([]);
     expect(result.authoritative).toBe(false);
   });
 
@@ -135,11 +173,17 @@ describe("iCalendar export adapter", () => {
       [{ name: "RRULE", value: "FREQ=MONTHLY;COUNT=4" }],
       "20260722T100000Z"
     );
+    const modifiedWeekly = summarizeRecurrence(
+      [{ name: "RRULE", value: "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4" }],
+      "20260720T100000Z"
+    );
 
     expect(bounded.occurrenceAnchors).toHaveLength(MAX_RECURRENCE_ANCHORS);
     expect(bounded.truncated).toBe(true);
     expect(unsupported.occurrenceAnchors).toEqual([]);
     expect(unsupported.truncated).toBe(true);
+    expect(modifiedWeekly.occurrenceAnchors).toEqual([]);
+    expect(modifiedWeekly.truncated).toBe(true);
   });
 
   test("matches only explicit iCalendar MIME or extension", () => {

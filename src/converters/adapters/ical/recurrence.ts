@@ -17,6 +17,7 @@ export interface RecurrenceSummary {
 export interface IcalPropertyLike {
   name: string;
   value: string;
+  params?: ReadonlyMap<string, string>;
 }
 
 interface BasicDateParts {
@@ -68,15 +69,23 @@ const parseRule = (value: string): Map<string, string> =>
       .map(([key, item]) => [key.toUpperCase(), item])
   );
 
+const recurrenceAnchor = (value: string, timezone?: string): string =>
+  timezone ? `TZID=${timezone}:${value}` : value;
+
 const expandSimpleRule = (
   start: string,
   ruleValue: string,
   exclusions: Set<string>,
-  limit: number
+  limit: number,
+  timezone?: string
 ): { anchors: string[]; truncated: boolean } => {
   const startParts = parseBasicDate(start);
   if (!startParts) return { anchors: [], truncated: true };
   const rule = parseRule(ruleValue);
+  const supportedKeys = new Set(["FREQ", "COUNT", "INTERVAL"]);
+  if ([...rule.keys()].some((key) => !supportedKeys.has(key))) {
+    return { anchors: [], truncated: true };
+  }
   const frequency = rule.get("FREQ");
   if (frequency !== "DAILY" && frequency !== "WEEKLY") {
     return { anchors: [], truncated: true };
@@ -103,7 +112,9 @@ const expandSimpleRule = (
     const occurrence = new Date(startParts.date);
     occurrence.setUTCDate(occurrence.getUTCDate() + elapsedDays);
     const formatted = formatBasicDate(startParts, occurrence);
-    if (!exclusions.has(formatted)) anchors.push(formatted);
+    if (!exclusions.has(formatted)) {
+      anchors.push(recurrenceAnchor(formatted, timezone));
+    }
   }
   return {
     anchors: anchors.slice(0, limit),
@@ -128,7 +139,11 @@ export function summarizeRecurrence(
   const values = (name: string): string[] =>
     properties
       .filter((item) => item.name === name)
-      .flatMap((item) => item.value.split(","))
+      .flatMap((item) =>
+        item.value
+          .split(",")
+          .map((value) => recurrenceAnchor(value, item.params?.get("TZID")))
+      )
       .map((item) => item.trim())
       .filter(Boolean);
 
@@ -137,10 +152,20 @@ export function summarizeRecurrence(
   const exdates = values("EXDATE").sort();
   const rdates = values("RDATE").sort();
   const explicit = rdates.filter((item) => !exdates.includes(item));
+  const startProperty = properties.find((item) => item.name === "DTSTART");
+  const startTimezone = startProperty?.params?.get("TZID");
+  const rawExdates = new Set(
+    properties
+      .filter((item) => item.name === "EXDATE")
+      .flatMap((item) => item.value.split(","))
+  );
   const expanded =
     rrule && start
-      ? expandSimpleRule(start, rrule, new Set(exdates), limit)
-      : { anchors: start ? [start] : [], truncated: false };
+      ? expandSimpleRule(start, rrule, rawExdates, limit, startTimezone)
+      : {
+          anchors: start ? [recurrenceAnchor(start, startTimezone)] : [],
+          truncated: false,
+        };
   const occurrenceAnchors = [...new Set([...expanded.anchors, ...explicit])]
     .sort()
     .slice(0, limit);

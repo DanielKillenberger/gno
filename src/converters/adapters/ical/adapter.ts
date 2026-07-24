@@ -44,13 +44,23 @@ async function* physicalLines(
   let line = 0;
   for await (const chunk of input.open()) {
     pending += decoder.decode(chunk, { stream: true });
+    if (pending.length > input.limits.maxRecordChars) {
+      throw new Error("iCalendar logical line exceeded its limit.");
+    }
     while (true) {
       const newline = pending.indexOf("\n");
       if (newline < 0) break;
       line += 1;
       const raw = pending.slice(0, newline);
       pending = pending.slice(newline + 1);
-      yield { text: raw.endsWith("\r") ? raw.slice(0, -1) : raw, line };
+      const withoutCarriageReturn = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+      yield {
+        text:
+          line === 1 && withoutCarriageReturn.startsWith("\uFEFF")
+            ? withoutCarriageReturn.slice(1)
+            : withoutCarriageReturn,
+        line,
+      };
     }
   }
   pending += decoder.decode();
@@ -70,6 +80,9 @@ async function* logicalLines(
   for await (const physical of physicalLines(input)) {
     if (/^[ \t]/.test(physical.text) && pending) {
       pending.text += physical.text.slice(1);
+      if (pending.text.length > input.limits.maxRecordChars) {
+        throw new Error("iCalendar unfolded line exceeded its limit.");
+      }
       pending.endLine = physical.line;
       continue;
     }
@@ -111,7 +124,8 @@ const unescapeText = (value: string): string =>
     .replace(/\\\\/g, "\\")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll(">", "&gt;")
+    .replace(/([\\`*_[\]#!])/g, "\\$1");
 
 const validCalendarDate = (
   year: number,
@@ -189,15 +203,22 @@ const convertEvent = (
   const start = startProperty ? normalizeDate(startProperty) : undefined;
   const end = endProperty ? normalizeDate(endProperty) : undefined;
   if ((startProperty && !start) || (endProperty && !end)) return undefined;
+  const invalidRecurrenceDate = properties
+    .filter((property) =>
+      ["RECURRENCE-ID", "RDATE", "EXDATE"].includes(property.name)
+    )
+    .some((property) =>
+      property.value
+        .split(",")
+        .some((value) => !normalizeDate({ ...property, value }))
+    );
+  if (invalidRecurrenceDate) return undefined;
   const recurrence = summarizeRecurrence(properties, startProperty?.value);
   const recurrenceIdProperty = first(properties, "RECURRENCE-ID");
-  let recurrenceIdentity: string | undefined;
-  if (recurrenceIdProperty) {
-    const recurrenceTimezone = recurrenceIdProperty.params.get("TZID");
-    recurrenceIdentity = recurrenceTimezone
-      ? `TZID=${recurrenceTimezone}:${recurrenceIdProperty.value}`
-      : recurrenceIdProperty.value;
-  }
+  const recurrenceIdentity = recurrenceIdProperty
+    ? normalizeDate(recurrenceIdProperty)
+    : undefined;
+  if (recurrenceIdProperty && !recurrenceIdentity) return undefined;
   const summary = unescapeText(first(properties, "SUMMARY")?.value ?? "Event");
   const description = first(properties, "DESCRIPTION")?.value;
   const location = first(properties, "LOCATION")?.value;
@@ -265,35 +286,49 @@ async function* parseCalendar(
   input: RecordAdapterInput
 ): AsyncGenerator<RecordAdapterEvent> {
   let sawCalendar = false;
+  let calendarOpen = false;
   let endedCalendar = false;
   let eventStart = 0;
   let eventChars = 0;
   let eventProperties: IcalProperty[] | undefined;
-  let nestedDepth = 0;
+  const nestedComponents: string[] = [];
   let hadFailure = false;
   try {
     for await (const line of logicalLines(input)) {
       if (line.text === "BEGIN:VCALENDAR") {
+        if (sawCalendar || calendarOpen || endedCalendar || eventProperties) {
+          hadFailure = true;
+          yield failure(`line:${line.startLine}`);
+          continue;
+        }
         sawCalendar = true;
+        calendarOpen = true;
         continue;
       }
       if (line.text === "END:VCALENDAR") {
+        if (!calendarOpen || eventProperties || nestedComponents.length > 0) {
+          hadFailure = true;
+          yield failure(`line:${line.startLine}`);
+          continue;
+        }
+        calendarOpen = false;
         endedCalendar = true;
         continue;
       }
       if (line.text === "BEGIN:VEVENT") {
-        if (eventProperties) {
+        if (!calendarOpen || endedCalendar || eventProperties) {
           hadFailure = true;
-          yield failure(`lines:${eventStart}-${line.endLine}`);
+          yield failure(`line:${line.startLine}`);
+          continue;
         }
         eventStart = line.startLine;
         eventChars = 0;
-        nestedDepth = 0;
+        nestedComponents.length = 0;
         eventProperties = [];
         continue;
       }
       if (line.text === "END:VEVENT") {
-        if (!eventProperties) {
+        if (!eventProperties || nestedComponents.length > 0) {
           hadFailure = true;
           yield failure(`line:${line.startLine}`);
           continue;
@@ -311,16 +346,39 @@ async function* parseCalendar(
         eventProperties = undefined;
         continue;
       }
-      if (!eventProperties) continue;
+      if (!eventProperties) {
+        if (line.text.trim() && (!calendarOpen || endedCalendar)) {
+          hadFailure = true;
+          yield failure(`line:${line.startLine}`);
+        }
+        continue;
+      }
       if (line.text.startsWith("BEGIN:")) {
-        nestedDepth += 1;
+        const component = line.text.slice("BEGIN:".length).trim();
+        if (!component) {
+          hadFailure = true;
+          yield failure(`line:${line.startLine}`);
+        } else {
+          nestedComponents.push(component);
+        }
         continue;
       }
-      if (line.text.startsWith("END:") && nestedDepth > 0) {
-        nestedDepth -= 1;
+      if (line.text.startsWith("END:") && nestedComponents.length > 0) {
+        const component = line.text.slice("END:".length).trim();
+        if (nestedComponents.at(-1) !== component) {
+          hadFailure = true;
+          yield failure(`line:${line.startLine}`);
+        } else {
+          nestedComponents.pop();
+        }
         continue;
       }
-      if (nestedDepth > 0) continue;
+      if (line.text.startsWith("END:")) {
+        hadFailure = true;
+        yield failure(`line:${line.startLine}`);
+        continue;
+      }
+      if (nestedComponents.length > 0) continue;
       eventChars += line.text.length;
       if (eventChars > input.limits.maxRecordChars) {
         hadFailure = true;
@@ -338,6 +396,10 @@ async function* parseCalendar(
       }
       const property = parseProperty(line.text);
       if (property) eventProperties.push(property);
+      else {
+        hadFailure = true;
+        yield failure(`line:${line.startLine}`);
+      }
     }
   } catch {
     hadFailure = true;
@@ -347,7 +409,7 @@ async function* parseCalendar(
     hadFailure = true;
     yield failure(`line:${eventStart}`, true);
   }
-  const complete = sawCalendar && endedCalendar && !hadFailure;
+  const complete = sawCalendar && endedCalendar && !calendarOpen && !hadFailure;
   yield { type: "snapshot", state: complete ? "complete" : "partial" };
 }
 
