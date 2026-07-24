@@ -5,7 +5,12 @@ import type {
   RecordAdapterRecord,
 } from "../../types";
 
-import { type ParsedAttachment, type ParsedEmail, parseEmail } from "./mime";
+import {
+  MailParseError,
+  type ParsedAttachment,
+  type ParsedEmail,
+  parseEmail,
+} from "./mime";
 
 const ADAPTER_ID = "native/email-export";
 const ADAPTER_VERSION = "1.0.0";
@@ -23,6 +28,7 @@ interface RawMessage {
 }
 
 interface BinaryLine {
+  rawLength: number;
   value?: string;
   oversized: boolean;
 }
@@ -62,42 +68,62 @@ async function* binaryLines(
   input: RecordAdapterInput,
   maxLineChars: number
 ): AsyncGenerator<BinaryLine> {
-  let pending = "";
+  let pendingParts: string[] = [];
+  let pendingChars = 0;
+  let rawLength = 0;
   let oversized = false;
   for await (const chunk of input.open()) {
     let start = 0;
     for (let index = 0; index < chunk.length; index += 1) {
       if (chunk[index] !== 0x0a) continue;
+      const segment = bytesToBinary(chunk.subarray(start, index));
+      rawLength += segment.length + 1;
       if (!oversized) {
-        const segment = bytesToBinary(chunk.subarray(start, index));
-        if (pending.length + segment.length > maxLineChars) {
+        if (pendingChars + segment.length > maxLineChars) {
           oversized = true;
-          pending = "";
+          pendingParts = [];
+          pendingChars = 0;
         } else {
-          pending += segment;
+          pendingParts.push(segment);
+          pendingChars += segment.length;
         }
       }
       yield oversized
-        ? { oversized: true }
-        : { value: pending.replace(/\r$/, ""), oversized: false };
-      pending = "";
+        ? { rawLength, oversized: true }
+        : {
+            rawLength,
+            value: pendingParts.join("").replace(/\r$/, ""),
+            oversized: false,
+          };
+      pendingParts = [];
+      pendingChars = 0;
+      rawLength = 0;
       oversized = false;
       start = index + 1;
     }
-    if (start < chunk.length && !oversized) {
+    if (start < chunk.length) {
       const segment = bytesToBinary(chunk.subarray(start));
-      if (pending.length + segment.length > maxLineChars) {
-        oversized = true;
-        pending = "";
-      } else {
-        pending += segment;
+      rawLength += segment.length;
+      if (!oversized) {
+        if (pendingChars + segment.length > maxLineChars) {
+          oversized = true;
+          pendingParts = [];
+          pendingChars = 0;
+        } else {
+          pendingParts.push(segment);
+          pendingChars += segment.length;
+        }
       }
     }
   }
-  if (pending || oversized) {
+  if (rawLength > 0 || oversized) {
     yield oversized
-      ? { oversized: true }
-      : { value: pending.replace(/\r$/, ""), oversized: false };
+      ? { rawLength, oversized: true }
+      : {
+          rawLength,
+          value: pendingParts.join("").replace(/\r$/, ""),
+          oversized: false,
+        };
   }
 }
 
@@ -122,30 +148,55 @@ async function* readMbox(
   let messageParts: string[] = [];
   let messageChars = 0;
   let messageIndex = 0;
+  let malformed = false;
   let oversized = false;
   let sawEnvelope = false;
+  let contentLength: number | undefined;
+  let bodyBytesRemaining: number | undefined;
+  let inHeaders = false;
 
   const finishMessage = (): RawMessage | undefined => {
-    if (messageParts.length === 0 && !oversized) return undefined;
+    if (messageParts.length === 0 && !(malformed || oversized))
+      return undefined;
     messageIndex += 1;
+    const incompleteBody =
+      bodyBytesRemaining !== undefined && bodyBytesRemaining > 0;
     const result: RawMessage = {
-      raw: oversized ? undefined : messageParts.join("\n"),
+      raw:
+        oversized || malformed || incompleteBody
+          ? undefined
+          : messageParts.join("\n"),
       index: messageIndex,
       oversized,
     };
     messageParts = [];
     messageChars = 0;
+    malformed = false;
     oversized = false;
+    contentLength = undefined;
+    bodyBytesRemaining = undefined;
+    inHeaders = false;
     return result;
   };
 
   for await (const line of binaryLines(input, maxChars)) {
-    const isEnvelope = !line.oversized && line.value?.startsWith("From ");
-    if (isEnvelope) {
-      const finished = finishMessage();
-      if (finished) yield finished;
-      sawEnvelope = true;
-      continue;
+    if (bodyBytesRemaining !== undefined && bodyBytesRemaining > 0) {
+      if (line.rawLength > bodyBytesRemaining) {
+        malformed = true;
+        bodyBytesRemaining = 0;
+        messageParts = [];
+        continue;
+      }
+      bodyBytesRemaining -= line.rawLength;
+    } else {
+      const isEnvelope = !line.oversized && isMboxEnvelope(line.value ?? "");
+      if (isEnvelope) {
+        const finished = finishMessage();
+        if (finished) yield finished;
+        sawEnvelope = true;
+        inHeaders = true;
+        continue;
+      }
     }
     if (!sawEnvelope && messageParts.length === 0 && line.value === "") {
       continue;
@@ -155,8 +206,29 @@ async function* readMbox(
       messageParts = [];
       continue;
     }
+    const rawLineValue = line.value ?? "";
+    const lineValue = inHeaders
+      ? rawLineValue
+      : rawLineValue.replace(/^>(?=>*From )/, "");
+    if (inHeaders) {
+      if (lineValue === "") {
+        inHeaders = false;
+        bodyBytesRemaining = contentLength;
+      } else if (/^content-length\s*:/i.test(lineValue)) {
+        const rawLength = lineValue.slice(lineValue.indexOf(":") + 1).trim();
+        if (!/^\d+$/.test(rawLength)) {
+          malformed = true;
+        } else {
+          contentLength = Number.parseInt(rawLength, 10);
+          if (!Number.isSafeInteger(contentLength)) {
+            malformed = true;
+          } else if (contentLength > maxChars) {
+            oversized = true;
+          }
+        }
+      }
+    }
     if (oversized) continue;
-    const lineValue = line.value ?? "";
     messageChars += lineValue.length + 1;
     if (messageChars > maxChars) {
       oversized = true;
@@ -168,6 +240,11 @@ async function* readMbox(
   const finished = finishMessage();
   if (finished) yield finished;
 }
+
+const isMboxEnvelope = (line: string): boolean =>
+  /^From \S+ (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) {1,2}\d{1,2} \d{2}:\d{2}(?::\d{2})?(?: [A-Za-z]{1,5}| [+-]\d{4})? \d{4}\s*$/.test(
+    line
+  );
 
 const markdownInline = (value: string): string =>
   value
@@ -193,11 +270,7 @@ const renderAttachments = (attachments: ParsedAttachment[]): string => {
   return `\n\n## Attachments\n\n${lines.join("\n")}`;
 };
 
-const renderEmail = (
-  parsed: ParsedEmail,
-  occurrence: number,
-  missingId: boolean
-): string => {
+const renderEmail = (parsed: ParsedEmail, missingId: boolean): string => {
   const title = markdownInline(parsed.subject ?? "(no subject)");
   const fields = [
     parsed.author ? `From: ${markdownInline(parsed.author)}` : undefined,
@@ -214,7 +287,7 @@ const renderEmail = (
     parsed.references.length > 0
       ? `References: ${parsed.references.map(markdownInline).join("; ")}`
       : undefined,
-    `Occurrence: ${occurrence}${missingId ? " (content-derived identity)" : ""}`,
+    missingId ? "Identity: content-derived" : undefined,
   ].filter((value): value is string => Boolean(value));
   const body = parsed.body
     ? safeBodyMarkdown(parsed.body)
@@ -227,22 +300,24 @@ const renderEmail = (
 const recordFor = (
   parsed: ParsedEmail,
   raw: string,
-  index: number,
-  identityCounts: Map<string, number>
+  index: number
 ): RecordAdapterRecord => {
   const canonicalRaw = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const sourceHash = hashText(`gno-email-source-v1\0${canonicalRaw}`);
+  const stableHeaders = [
+    parsed.messageId,
+    parsed.sentAt ?? "",
+    parsed.author ?? "",
+    parsed.subject ?? "",
+  ].join("\0");
   const identity = parsed.messageId
-    ? `message:${hashText(parsed.messageId)}`
+    ? `message:${hashText(parsed.messageId)}:variant:${hashText(stableHeaders)}`
     : `missing:${sourceHash}`;
-  const occurrence = (identityCounts.get(identity) ?? 0) + 1;
-  identityCounts.set(identity, occurrence);
   return {
-    stableId:
-      occurrence === 1 ? identity : `${identity}:occurrence:${occurrence}`,
+    stableId: identity,
     sourceLocator: `message:${index}`,
     sourceHash,
-    markdown: renderEmail(parsed, occurrence, !parsed.messageId),
+    markdown: renderEmail(parsed, !parsed.messageId),
     title: parsed.subject,
     metadata: parsed.metadata,
     anchors: [
@@ -305,25 +380,32 @@ export const emailRecordAdapter: RecordAdapter = {
             yield await readEml(input, rawMessageLimit(input));
           },
         };
-    const identityCounts = new Map<string, number>();
     let partial = false;
     let messageCount = 0;
     for await (const message of messages) {
       messageCount += 1;
       if (message.oversized || message.raw === undefined) {
         partial = true;
-        yield failure(message.index, "RECORD_TOO_LARGE");
+        yield failure(
+          message.index,
+          message.oversized ? "RECORD_TOO_LARGE" : "MALFORMED_RECORD"
+        );
         continue;
       }
       try {
         const parsed = parseEmail(message.raw, parseLimits(input));
         yield {
           type: "record",
-          record: recordFor(parsed, message.raw, message.index, identityCounts),
+          record: recordFor(parsed, message.raw, message.index),
         };
-      } catch {
+      } catch (error) {
         partial = true;
-        yield failure(message.index, "MALFORMED_RECORD");
+        yield failure(
+          message.index,
+          error instanceof MailParseError && error.kind === "limit"
+            ? "RECORD_TOO_LARGE"
+            : "MALFORMED_RECORD"
+        );
       }
     }
     if (messageCount === 0) {

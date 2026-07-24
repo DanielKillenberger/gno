@@ -3,6 +3,9 @@ import type {
   RecordMetadata,
 } from "../../types";
 
+import { sanitizeHtmlToText } from "./html";
+import { parseParameterizedHeader } from "./parameters";
+
 const MAX_MIME_DEPTH = 12;
 const MAX_MIME_PARTS = 256;
 const MAX_HEADER_CHARS = 256 * 1024;
@@ -11,17 +14,15 @@ const CONTROL_CHAR_PATTERN = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`,
   "g"
 );
-const DANGEROUS_HTML_BLOCKS =
-  /<(script|style|iframe|object|embed|form|svg|math|head)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
-const HTML_COMMENTS = /<!--[\s\S]*?-->/g;
-const HTML_TAGS = /<[^>]*>/g;
-const HTML_BREAKS = /<(?:br|hr)\s*\/?>/gi;
-const HTML_BLOCK_ENDS =
-  /<\/(?:p|div|section|article|header|footer|li|tr|h[1-6])\s*>/gi;
 const MESSAGE_ID_PATTERN = /<([^<>\s]+)>/g;
 
+export type MailParseErrorKind = "limit" | "malformed";
+
 export class MailParseError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly kind: MailParseErrorKind = "malformed"
+  ) {
     super(message);
     this.name = "MailParseError";
   }
@@ -48,11 +49,6 @@ export interface ParseEmailLimits {
   maxBodyChars: number;
   maxMetadataChars: number;
   maxAttachmentBytes: number;
-}
-
-interface HeaderValue {
-  value: string;
-  params: Record<string, string>;
 }
 
 interface MimeState {
@@ -131,19 +127,28 @@ const decodeTransfer = (
   let bytes: Uint8Array;
   if (normalized === "base64") {
     if (value.replace(/\s/g, "").length > maxBytes * 2) {
-      throw new MailParseError("MIME body exceeds its decoded byte limit.");
+      throw new MailParseError(
+        "MIME body exceeds its decoded byte limit.",
+        "limit"
+      );
     }
     bytes = decodeBase64(value);
   } else if (normalized === "quoted-printable") {
     if (value.length > maxBytes * 3) {
-      throw new MailParseError("MIME body exceeds its decoded byte limit.");
+      throw new MailParseError(
+        "MIME body exceeds its decoded byte limit.",
+        "limit"
+      );
     }
     bytes = decodeQuotedPrintable(value);
   } else {
     bytes = binaryToBytes(value);
   }
   if (bytes.byteLength > maxBytes) {
-    throw new MailParseError("MIME body exceeds its decoded byte limit.");
+    throw new MailParseError(
+      "MIME body exceeds its decoded byte limit.",
+      "limit"
+    );
   }
   return bytes;
 };
@@ -182,12 +187,15 @@ const splitHeaderBody = (raw: string): [string, string] => {
 
 const parseHeaders = (raw: string): Map<string, string> => {
   if (raw.length > MAX_HEADER_CHARS) {
-    throw new MailParseError("Mail headers exceed their character limit.");
+    throw new MailParseError(
+      "Mail headers exceed their character limit.",
+      "limit"
+    );
   }
   const unfolded = raw.replace(/\r?\n[ \t]+/g, " ");
   const lines = unfolded.split(/\r?\n/);
   if (lines.length > MAX_HEADER_LINES) {
-    throw new MailParseError("Mail headers exceed their line limit.");
+    throw new MailParseError("Mail headers exceed their line limit.", "limit");
   }
   const headers = new Map<string, string>();
   for (const line of lines) {
@@ -203,35 +211,6 @@ const parseHeaders = (raw: string): Map<string, string> => {
   return headers;
 };
 
-const parseParameterizedHeader = (raw: string | undefined): HeaderValue => {
-  if (!raw) return { value: "", params: {} };
-  const pieces = raw.match(/(?:[^;"']+|"[^"]*"|'[^']*')+/g) ?? [raw];
-  const value = pieces[0]?.trim().toLowerCase() ?? "";
-  const params: Record<string, string> = {};
-  for (const piece of pieces.slice(1)) {
-    const separator = piece.indexOf("=");
-    if (separator <= 0) continue;
-    const key = piece.slice(0, separator).trim().toLowerCase();
-    let parameter = piece.slice(separator + 1).trim();
-    if (
-      (parameter.startsWith('"') && parameter.endsWith('"')) ||
-      (parameter.startsWith("'") && parameter.endsWith("'"))
-    ) {
-      parameter = parameter.slice(1, -1);
-    }
-    if (key.endsWith("*")) {
-      const encoded = parameter.split("''").at(-1) ?? parameter;
-      try {
-        parameter = decodeURIComponent(encoded);
-      } catch {
-        parameter = encoded;
-      }
-    }
-    params[key.replace(/\*$/, "")] = decodeHeaderWords(parameter);
-  }
-  return { value, params };
-};
-
 const splitMultipart = (body: string, boundary: string): string[] => {
   if (!boundary || boundary.length > 200 || /[\r\n]/.test(boundary)) {
     throw new MailParseError("Invalid MIME multipart boundary.");
@@ -242,10 +221,11 @@ const splitMultipart = (body: string, boundary: string): string[] => {
   let current: string[] | undefined;
   for (const line of body.split("\n")) {
     const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
-    if (normalized === marker || normalized === closing) {
+    const boundaryLine = normalized.replace(/[ \t]+$/, "");
+    if (boundaryLine === marker || boundaryLine === closing) {
       if (current) parts.push(current.join("\n"));
-      current = normalized === closing ? undefined : [];
-      if (normalized === closing) break;
+      current = boundaryLine === closing ? undefined : [];
+      if (boundaryLine === closing) break;
     } else if (current) {
       current.push(line);
     }
@@ -255,51 +235,6 @@ const splitMultipart = (body: string, boundary: string): string[] => {
   }
   return parts;
 };
-
-const decodeHtmlEntities = (value: string): string => {
-  const named: Record<string, string> = {
-    amp: "&",
-    apos: "'",
-    gt: ">",
-    lt: "<",
-    nbsp: " ",
-    quot: '"',
-  };
-  return value.replace(
-    /&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi,
-    (_match, decimal: string, hexadecimal: string, name: string) => {
-      const code = decimal
-        ? Number.parseInt(decimal, 10)
-        : hexadecimal
-          ? Number.parseInt(hexadecimal, 16)
-          : undefined;
-      if (code !== undefined) {
-        return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff
-          ? String.fromCodePoint(code)
-          : "";
-      }
-      return named[name.toLowerCase()] ?? "";
-    }
-  );
-};
-
-export const sanitizeHtmlToText = (html: string): string =>
-  decodeHtmlEntities(
-    html
-      .replace(HTML_COMMENTS, "")
-      .replace(DANGEROUS_HTML_BLOCKS, "")
-      .replace(HTML_BREAKS, "\n")
-      .replace(HTML_BLOCK_ENDS, "\n")
-      .replace(HTML_TAGS, "")
-  )
-    .replace(DANGEROUS_HTML_BLOCKS, "")
-    .replace(HTML_TAGS, "")
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line, index, lines) => line || lines[index - 1])
-    .join("\n")
-    .trim();
 
 const hashBytes = (bytes: Uint8Array): string =>
   new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
@@ -317,17 +252,21 @@ const safeFilename = (value: string | undefined, index: number): string => {
 
 const walkMimePart = (raw: string, state: MimeState, depth: number): void => {
   if (depth > MAX_MIME_DEPTH) {
-    throw new MailParseError("MIME nesting exceeds its depth limit.");
+    throw new MailParseError("MIME nesting exceeds its depth limit.", "limit");
   }
   state.partCount += 1;
   if (state.partCount > MAX_MIME_PARTS) {
-    throw new MailParseError("MIME message exceeds its part limit.");
+    throw new MailParseError("MIME message exceeds its part limit.", "limit");
   }
   const [rawHeaders, body] = splitHeaderBody(raw);
   const headers = parseHeaders(rawHeaders);
-  const contentType = parseParameterizedHeader(headers.get("content-type"));
+  const contentType = parseParameterizedHeader(
+    headers.get("content-type"),
+    decodeHeaderWords
+  );
   const disposition = parseParameterizedHeader(
-    headers.get("content-disposition")
+    headers.get("content-disposition"),
+    decodeHeaderWords
   );
   const mime = contentType.value || "text/plain";
   if (mime.startsWith("multipart/")) {
@@ -458,7 +397,10 @@ export const parseEmail = (
     throw new MailParseError("Mail message has no parseable content.");
   }
   if (body.length > limits.maxBodyChars) {
-    throw new MailParseError("Decoded mail body exceeds its character limit.");
+    throw new MailParseError(
+      "Decoded mail body exceeds its character limit.",
+      "limit"
+    );
   }
 
   const author = normalizedHeader(headers, "from");
@@ -482,7 +424,10 @@ export const parseEmail = (
     ),
   };
   if (JSON.stringify(metadata).length > limits.maxMetadataChars) {
-    throw new MailParseError("Mail metadata exceeds its character limit.");
+    throw new MailParseError(
+      "Mail metadata exceeds its character limit.",
+      "limit"
+    );
   }
   return {
     subject: normalizedHeader(headers, "subject"),
