@@ -13,7 +13,10 @@ export type {
   HttpDestinationPolicyAudit,
   PinnedHttpFetch,
 } from "./pinned-http-connection";
-export { PinnedHttpConnection } from "./pinned-http-connection";
+export {
+  PinnedHttpConnection,
+  PinnedHttpRequestError,
+} from "./pinned-http-connection";
 
 export const MAX_HTTP_DESTINATION_ADDRESSES = 32;
 export const MAX_HTTP_DESTINATION_REDIRECTS = 5;
@@ -220,6 +223,16 @@ interface PreparedDestination {
   classification: DestinationClassification;
 }
 
+function freezeClassification(
+  classification: DestinationClassification
+): DestinationClassification {
+  const audit = Object.freeze({
+    ...classification.audit,
+    addressClasses: Object.freeze([...classification.audit.addressClasses]),
+  });
+  return Object.freeze({ ...classification, audit });
+}
+
 function isPolicyDenial(
   value: PreparedDestination | HttpDestinationPolicyDenial
 ): value is HttpDestinationPolicyDenial {
@@ -283,7 +296,8 @@ async function prepareDestination(
  * details are released only by acquireConnection() after an exact DNS recheck.
  */
 export class HttpDestinationPin {
-  readonly classification: DestinationClassification;
+  readonly #classification: DestinationClassification;
+  readonly #classificationZone: DestinationClassification["zone"];
   readonly #url: URL;
   readonly #hostname: string;
   readonly #addresses: readonly string[];
@@ -303,7 +317,8 @@ export class HttpDestinationPin {
     > & { resolver: HttpDestinationResolver },
     redirectCount: number
   ) {
-    this.classification = prepared.classification;
+    this.#classification = freezeClassification(prepared.classification);
+    this.#classificationZone = prepared.classification.zone;
     this.#url = prepared.url;
     this.#hostname = prepared.hostname;
     this.#addresses = prepared.addresses;
@@ -319,9 +334,13 @@ export class HttpDestinationPin {
     audit: HttpDestinationPolicyAudit;
   } {
     return {
-      classification: this.classification,
-      audit: createAudit(this.classification, this.#url, this.#redirectCount),
+      classification: this.#classification,
+      audit: createAudit(this.#classification, this.#url, this.#redirectCount),
     };
+  }
+
+  get classification(): DestinationClassification {
+    return this.#classification;
   }
 
   async acquireConnection(): Promise<HttpDestinationConnectionResult> {
@@ -361,7 +380,7 @@ export class HttpDestinationPin {
     if (!address) {
       return denial(
         "DNS_UNRESOLVED",
-        this.classification,
+        this.#classification,
         this.#url,
         this.#redirectCount
       );
@@ -374,7 +393,7 @@ export class HttpDestinationPin {
         target.href,
         this.#url.host,
         isNetworkAddress(this.#hostname) ? undefined : this.#hostname,
-        createAudit(this.classification, this.#url, this.#redirectCount)
+        createAudit(this.#classification, this.#url, this.#redirectCount)
       ),
     };
   }
@@ -383,7 +402,7 @@ export class HttpDestinationPin {
     if (this.#redirectCount >= MAX_HTTP_DESTINATION_REDIRECTS) {
       return denial(
         "REDIRECT_LIMIT",
-        this.classification,
+        this.#classification,
         this.#url,
         this.#redirectCount
       );
@@ -426,7 +445,7 @@ export class HttpDestinationPin {
       redirectCount: this.#redirectCount + 1,
     });
     if (!next.ok) return next;
-    if (next.value.classification.zone !== this.classification.zone) {
+    if (next.value.classification.zone !== this.#classificationZone) {
       return denial(
         "REDIRECT_ZONE_CHANGED",
         next.value.classification,

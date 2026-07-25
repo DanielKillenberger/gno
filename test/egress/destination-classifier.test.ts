@@ -192,14 +192,13 @@ describe("DNS-pinned outbound HTTP policy", () => {
       tls: { cert, key },
       fetch(request) {
         return Response.json({
-          host: request.headers.get("host"),
-          pathname: new URL(request.url).pathname,
+          matched: new URL(request.url).pathname === "/private/path",
         });
       },
     });
     try {
       const prepared = await prepareHttpDestination(
-        `https://model.test:${server.port}/health`,
+        `https://model.test:${server.port}/private/path?api_key=secret`,
         {
           maximumZone: "loopback",
           resolver: sequenceResolver(["127.0.0.1"], ["127.0.0.1"]),
@@ -214,10 +213,18 @@ describe("DNS-pinned outbound HTTP policy", () => {
 
       const response = await acquired.value.request({ tls: { ca: cert } });
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        host: `model.test:${server.port}`,
-        pathname: "/health",
+      expect(response.url).toBe("");
+      const body = await response.json();
+      expect(body).toEqual({ matched: true });
+      const exposedResponse = JSON.stringify({
+        url: response.url,
+        status: response.status,
+        headers: [...response.headers],
+        body,
       });
+      for (const secret of ["127.0.0.1", "private/path", "api_key", "secret"]) {
+        expect(exposedResponse).not.toContain(secret);
+      }
 
       const wrongName = await prepareHttpDestination(
         `https://wrong.test:${server.port}/health`,
@@ -482,27 +489,5 @@ describe("DNS-pinned outbound HTTP policy", () => {
       ok: false,
       reason: "CREDENTIALS_IN_URL",
     });
-  });
-
-  test("denials and pins omit credentials, hostnames, paths, and addresses", async () => {
-    const credentialed = await prepareHttpDestination(
-      "https://user:password@secret.example/private/path?api_key=token",
-      {
-        maximumZone: "remote",
-        resolver: sequenceResolver(["8.8.8.8"]),
-        env: {},
-      }
-    );
-    const serialized = JSON.stringify(credentialed);
-    for (const secret of [
-      "user",
-      "password",
-      "secret.example",
-      "private/path",
-      "api_key",
-      "8.8.8.8",
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
   });
 });

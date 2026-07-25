@@ -30,18 +30,18 @@ export type DestinationClassificationReason =
   (typeof DESTINATION_CLASSIFICATION_REASONS)[number];
 
 export interface DestinationClassificationAudit {
-  source: "local_process" | "bind" | "literal" | "dns" | "provider";
-  hostnameKind: "none" | "ip_literal" | "dns_name";
-  addressCount: number;
-  addressClasses: readonly DestinationAddressClass[];
-  mixed: boolean;
+  readonly source: "local_process" | "bind" | "literal" | "dns" | "provider";
+  readonly hostnameKind: "none" | "ip_literal" | "dns_name";
+  readonly addressCount: number;
+  readonly addressClasses: readonly DestinationAddressClass[];
+  readonly mixed: boolean;
 }
 
 export interface DestinationClassification {
-  zone: EgressDestinationZone;
-  addressClass: DestinationAddressClass;
-  reason: DestinationClassificationReason;
-  audit: DestinationClassificationAudit;
+  readonly zone: EgressDestinationZone;
+  readonly addressClass: DestinationAddressClass;
+  readonly reason: DestinationClassificationReason;
+  readonly audit: DestinationClassificationAudit;
 }
 
 export interface DestinationClassifierInput {

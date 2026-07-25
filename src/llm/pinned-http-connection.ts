@@ -14,6 +14,34 @@ export type PinnedHttpFetch = (
   init?: BunFetchRequestInit
 ) => Promise<Response>;
 
+export class PinnedHttpRequestError extends Error {
+  readonly code = "PINNED_HTTP_REQUEST_FAILED";
+  readonly aborted: boolean;
+
+  constructor(aborted: boolean) {
+    super(
+      aborted ? "Pinned HTTP request aborted" : "Pinned HTTP request failed"
+    );
+    this.name = "PinnedHttpRequestError";
+    this.aborted = aborted;
+    this.stack = `${this.name}: ${this.message}`;
+  }
+
+  toJSON(): { code: string; message: string; aborted: boolean } {
+    return { code: this.code, message: this.message, aborted: this.aborted };
+  }
+}
+
+function freezeAudit(
+  audit: HttpDestinationPolicyAudit
+): HttpDestinationPolicyAudit {
+  const classification = Object.freeze({
+    ...audit.classification,
+    addressClasses: Object.freeze([...audit.classification.addressClasses]),
+  });
+  return Object.freeze({ ...audit, classification });
+}
+
 /**
  * JSON/log projection is redacted. request() is the only raw target consumer;
  * it preserves Host/SNI while forcing an IP URL and manual redirects.
@@ -33,14 +61,14 @@ export class PinnedHttpConnection {
     this.#targetUrl = targetUrl;
     this.#hostHeader = hostHeader;
     this.#tlsServerName = tlsServerName;
-    this.#audit = audit;
+    this.#audit = freezeAudit(audit);
   }
 
   toJSON(): { audit: HttpDestinationPolicyAudit; pinned: true } {
     return { audit: this.#audit, pinned: true };
   }
 
-  request(
+  async request(
     init: BunFetchRequestInit = {},
     fetchFn: PinnedHttpFetch = fetch
   ): Promise<Response> {
@@ -57,12 +85,21 @@ export class PinnedHttpConnection {
       rejectUnauthorized: true,
       serverName: this.#tlsServerName,
     };
-    return fetchFn(this.#targetUrl, {
-      ...init,
-      headers,
-      redirect: "manual",
-      tls,
-      proxy: undefined,
-    });
+    try {
+      const response = await fetchFn(this.#targetUrl, {
+        ...init,
+        headers,
+        redirect: "manual",
+        tls,
+        proxy: undefined,
+      });
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } catch {
+      throw new PinnedHttpRequestError(init.signal?.aborted === true);
+    }
   }
 }
