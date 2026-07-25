@@ -5,7 +5,12 @@ import type {
   RecordAdapterEvent,
   RecordAdapterInput,
 } from "../converters/types";
+import type { EgressLineage } from "../core/egress-provenance";
 
+import {
+  egressLineageSchema,
+  legacyLocalOnlyEgressLineage,
+} from "../core/egress-provenance";
 import {
   type AccountedCanonicalRecord,
   adapterFailureMessage,
@@ -27,6 +32,7 @@ export interface RecordAdapterRunResult {
   adapterId: string;
   adapterVersion: string;
   adapterFingerprint: string;
+  egressLineage: EgressLineage;
   records: CanonicalRecord[];
   failures: RecordAdapterFailure[];
   failedRecordKeys: string[];
@@ -83,10 +89,14 @@ const closeIterator = async (
 /** Consume one adapter snapshot while centrally enforcing every global cap. */
 export async function runRecordAdapter(
   adapter: RecordAdapter,
-  input: RecordAdapterInput
+  input: RecordAdapterInput,
+  options: { egressLineage?: EgressLineage } = {}
 ): Promise<RecordAdapterRunResult> {
   const adapterIdentity = normalizeRecordAdapterIdentity(adapter);
   const adapterFingerprint = recordAdapterFingerprint(adapter);
+  const egressLineage = egressLineageSchema.parse(
+    options.egressLineage ?? legacyLocalOnlyEgressLineage(input.collection)
+  );
   const accepted = new Map<string, AccountedCanonicalRecord>();
   const seenKeys = new Set<string>();
   const failedRecordKeys = new Set<string>();
@@ -418,6 +428,7 @@ export async function runRecordAdapter(
     adapterId: adapterIdentity.id,
     adapterVersion: adapterIdentity.version,
     adapterFingerprint,
+    egressLineage,
     records: [...accepted.values()]
       .sort((left, right) => left.recordKey.localeCompare(right.recordKey))
       .map(

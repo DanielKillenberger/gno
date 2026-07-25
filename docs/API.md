@@ -151,9 +151,13 @@ and clip-identity hashes needed to reconcile an interrupted atomic write.
 Preview accepts the closed
 [`browser-clip@1.0`](../spec/output-schemas/browser-clip.schema.json) payload
 and returns the normalized body, full provenance, preview digest, and collision
-plan without writing. Commit requires the same payload and digest plus a
-visible-ASCII `Idempotency-Key` header. The server reparses and replans before
-using the shared capture writer; completed retries replay the stored receipt.
+plan without writing. The preview also includes the destination collection's
+server-resolved `egressLineage`; the extension cannot submit or override it.
+The preview digest binds that lineage, so a policy change invalidates the
+preview without changing the content-derived `clipIdentity`. Commit requires
+the same payload and digest plus a visible-ASCII `Idempotency-Key` header. The
+server reparses and replans before using the shared capture writer; completed
+retries replay the stored receipt.
 If the process is interrupted after the file write but before receipt
 persistence, a retry verifies those exact local hashes and completes the
 receipt without choosing a new path or creating a suffixed duplicate. Plan or
@@ -2732,17 +2736,21 @@ Public artifact spaces carry a manifest conforming to
 `gno://schemas/publish-artifact@1.0`: a stable projection revision, sorted
 documents, relative Markdown paths, exact line locators, content/evidence
 hashes, and closed public capabilities. The manifest and its revision derive
-only from sanitized published notes. `publish: false` notes, local collection
+from sanitized published notes plus deterministic `egressLineage`: sorted
+source-collection membership and the most restrictive effective policy.
+Current artifact wrappers always include that lineage; public manifests repeat
+it, and `projectionRevision` binds it. `publish: false` notes, local collection
 paths, local source URIs, and metadata values containing embedded local path or
 GNO/file URI tokens are excluded. Canonical and image metadata fields accept
 only uncredentialed public HTTP(S) targets.
 
 Secret-link and invite-only artifacts have no agent manifest or capability
 activation flags. Encrypted artifacts expose no plaintext manifest or evidence;
-the server receives ciphertext metadata and an opaque token only. V2 artifact
-fields are closed and validated before export, including bounded base64
-payloads, positive safe-integer KDF iterations, route/source identity, and the
-bounded opaque token.
+their wrappers retain only the redacted lineage alongside the existing
+ciphertext metadata and opaque token. No server-side decryption path is added.
+V2 artifact fields are closed and validated before export, including bounded
+base64 payloads, positive safe-integer KDF iterations, route/source identity,
+and the bounded opaque token.
 
 ---
 

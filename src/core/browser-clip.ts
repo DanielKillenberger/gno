@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { EgressLineage } from "./egress-provenance";
+
 import { canonicalize } from "../converters/canonicalize";
 import {
   BROWSER_CLIP_MAX_BYTES,
@@ -15,6 +17,10 @@ import {
   type CaptureInput,
   type CaptureSource,
 } from "./capture";
+import {
+  egressLineageSchema,
+  legacyLocalOnlyEgressLineage,
+} from "./egress-provenance";
 
 export {
   BROWSER_CLIP_MAX_BYTES,
@@ -206,12 +212,14 @@ export type BrowserClipBlock = z.infer<typeof readerBlockSchema>;
 export interface PreparedBrowserClip {
   payload: BrowserClipPayload;
   captureInput: CaptureInput;
+  egressLineage: EgressLineage;
   provenance: BrowserClipProvenance;
   preview: {
     body: string;
     digest: string;
     source: CaptureSource;
     destination: BrowserClipPayload["destination"];
+    egressLineage: EgressLineage;
     tags: string[];
   };
 }
@@ -330,9 +338,13 @@ const dedupeWarnings = (
 
 export const prepareBrowserClip = (
   input: unknown,
-  options: { now?: Date } = {}
+  options: { now?: Date; egressLineage?: EgressLineage } = {}
 ): PreparedBrowserClip => {
   const payload = browserClipPayloadSchema.parse(input);
+  const egressLineage = egressLineageSchema.parse(
+    options.egressLineage ??
+      legacyLocalOnlyEgressLineage(payload.destination.collection)
+  );
   const capturedAt = (options.now ?? new Date()).toISOString();
   const sourceUrl = normalizeUrl(payload.sourceUrl);
   const canonicalUrl =
@@ -411,6 +423,7 @@ export const prepareBrowserClip = (
     stableJson({
       body,
       destination: payload.destination,
+      egressLineage,
       extraction: payload.extraction,
       provenance: previewProvenance,
       source: previewSource,
@@ -461,12 +474,14 @@ export const prepareBrowserClip = (
   return {
     payload,
     captureInput,
+    egressLineage,
     provenance,
     preview: {
       body,
       digest: previewDigest,
       source,
       destination: payload.destination,
+      egressLineage,
       tags: payload.tags,
     },
   };

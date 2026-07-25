@@ -4,6 +4,7 @@
  * @module src/publish/artifact
  */
 
+import type { EgressLineage } from "../core/egress-provenance";
 import type { DocumentRow } from "../store/types";
 
 import { deriveDocid } from "../app/constants";
@@ -11,6 +12,7 @@ import {
   contextCapsuleEvidenceIdentity,
   sha256Text,
 } from "../core/context-capsule-validation";
+import { legacyLocalOnlyEgressLineage } from "../core/egress-provenance";
 import { stripFrontmatter } from "../ingestion/frontmatter";
 import {
   MAX_PUBLISH_SLUG_LENGTH,
@@ -71,6 +73,7 @@ export interface PublicPublishDocument {
 export interface PublicPublishManifest {
   capabilities: typeof PUBLIC_PUBLISH_CAPABILITIES;
   documents: PublicPublishDocument[];
+  egressLineage: EgressLineage;
   generatedAt: string;
   projectionRevision: string;
   schemaVersion: typeof PUBLIC_PUBLISH_MANIFEST_SCHEMA_VERSION;
@@ -116,6 +119,7 @@ export interface EncryptedPublishArtifactSpace {
 }
 
 export interface PublishArtifactV1 {
+  egressLineage: EgressLineage;
   exportedAt: string;
   source: string;
   spaces: PublishArtifactSpace[];
@@ -123,6 +127,7 @@ export interface PublishArtifactV1 {
 }
 
 export interface PublishArtifactV2 {
+  egressLineage: EgressLineage;
   exportedAt: string;
   source: string;
   spaces: EncryptedPublishArtifactSpace[];
@@ -279,6 +284,7 @@ const buildPublicPublishDocument = (
 };
 
 export const buildPublicPublishManifest = (input: {
+  egressLineage?: EgressLineage;
   exportedAt: string;
   homeNoteSlug?: string;
   notes: PublishArtifactNote[];
@@ -288,7 +294,10 @@ export const buildPublicPublishManifest = (input: {
   title: string;
   visibility: "public";
 }): PublicPublishManifest => {
-  const validated = validateAndProjectPublishSpaceInput(input);
+  const { egressLineage: providedLineage, ...spaceInput } = input;
+  const validated = validateAndProjectPublishSpaceInput(spaceInput);
+  const egressLineage =
+    providedLineage ?? legacyLocalOnlyEgressLineage("legacy");
   if (validated.visibility !== "public") {
     throw new Error("Public publish manifests require public visibility");
   }
@@ -304,6 +313,7 @@ export const buildPublicPublishManifest = (input: {
   const revisionProjection = {
     capabilities: PUBLIC_PUBLISH_CAPABILITIES,
     documents,
+    egressLineage,
     homeNoteSlug: validated.homeNoteSlug ?? null,
     notes: validated.notes
       .map((note) => ({
@@ -324,6 +334,7 @@ export const buildPublicPublishManifest = (input: {
   return {
     capabilities: { ...PUBLIC_PUBLISH_CAPABILITIES },
     documents,
+    egressLineage,
     generatedAt: exportedAt,
     projectionRevision: sha256Text(canonicalJson(revisionProjection)),
     schemaVersion: PUBLIC_PUBLISH_MANIFEST_SCHEMA_VERSION,
@@ -332,6 +343,7 @@ export const buildPublicPublishManifest = (input: {
 };
 
 export const buildPublishArtifact = (input: {
+  egressLineage?: EgressLineage;
   homeNoteSlug?: string;
   notes: PublishArtifactNote[];
   routeSlug: string;
@@ -340,7 +352,10 @@ export const buildPublishArtifact = (input: {
   title: string;
   visibility: Exclude<PublishVisibility, "encrypted">;
 }): PublishArtifactV1 => {
-  const validated = validateAndProjectPublishSpaceInput(input);
+  const { egressLineage: providedLineage, ...spaceInput } = input;
+  const validated = validateAndProjectPublishSpaceInput(spaceInput);
+  const egressLineage =
+    providedLineage ?? legacyLocalOnlyEgressLineage("legacy");
   const exportedAt = new Date().toISOString();
   const base = {
     ...(validated.homeNoteSlug === undefined
@@ -357,6 +372,7 @@ export const buildPublishArtifact = (input: {
       ? {
           ...base,
           manifest: buildPublicPublishManifest({
+            egressLineage,
             exportedAt,
             homeNoteSlug: validated.homeNoteSlug,
             notes: validated.notes,
@@ -374,6 +390,7 @@ export const buildPublishArtifact = (input: {
         };
 
   return {
+    egressLineage,
     exportedAt,
     source: validated.routeSlug,
     spaces: [space],
@@ -382,14 +399,19 @@ export const buildPublishArtifact = (input: {
 };
 
 export const buildEncryptedPublishArtifact = (input: {
+  egressLineage?: EgressLineage;
   encryptedPayload: EncryptedArtifactPayload;
   routeSlug: string;
   secretToken: string;
   sourceType: "note" | "collection";
 }): PublishArtifactV2 => {
-  const validated = validateAndProjectEncryptedPublishInput(input);
+  const { egressLineage: providedLineage, ...encryptedInput } = input;
+  const validated = validateAndProjectEncryptedPublishInput(encryptedInput);
+  const egressLineage =
+    providedLineage ?? legacyLocalOnlyEgressLineage("legacy");
   const exportedAt = requirePublishDateTime(new Date().toISOString());
   return {
+    egressLineage,
     exportedAt,
     source: validated.routeSlug,
     spaces: [

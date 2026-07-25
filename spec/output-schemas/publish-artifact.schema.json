@@ -13,6 +13,7 @@
       "required": ["version", "source", "exportedAt", "spaces"],
       "properties": {
         "version": { "const": 1 },
+        "egressLineage": { "$ref": "#/definitions/egressLineage" },
         "source": { "$ref": "#/definitions/slug" },
         "exportedAt": { "type": "string", "format": "date-time" },
         "spaces": {
@@ -33,6 +34,7 @@
       "required": ["version", "source", "exportedAt", "spaces"],
       "properties": {
         "version": { "const": 2 },
+        "egressLineage": { "$ref": "#/definitions/egressLineage" },
         "source": { "$ref": "#/definitions/slug" },
         "exportedAt": { "type": "string", "format": "date-time" },
         "spaces": {
@@ -50,6 +52,35 @@
     "hash": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "egressLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effectivePolicy", "digest", "sources"],
+      "properties": {
+        "effectivePolicy": { "enum": ["local_only", "lan", "remote"] },
+        "digest": { "$ref": "#/definitions/hash" },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["collection", "policy", "source"],
+            "properties": {
+              "collection": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              "policy": { "enum": ["local_only", "lan", "remote"] },
+              "source": {
+                "enum": ["explicit", "config_default", "legacy_default"]
+              }
+            }
+          }
+        }
+      }
     },
     "docid": {
       "type": "string",
@@ -145,6 +176,7 @@
       "properties": {
         "schemaVersion": { "const": "1.0" },
         "projectionRevision": { "$ref": "#/definitions/hash" },
+        "egressLineage": { "$ref": "#/definitions/egressLineage" },
         "generatedAt": { "type": "string", "format": "date-time" },
         "visibility": { "const": "public" },
         "capabilities": {

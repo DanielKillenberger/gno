@@ -7,7 +7,7 @@
 import type { Collection } from "../config/types";
 import type { DocumentRow, StorePort, TagRow } from "../store/types";
 
-import { enforceCollectionEgress } from "../core/egress-enforcement";
+import { enforceCollectionEgressWithAudit } from "../core/egress-enforcement";
 import { parseRef } from "../core/ref-parser";
 import { parseFrontmatter, stripFrontmatter } from "../ingestion/frontmatter";
 import { getContentBatch } from "../store/content-batch";
@@ -218,6 +218,15 @@ async function exportCollectionArtifact(
     target,
   ]);
   const visibility = resolveVisibility(options.visibility);
+  const { lineage } = await enforceCollectionEgressWithAudit({
+    collections,
+    collectionNames: [collection.name],
+    action: "export",
+    destinationZone: "local_process",
+    caller: { authenticated: true, operationAuthorized: true },
+    contentClass: "source",
+    store,
+  });
 
   if (visibility === "encrypted") {
     if (!options.encryptionPassphrase) {
@@ -238,6 +247,7 @@ async function exportCollectionArtifact(
     });
 
     return buildEncryptedPublishArtifact({
+      egressLineage: lineage,
       encryptedPayload: encrypted.encryptedPayload,
       routeSlug,
       secretToken: encrypted.secretToken,
@@ -246,6 +256,7 @@ async function exportCollectionArtifact(
   }
 
   return buildPublishArtifact({
+    egressLineage: lineage,
     homeNoteSlug: chooseHomeNoteSlug(notes),
     notes,
     routeSlug,
@@ -258,6 +269,7 @@ async function exportCollectionArtifact(
 
 async function exportDocumentArtifact(
   store: StorePort,
+  collections: Collection[],
   target: string,
   options: PublishExportCoreOptions,
   warnings: SanitizeWarning[]
@@ -284,6 +296,15 @@ async function exportDocumentArtifact(
   const slug = deriveExportedSlug(doc);
   const visibility = resolveVisibility(options.visibility);
   const routeSlug = derivePublishSlug([options.routeSlug ?? "", slug, target]);
+  const { lineage } = await enforceCollectionEgressWithAudit({
+    collections,
+    collectionNames: [doc.collection],
+    action: "export",
+    destinationZone: "local_process",
+    caller: { authenticated: true, operationAuthorized: true },
+    contentClass: "source",
+    store,
+  });
 
   if (visibility === "encrypted") {
     if (!options.encryptionPassphrase) {
@@ -311,6 +332,7 @@ async function exportDocumentArtifact(
     });
 
     return buildEncryptedPublishArtifact({
+      egressLineage: lineage,
       encryptedPayload: encrypted.encryptedPayload,
       routeSlug,
       secretToken: encrypted.secretToken,
@@ -319,6 +341,7 @@ async function exportDocumentArtifact(
   }
 
   return buildPublishArtifact({
+    egressLineage: lineage,
     notes: [
       {
         markdown,
@@ -347,13 +370,6 @@ export async function exportPublishArtifact(input: {
   store: StorePort;
   target: string;
 }): Promise<ExportPublishArtifactResult> {
-  enforceCollectionEgress({
-    collections: input.collections,
-    action: "export",
-    destinationZone: "local_process",
-    caller: { authenticated: true, operationAuthorized: true },
-    contentClass: "source",
-  });
   const warnings: SanitizeWarning[] = [];
   const artifact =
     (await exportCollectionArtifact(
@@ -365,6 +381,7 @@ export async function exportPublishArtifact(input: {
     )) ??
     (await exportDocumentArtifact(
       input.store,
+      input.collections,
       input.target,
       input.options,
       warnings

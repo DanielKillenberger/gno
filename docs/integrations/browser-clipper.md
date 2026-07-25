@@ -104,9 +104,10 @@ Use one of two explicit modes:
 
 Review the source metadata, optional authenticated-visible disclosure,
 destination, tags, collision policy, normalized Markdown, provenance, warnings,
-and digest. Any edit to content, metadata, destination, tags, mode, extraction,
-or authenticated-visible state invalidates the preview. Preview again, then
-confirm the write.
+digest, and destination collection's server-resolved egress lineage. The
+extension cannot supply or override that lineage. Any edit to content, metadata,
+destination, tags, mode, extraction, authenticated-visible state, or collection
+policy invalidates the preview. Preview again, then confirm the write.
 
 The gateway does not accept arbitrary HTML. Scripts, styles, forms,
 navigation/aside content, hidden/inert/`aria-hidden` nodes, tracking content,
@@ -139,7 +140,9 @@ Browser-clip provenance contains exactly:
 - `clipIdentity`: source plus extraction/final identity
 - `previewDigest`: exact preview and destination plan
 
-Browser clips do not use `sourceHash`.
+`previewDigest` also binds the server-resolved destination egress lineage.
+Policy changes therefore require a new preview, while `clipIdentity` remains a
+stable content-provenance identity. Browser clips do not use `sourceHash`.
 
 The wire result is closed and status-bound:
 

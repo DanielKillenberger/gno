@@ -15,11 +15,13 @@ import type {
   WalkEntry,
 } from "./types";
 
+import { resolveConfiguredEgressPolicy } from "../config/types";
 import { DEFAULT_RECORD_ADAPTER_LIMITS } from "../converters/types";
 import {
   diffDocumentStructure,
   extractDocumentStructure,
 } from "../core/change-diff";
+import { createEgressLineage } from "../core/egress-provenance";
 import { normalizeTag, validateTag } from "../core/tags";
 import { runRecordAdapter } from "./record-adapter";
 import { recordVirtualPath } from "./record-path";
@@ -432,29 +434,42 @@ const recordProvenanceChanged = (
 export async function processRecordContainer(
   input: RecordContainerInput
 ): Promise<FileSyncResult> {
-  const snapshot = await runRecordAdapter(input.adapter, {
-    sourcePath: input.entry.absPath,
-    relativePath: input.entry.relPath,
-    collection: input.collection.name,
-    mime: input.mime,
-    ext: input.ext,
-    open: (signal) => sourceStream(input.entry.absPath, signal),
-    limits: {
-      ...DEFAULT_RECORD_ADAPTER_LIMITS,
-      timeoutMs: Math.min(
-        DEFAULT_RECORD_ADAPTER_LIMITS.timeoutMs ?? 60_000,
-        input.options.limits?.timeoutMs ?? Number.POSITIVE_INFINITY
-      ),
-      maxSourceBytes: Math.min(
-        DEFAULT_RECORD_ADAPTER_LIMITS.maxSourceBytes,
-        input.options.limits?.maxBytes ?? Number.POSITIVE_INFINITY
-      ),
-      maxTotalChars: Math.min(
-        DEFAULT_RECORD_ADAPTER_LIMITS.maxTotalChars,
-        input.options.limits?.maxOutputChars ?? Number.POSITIVE_INFINITY
-      ),
+  const effectiveEgress = resolveConfiguredEgressPolicy(input.collection);
+  const snapshot = await runRecordAdapter(
+    input.adapter,
+    {
+      sourcePath: input.entry.absPath,
+      relativePath: input.entry.relPath,
+      collection: input.collection.name,
+      mime: input.mime,
+      ext: input.ext,
+      open: (signal) => sourceStream(input.entry.absPath, signal),
+      limits: {
+        ...DEFAULT_RECORD_ADAPTER_LIMITS,
+        timeoutMs: Math.min(
+          DEFAULT_RECORD_ADAPTER_LIMITS.timeoutMs ?? 60_000,
+          input.options.limits?.timeoutMs ?? Number.POSITIVE_INFINITY
+        ),
+        maxSourceBytes: Math.min(
+          DEFAULT_RECORD_ADAPTER_LIMITS.maxSourceBytes,
+          input.options.limits?.maxBytes ?? Number.POSITIVE_INFINITY
+        ),
+        maxTotalChars: Math.min(
+          DEFAULT_RECORD_ADAPTER_LIMITS.maxTotalChars,
+          input.options.limits?.maxOutputChars ?? Number.POSITIVE_INFINITY
+        ),
+      },
     },
-  });
+    {
+      egressLineage: createEgressLineage([
+        {
+          collection: input.collection.name,
+          policy: effectiveEgress.policy,
+          source: effectiveEgress.source,
+        },
+      ]),
+    }
+  );
 
   const reconcileAndApply = async (): Promise<AppliedRecordReconciliation> => {
     const priorDocuments = mustOk(
@@ -615,6 +630,7 @@ export async function processRecordContainer(
     adapterId: snapshot.adapterId,
     adapterVersion: snapshot.adapterVersion,
     adapterFingerprint: snapshot.adapterFingerprint,
+    egressLineage: snapshot.egressLineage,
     snapshotState: snapshot.snapshotState,
     authoritative: snapshot.authoritative,
     stoppedByCap: snapshot.stoppedByCap,

@@ -106,7 +106,10 @@ bounded codes and locators, never raw malformed records or absolute paths.
 Terminal output always reports the file, warning count, and partial snapshot;
 `--verbose` adds the stable code, source locator, retryability, and redacted
 message. Programmatic sync results expose `recordImport` with adapter identity,
-snapshot authority, source bytes read, per-action counts, and bounded failures.
+snapshot authority, source bytes read, per-action counts, bounded failures, and
+deterministic `egressLineage`. Every logical record inherits the owning
+collection's lineage; parsing or transformation cannot relax its effective
+policy.
 
 ## Security and privacy boundary
 

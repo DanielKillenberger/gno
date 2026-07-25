@@ -11,6 +11,7 @@ import type {
   RecordAdapterFailure,
   RecordAttachmentInventoryItem,
 } from "../converters/types";
+import type { EgressLineage } from "../core/egress-provenance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Walker Types
@@ -203,6 +204,7 @@ export interface FileSyncResult {
     adapterId: string;
     adapterVersion: string;
     adapterFingerprint: string;
+    egressLineage?: EgressLineage;
     snapshotState: "complete" | "partial";
     authoritative: boolean;
     stoppedByCap: boolean;

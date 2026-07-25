@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import type { Collection } from "../../src/config/types";
+
+import {
+  EgressDeniedError,
+  planCollectionEgress,
+} from "../../src/core/egress-enforcement";
 import {
   createEgressLineage,
   EgressProvenanceError,
@@ -40,5 +46,52 @@ describe("derived egress policy lineage", () => {
     expect(() =>
       createEgressLineage([sources[0], { ...sources[0], policy: "local_only" }])
     ).toThrow("Conflicting policy lineage");
+  });
+
+  test("denies mixed transfer by default and discloses explicit partial output", () => {
+    const collections: Collection[] = [
+      {
+        name: "remote",
+        path: "/remote",
+        pattern: "**/*",
+        include: [],
+        exclude: [],
+        egressPolicy: "remote",
+      },
+      {
+        name: "local",
+        path: "/local",
+        pattern: "**/*",
+        include: [],
+        exclude: [],
+        egressPolicy: "local_only",
+      },
+    ];
+    const input = {
+      collections,
+      action: "publish" as const,
+      destinationZone: "remote" as const,
+      caller: { authenticated: true, operationAuthorized: true },
+      contentClass: "capsule" as const,
+    };
+    expect(() => planCollectionEgress(input)).toThrow(EgressDeniedError);
+    expect(
+      planCollectionEgress({ ...input, partialResults: "explicit" })
+    ).toEqual({
+      mode: "partial",
+      sourceLineage: createEgressLineage([
+        { collection: "local", policy: "local_only", source: "explicit" },
+        { collection: "remote", policy: "remote", source: "explicit" },
+      ]),
+      allowedCollections: ["remote"],
+      omittedCollections: [
+        { collection: "local", reason: "POLICY_LOCAL_ONLY" },
+      ],
+      disclosure: {
+        code: "EGRESS_PARTIAL_RESULT",
+        omittedCount: 1,
+        omittedCollections: ["local"],
+      },
+    });
   });
 });

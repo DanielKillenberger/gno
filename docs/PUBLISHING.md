@@ -42,11 +42,16 @@ Human-reader access modes:
 Public artifacts also carry the shipped read-only agent projection: a closed
 manifest, deterministic Markdown, `llms.txt`, content hashes, and exact line
 locators. The projection contains only the explicitly exported public
-snapshot.
+snapshot. Every current artifact records deterministic `egressLineage`: sorted
+source-collection membership plus the most restrictive effective policy.
+Public manifests repeat that lineage, and `projectionRevision` binds it so a
+policy change cannot reuse an older revision.
 
 Secret-link, invite-only, and encrypted spaces do not expose an agent
-projection. gno.sh does not currently provide token-authenticated private agent
-access. Do not treat a secret link as an agent API credential.
+projection. Their wrappers retain the same redacted egress lineage for local
+verification without exposing an agent manifest or decrypting content. gno.sh
+does not currently provide token-authenticated private agent access. Do not
+treat a secret link as an agent API credential.
 
 ## Encrypted export
 
