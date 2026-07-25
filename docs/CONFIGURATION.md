@@ -29,6 +29,7 @@ collections:
   - name: notes
     path: /Users/you/notes
     pattern: "**/*.md"
+    egressPolicy: local_only
     include: []
     exclude:
       - .git
@@ -131,6 +132,58 @@ receipts, snapshot/tombstone semantics, and no-live-account security boundary.
 When `include` is empty, configuring `recordAdapters.transcript.format: json`
 also makes `.json` files discoverable. A nonempty `include` remains an explicit
 allowlist and must list `.json`.
+
+## Collection egress policy
+
+Every collection has one effective boundary: `local_only`, `lan`, or `remote`.
+An omitted value fails closed to `local_only`. Collections created before the
+policy migration retain their indexed documents and lexical/vector data, but
+their cached provenance is `legacy_default`; newly synchronized collections
+without an explicit value report `config_default`. Neither default can imply
+`lan` or `remote`.
+
+| Policy       | Permitted destination                                                         |
+| ------------ | ----------------------------------------------------------------------------- |
+| `local_only` | Local process, local files, loopback clients, and loopback model servers only |
+| `lan`        | `local_only` plus authenticated, proven private-network peers                 |
+| `remote`     | `lan` plus authenticated public transport and pinned HTTPS model providers    |
+
+Authentication and write permission remain separate gates. A token does not
+relax collection policy; `gateway.enableWrite` does not relax it either.
+Mixed evidence and derived artifacts use the most restrictive participating
+collection. Explicit partial checks disclose every omitted collection and
+reason; normal operations never silently drop restricted evidence.
+
+Inspect and change one policy with:
+
+```bash
+gno collection policy get notes
+gno collection policy check --action remote_inference \
+  --destination remote --content-class source -c notes \
+  --authenticated --authorized --explain-egress
+gno collection policy set notes remote --confirm-relaxation 0
+gno collection policy set notes local_only
+```
+
+The relaxation revision must exactly match the current `get` result. It is
+single-use and becomes stale after any intervening policy change. Tightening
+needs no confirmation and invalidates resident sessions, active streams,
+queued jobs, and saved authorization state; callers must retry against the new
+policy. Removing an explicit policy does not restore network access—it returns
+to the fail-closed local default.
+
+Migration does not recall data already disclosed. Tightening a collection
+blocks future GNO-controlled transfers, but an artifact previously uploaded to
+a remote service may require deletion or takedown at that service. For gno.sh,
+remove the published space remotely, then create and upload a new artifact only
+after reviewing the current policy and preview. Encrypted artifacts remain
+client-encrypted; gno.sh never receives the passphrase and cannot decrypt or
+recover them.
+
+Policy decisions create bounded, content-free local audit receipts. Use
+`gno egress-audit list|show|status|delete|purge`; receipts contain stable reason
+codes and redacted collection identity, never query text, document content,
+credentials, target URLs, or sensitive absolute paths.
 
 ## Resident HTTP MCP Gateway
 

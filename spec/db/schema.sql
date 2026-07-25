@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS collections (
   exclude TEXT,              -- JSON array of patterns
   update_cmd TEXT,
   language_hint TEXT,        -- BCP-47 or NULL
+  -- Migration 023 backfills existing rows as local_only/legacy_default.
+  -- Config sync without an explicit value remains local_only/config_default;
+  -- only explicit config may persist lan or remote.
   egress_policy TEXT NOT NULL DEFAULT 'local_only'
     CHECK (egress_policy IN ('local_only', 'lan', 'remote')),
   egress_policy_source TEXT NOT NULL DEFAULT 'legacy_default'

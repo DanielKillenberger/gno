@@ -6,9 +6,11 @@ import { join } from "node:path";
 
 import type { ToolContext } from "../../src/mcp/server";
 
+import { authorizeCurrentEgress } from "../../src/core/egress-authorization";
 import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import {
+  handleTraceExport as handleMcpTraceExport,
   handleTraceLabel as handleMcpTraceLabel,
   handleTraceList as handleMcpTraceList,
   handleTraceShow as handleMcpTraceShow,
@@ -105,7 +107,10 @@ describe("retrieval trace cross-surface management", () => {
     await safeRm(root);
   });
 
-  const context = (enableWrite = false): ToolContext =>
+  const context = (
+    enableWrite = false,
+    authorizeTraceExport?: ToolContext["authorizeTraceExport"]
+  ): ToolContext =>
     ({
       store,
       config: {
@@ -122,6 +127,7 @@ describe("retrieval trace cross-surface management", () => {
       serverInstanceId: "test",
       writeLockPath: join(root, ".write.lock"),
       enableWrite,
+      authorizeTraceExport,
       isShuttingDown: () => false,
     }) as unknown as ToolContext;
 
@@ -232,6 +238,110 @@ describe("retrieval trace cross-surface management", () => {
 
     const purged = await handleTracePurge(store);
     expect(purged.status).toBe(200);
+    expect(await purged.json()).toMatchObject({
+      schemaVersion: "1.0",
+      traces: 0,
+    });
+  });
+
+  test("requires write authorization and destination policy independently for trace export", async () => {
+    const localOnlyCollection = {
+      name: "notes",
+      path: "/private/source-notes",
+      pattern: "**/*",
+      include: [],
+      exclude: [],
+      egressPolicy: "local_only" as const,
+    };
+    let policyChecks = 0;
+    const authorizeRemoteExport: NonNullable<
+      ToolContext["authorizeTraceExport"]
+    > = async (lineage) => {
+      policyChecks += 1;
+      return authorizeCurrentEgress({
+        store,
+        config: { collections: [localOnlyCollection] },
+        lineage,
+        action: "export",
+        destinationZone: "remote",
+        caller: { authenticated: true, operationAuthorized: true },
+        contentClass: "retrieval_trace",
+      });
+    };
+
+    const writeDisabled = await handleMcpTraceExport(
+      { traceIds: ["surface-trace"], format: "agentic-receipt" },
+      context(false, authorizeRemoteExport)
+    );
+    expect(writeDisabled).toMatchObject({
+      isError: true,
+      structuredContent: { error: "WRITE_DISABLED" },
+    });
+    expect(policyChecks).toBe(0);
+
+    const policyDenied = await handleMcpTraceExport(
+      { traceIds: ["surface-trace"], format: "agentic-receipt" },
+      context(true, authorizeRemoteExport)
+    );
+    expect(policyDenied).toMatchObject({
+      isError: true,
+      structuredContent: { error: "EGRESS_DENIED" },
+    });
+    expect(policyChecks).toBe(1);
+
+    const remoteRestDenied = await handleTraceExport(
+      store,
+      new Request("https://public.example/api/traces/export", {
+        method: "POST",
+        body: JSON.stringify({
+          traceIds: ["surface-trace"],
+          format: "agentic-receipt",
+        }),
+      }),
+      [localOnlyCollection]
+    );
+    expect(remoteRestDenied.status).toBe(403);
+
+    for (const denial of [
+      JSON.stringify(writeDisabled),
+      JSON.stringify(policyDenied),
+      await remoteRestDenied.text(),
+    ]) {
+      expect(denial).not.toContain("private query");
+      expect(denial).not.toContain("evidence.md");
+      expect(denial).not.toContain("/private/source-notes");
+      expect(denial).not.toContain("gno://notes/");
+    }
+
+    const afterDenial = await new RetrievalTraceManagementService(store).show(
+      "surface-trace"
+    );
+    expect(afterDenial.ok).toBeTrue();
+    if (!afterDenial.ok) throw new Error(afterDenial.error.message);
+    expect(afterDenial.value.exports).toEqual([]);
+
+    const loopbackRestAllowed = await handleTraceExport(
+      store,
+      new Request("http://127.0.0.1/api/traces/export", {
+        method: "POST",
+        body: JSON.stringify({
+          traceIds: ["surface-trace"],
+          format: "agentic-receipt",
+        }),
+      }),
+      [localOnlyCollection]
+    );
+    expect(loopbackRestAllowed.status).toBe(200);
+    expect(await loopbackRestAllowed.json()).toMatchObject({
+      manifest: { traceIds: ["surface-trace"] },
+    });
+
+    const deleted = await handleTraceDelete(store, "surface-trace");
+    expect(await deleted.json()).toMatchObject({
+      deleted: true,
+      counts: { traces: 1 },
+    });
+    const purged = await handleTracePurge(store);
     expect(await purged.json()).toMatchObject({
       schemaVersion: "1.0",
       traces: 0,

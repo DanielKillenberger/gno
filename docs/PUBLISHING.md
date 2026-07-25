@@ -29,6 +29,33 @@ source URIs, credential-bearing URLs, and unsafe metadata from reader
 artifacts. Review the preview and the exported file before upload. Publication
 is a disclosure decision, not a backup.
 
+## Collection policy and migration
+
+Every exported snapshot records its exact collection membership and the most
+restrictive effective `local_only`, `lan`, or `remote` policy. Building and
+previewing the JSON file is a local-process operation; it never uploads by
+itself. The current Studio upload is a second, explicit user action. Future
+integrated upload or private agent access remains disabled until both its own
+authentication gate and a current `publish` policy decision pass.
+
+Collections created before egress policies are migrated to an effective
+`local_only` boundary without deleting or rebuilding local documents. That
+default blocks future GNO-controlled network transfer while local indexing,
+search, retrieval, trace inspection, and local-file export remain usable.
+Choose a less restrictive policy only after reviewing the destination and the
+exact current revision:
+
+```bash
+gno collection policy get work-docs
+gno collection policy set work-docs remote --confirm-relaxation <revision>
+```
+
+Tightening policy does not retract an artifact already uploaded or copied.
+Delete the remote gno.sh space (or request remote takedown), then regenerate
+and review any replacement artifact. Never assume republishing, deleting a
+local export, or changing local policy removed independently retained remote
+copies.
+
 ## Visibility and agent access
 
 Human-reader access modes:
@@ -64,6 +91,10 @@ gno publish export work-docs \
 GNO encrypts the payload locally. The exported wrapper contains ciphertext
 metadata and an opaque share token, not plaintext notes or evidence. Losing the
 passphrase means losing access; gno.sh cannot recover it.
+
+The passphrase and plaintext never become server inputs. Readers decrypt in
+their browser; gno.sh stores and serves ciphertext only. No plan, support path,
+agent route, or administrator action enables server-side recovery.
 
 Avoid passing a real passphrase directly in shared shell history. Use a private
 interactive environment and follow your organization’s secret-handling rules.

@@ -874,6 +874,33 @@ describe("store migrations", () => {
         { rel_path: "inactive.md", fts_mirror_hash: null },
         { rel_path: "title.md", fts_mirror_hash: null },
       ]);
+      expect(
+        db
+          .query<
+            {
+              egress_policy: string;
+              egress_policy_revision: number;
+              egress_policy_source: string;
+            },
+            []
+          >(
+            `SELECT egress_policy, egress_policy_source, egress_policy_revision
+             FROM collections WHERE name = 'notes'`
+          )
+          .get()
+      ).toEqual({
+        egress_policy: "local_only",
+        egress_policy_revision: 0,
+        egress_policy_source: "legacy_default",
+      });
+      expect(
+        db
+          .query<{ filepath: string }, []>(
+            `SELECT filepath FROM documents_fts
+             WHERE documents_fts MATCH 'current'`
+          )
+          .all()
+      ).toEqual([{ filepath: "current.md" }]);
     } finally {
       db.close();
     }

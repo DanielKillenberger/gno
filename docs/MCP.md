@@ -147,6 +147,24 @@ Collection policy never replaces bearer authentication or the MCP write flag.
 Trace export resolves exact trace lineage and checks policy before creating or
 reusing an export receipt.
 
+Trace management intentionally keeps three independent decisions:
+
+| Operation                      | Bearer/transport auth | MCP write opt-in | Collection destination policy   |
+| ------------------------------ | --------------------- | ---------------- | ------------------------------- |
+| Local list/show                | Transport-dependent   | No               | No network export               |
+| Local label/delete/purge       | Transport-dependent   | Yes on MCP       | No network export               |
+| Loopback aggregate export      | Loopback admission    | Yes on MCP       | Local-file/process allowed      |
+| LAN or remote aggregate export | Required              | Yes              | `lan` or `remote` as applicable |
+
+An authenticated caller with writes disabled receives `WRITE_DISABLED` before
+trace lookup or policy evaluation. A write-enabled caller whose destination is
+outside the current trace lineage policy receives content-free
+`EGRESS_DENIED`; no export manifest is created or reused. Loopback REST
+inspection, explicit label/delete, and full purge remain local controls and do
+not grant permission for a later LAN or remote export. Missing IDs and denials
+never echo trace IDs, queries, goals, evidence references, local paths, target
+URLs, or receipt content.
+
 For ambiguous terms, pass `intent` instead of stuffing extra words into `query`:
 
 ```json
