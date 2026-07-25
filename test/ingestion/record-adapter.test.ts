@@ -12,6 +12,7 @@ import {
   recordKeyFor,
   runRecordAdapter,
 } from "../../src/ingestion/record-adapter";
+import { safeFailure } from "../../src/ingestion/record-adapter-canonical";
 
 const limits = {
   maxSourceBytes: 1_024,
@@ -146,6 +147,46 @@ describe("streaming record adapter contract", () => {
     expect(recordKeyFor("adapter/test", "item-1")).not.toBe(
       recordKeyFor("adapter/other", "item-1")
     );
+  });
+
+  test("bounds and canonicalizes custom adapter identity before execution", async () => {
+    let started = false;
+    const custom = adapter([], {
+      id: " adapter/custom ",
+      version: " 1.2.3 ",
+      records: async function* () {
+        started = true;
+        yield complete;
+      },
+    });
+    const result = await runRecordAdapter(custom, input());
+
+    expect(result.adapterId).toBe("adapter/custom");
+    expect(result.adapterVersion).toBe("1.2.3");
+    expect(started).toBe(true);
+
+    for (const invalid of [
+      adapter([], { id: "x".repeat(129) }),
+      adapter([], { version: "x".repeat(65) }),
+      adapter([], { id: "adapter/\u001bunsafe" }),
+    ]) {
+      started = false;
+      const guarded = {
+        ...invalid,
+        records: async function* () {
+          started = true;
+          yield complete;
+        },
+      };
+      let message = "";
+      try {
+        await runRecordAdapter(guarded, input());
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain("invalid record adapter");
+      expect(started).toBe(false);
+    }
   });
 
   test("isolates an oversized record while retaining valid siblings", async () => {
@@ -348,10 +389,10 @@ describe("streaming record adapter contract", () => {
     );
 
     expect(result.stoppedByCap).toBe(true);
-    expect(result.failures).toHaveLength(4);
+    expect(result.failures).toHaveLength(2);
     expect(
       result.failures.filter((failure) => failure.code === "RECORD_TOO_LARGE")
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       result.failures.some((failure) => failure.code === "FAILURE_LIMIT")
     ).toBe(true);
@@ -498,5 +539,165 @@ describe("streaming record adapter contract", () => {
     expect(
       result.failures.some((failure) => failure.code === "INVALID_SOURCE_HASH")
     ).toBe(true);
+  });
+
+  test("rejects metadata that cannot satisfy every output contract", async () => {
+    const result = await runRecordAdapter(
+      adapter([
+        {
+          type: "record",
+          record: {
+            stableId: "oversized-metadata",
+            sourceLocator: "line:1",
+            markdown: "bounded body",
+            metadata: {
+              participants: Array.from(
+                { length: 257 },
+                (_, index) => `person-${index}`
+              ),
+            },
+          },
+        },
+        complete,
+      ]),
+      input({ limits: { ...limits, maxMetadataChars: 100_000 } })
+    );
+
+    expect(result.records).toEqual([]);
+    expect(result.authoritative).toBe(false);
+    expect(result.failures.map(({ code }) => code)).toContain(
+      "RECORD_TOO_LARGE"
+    );
+  });
+
+  test("rejects custom adapter enum and numeric values outside the output schemas", async () => {
+    const result = await runRecordAdapter(
+      adapter([
+        {
+          type: "record",
+          record: {
+            stableId: "bad-disposition",
+            sourceLocator: "line:1",
+            markdown: "bounded body",
+            metadata: {
+              attachments: [
+                {
+                  name: "attachment.txt",
+                  disposition: "download" as never,
+                },
+              ],
+            },
+          },
+        },
+        {
+          type: "record",
+          record: {
+            stableId: "bad-anchor-kind",
+            sourceLocator: "line:2",
+            markdown: "bounded body",
+            anchors: [{ kind: "offset" as never, value: "2" }],
+          },
+        },
+        {
+          type: "record",
+          record: {
+            stableId: "unsafe-byte-count",
+            sourceLocator: "line:3",
+            markdown: "bounded body",
+            metadata: {
+              attachments: [
+                {
+                  name: "attachment.bin",
+                  bytes: Number.MAX_SAFE_INTEGER + 1,
+                },
+              ],
+            },
+          },
+        },
+        complete,
+      ]),
+      input({ limits: { ...limits, maxMetadataChars: 100_000 } })
+    );
+
+    expect(result.records).toEqual([]);
+    expect(
+      result.failures.filter(({ code }) => code === "RECORD_TOO_LARGE")
+    ).toHaveLength(3);
+  });
+
+  test("removes every terminal control from accepted metadata", async () => {
+    const result = await runRecordAdapter(
+      adapter([
+        {
+          type: "record",
+          record: {
+            stableId: "controlled-metadata",
+            sourceLocator: "line:1",
+            markdown: "bounded body",
+            title: "A\u0001B\u0002C",
+            metadata: {
+              author: "D\u0003E\u0004F",
+              dateFields: { created: "G\u0005H\u0006I" },
+            },
+          },
+        },
+        complete,
+      ]),
+      input()
+    );
+
+    expect(result.records[0]?.title).toBe("ABC");
+    expect(result.records[0]?.metadata?.author).toBe("DEF");
+    expect(result.records[0]?.metadata?.dateFields).toEqual({ created: "GHI" });
+  });
+
+  test("removes every terminal control from safe failures", () => {
+    const failure = safeFailure(
+      input(),
+      "ADAPTER_FAILURE",
+      "first\u001bsecond\u0007third\u007flast",
+      false
+    );
+
+    expect(failure.message).toBe("first second third last");
+    let containsTerminalControl = false;
+    for (const character of failure.message) {
+      const codePoint = character.codePointAt(0) ?? 0;
+      if (codePoint <= 31 || codePoint === 127) {
+        containsTerminalControl = true;
+        break;
+      }
+    }
+    expect(containsTerminalControl).toBe(false);
+  });
+
+  test("bounds a stalled adapter with the central deadline", async () => {
+    let observedAbort = false;
+    const stalled = adapter([], {
+      records: async function* (adapterInput) {
+        await new Promise<void>((resolve) => {
+          adapterInput.signal?.addEventListener(
+            "abort",
+            () => {
+              observedAbort = true;
+              resolve();
+            },
+            { once: true }
+          );
+        });
+        yield complete;
+      },
+    });
+    const started = performance.now();
+    const result = await runRecordAdapter(
+      stalled,
+      input({ limits: { ...limits, timeoutMs: 20 } })
+    );
+
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(result.authoritative).toBe(false);
+    expect(result.stoppedByCap).toBe(true);
+    expect(result.failures.map(({ code }) => code)).toContain("TIMEOUT");
+    expect(observedAbort).toBe(true);
   });
 });

@@ -1067,10 +1067,13 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           collection, rel_path, source_hash, source_mime, source_ext,
           source_size, source_mtime, source_ctime, docid, uri, title, mirror_hash,
           converter_id, converter_version, language_hint, content_type, categories,
-          content_type_source, author, frontmatter_date, date_fields, content_type_rules_fingerprint,
+          content_type_source, author, frontmatter_date, date_fields,
+          record_key, record_source_path, record_source_locator, record_metadata, record_anchors,
+          record_adapter_fingerprint,
+          content_type_rules_fingerprint,
           active, indexed_at, last_error_code, last_error_message, last_error_at,
           ingest_version, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), ?, ?, ?, ?, datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(collection, rel_path) DO UPDATE SET
           source_hash = excluded.source_hash,
           source_mime = excluded.source_mime,
@@ -1091,6 +1094,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           author = excluded.author,
           frontmatter_date = excluded.frontmatter_date,
           date_fields = excluded.date_fields,
+          record_key = excluded.record_key,
+          record_source_path = excluded.record_source_path,
+          record_source_locator = excluded.record_source_locator,
+          record_metadata = excluded.record_metadata,
+          record_anchors = excluded.record_anchors,
+          record_adapter_fingerprint = excluded.record_adapter_fingerprint,
           content_type_rules_fingerprint = excluded.content_type_rules_fingerprint,
           active = 1,
           indexed_at = datetime('now'),
@@ -1122,6 +1131,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             doc.author ?? null,
             doc.frontmatterDate ?? null,
             doc.dateFields ? JSON.stringify(doc.dateFields) : null,
+            doc.recordKey ?? null,
+            doc.recordSourcePath ?? null,
+            doc.recordSourceLocator ?? null,
+            doc.recordMetadata ? JSON.stringify(doc.recordMetadata) : null,
+            doc.recordAnchors ? JSON.stringify(doc.recordAnchors) : null,
+            doc.recordAdapterFingerprint ?? null,
             doc.contentTypeRulesFingerprint ?? null,
             doc.lastErrorCode ?? null,
             doc.lastErrorMessage ?? null,
@@ -1361,6 +1376,32 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       return err(
         "QUERY_FAILED",
         cause instanceof Error ? cause.message : "Failed to list documents",
+        cause
+      );
+    }
+  }
+
+  async listRecordDocuments(
+    collection: string,
+    sourcePath: string
+  ): Promise<StoreResult<DocumentRow[]>> {
+    try {
+      const db = this.ensureOpen();
+      const rows = db
+        .query<DbDocumentRow, [string, string]>(
+          `SELECT * FROM documents
+           WHERE collection = ? AND record_source_path = ?
+           ORDER BY rel_path ASC, id ASC`
+        )
+        .all(collection, sourcePath);
+
+      return ok(rows.map(mapDocumentRow));
+    } catch (cause) {
+      return err(
+        "QUERY_FAILED",
+        cause instanceof Error
+          ? cause.message
+          : "Failed to list record documents",
         cause
       );
     }
@@ -2162,7 +2203,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             ${options.collection ? "AND collection = ?" : ""}
             ${
               options.relPathPrefix !== undefined
-                ? "AND (rel_path = ? OR substr(rel_path, 1, length(?) + 1) = ? || '/')"
+                ? "AND (COALESCE(NULLIF(record_source_path, ''), rel_path) = ? OR substr(COALESCE(NULLIF(record_source_path, ''), rel_path), 1, length(?) + 1) = ? || '/')"
                 : ""
             }
           )
@@ -2187,7 +2228,15 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           d.source_hash,
           d.content_type,
           d.content_type_source,
-          d.categories
+          d.categories,
+          d.converter_id,
+          d.converter_version,
+          d.record_key,
+          d.record_source_path,
+          d.record_source_locator,
+          d.record_metadata,
+          d.record_anchors,
+          d.record_adapter_fingerprint
         FROM fts_matches fm
         JOIN documents d ON d.id = fm.rowid AND d.active = 1
         WHERE 1 = 1
@@ -2215,6 +2264,14 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         content_type: string | null;
         content_type_source: string | null;
         categories: string | null;
+        converter_id: string | null;
+        converter_version: string | null;
+        record_key: string | null;
+        record_source_path: string | null;
+        record_source_locator: string | null;
+        record_metadata: string | null;
+        record_anchors: string | null;
+        record_adapter_fingerprint: string | null;
       }
 
       const queryParams = [
@@ -2254,6 +2311,15 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           contentType: r.content_type ?? undefined,
           contentTypeSource: r.content_type_source ?? undefined,
           categories: parseCategoriesJson(r.categories) ?? undefined,
+          converterId: r.converter_id ?? undefined,
+          converterVersion: r.converter_version ?? undefined,
+          recordKey: r.record_key ?? undefined,
+          recordSourcePath: r.record_source_path ?? undefined,
+          recordSourceLocator: r.record_source_locator ?? undefined,
+          recordMetadata:
+            parseRecordMetadataJson(r.record_metadata) ?? undefined,
+          recordAnchors: parseRecordAnchorsJson(r.record_anchors) ?? undefined,
+          recordAdapterFingerprint: r.record_adapter_fingerprint ?? undefined,
         }))
       );
     } catch (cause) {
@@ -5098,6 +5164,12 @@ interface DbDocumentRow {
   author: string | null;
   frontmatter_date: string | null;
   date_fields: string | null;
+  record_key: string | null;
+  record_source_path: string | null;
+  record_source_locator: string | null;
+  record_metadata: string | null;
+  record_anchors: string | null;
+  record_adapter_fingerprint: string | null;
   content_type_rules_fingerprint: string | null;
   indexed_at: string | null;
   active: number;
@@ -5185,6 +5257,34 @@ function parseCategoriesJson(raw: string | null): string[] | null {
   return null;
 }
 
+function parseRecordMetadataJson(
+  raw: string | null
+): DocumentRow["recordMetadata"] {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as NonNullable<DocumentRow["recordMetadata"]>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseRecordAnchorsJson(
+  raw: string | null
+): DocumentRow["recordAnchors"] {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? (parsed as NonNullable<DocumentRow["recordAnchors"]>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function mapDocumentRow(row: DbDocumentRow): DocumentRow {
   const categories = parseCategoriesJson(row.categories);
   let dateFields: Record<string, string> | null = null;
@@ -5230,6 +5330,12 @@ function mapDocumentRow(row: DbDocumentRow): DocumentRow {
     author: row.author,
     frontmatterDate: row.frontmatter_date,
     dateFields,
+    recordKey: row.record_key,
+    recordSourcePath: row.record_source_path,
+    recordSourceLocator: row.record_source_locator,
+    recordMetadata: parseRecordMetadataJson(row.record_metadata),
+    recordAnchors: parseRecordAnchorsJson(row.record_anchors),
+    recordAdapterFingerprint: row.record_adapter_fingerprint,
     indexedAt: row.indexed_at,
     active: row.active === 1,
     ingestVersion: row.ingest_version,

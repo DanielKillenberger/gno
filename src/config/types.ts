@@ -10,6 +10,7 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 import { URI_PREFIX } from "../app/constants";
+import { JsonlFieldMappingSchema } from "../converters/adapters/jsonl/config";
 import { RetrievalTraceConfigSchema } from "./retrieval-traces";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +112,21 @@ export const CollectionSchema = z.object({
       expand: z.string().min(1).optional(),
       gen: z.string().min(1).optional(),
     })
+    .optional(),
+
+  /** Optional declarative overrides for ambiguous export formats. */
+  recordAdapters: z
+    .object({
+      jsonl: z
+        .object({ fieldMapping: JsonlFieldMappingSchema.optional() })
+        .strict()
+        .optional(),
+      transcript: z
+        .object({ format: z.enum(["json", "srt", "text", "vtt"]) })
+        .strict()
+        .optional(),
+    })
+    .strict()
     .optional(),
 });
 

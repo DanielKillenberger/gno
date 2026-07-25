@@ -7,6 +7,7 @@
 
 import type { NormalizedContentTypeRule } from "../config";
 import type { Collection } from "../config/types";
+import type { RecordAdapterFailure } from "../converters/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Walker Types
@@ -165,6 +166,26 @@ export interface FileSyncResult {
   contentTypeSource?: ContentTypeSource;
   errorCode?: string;
   errorMessage?: string;
+  recordImport?: {
+    adapterId: string;
+    adapterVersion: string;
+    adapterFingerprint: string;
+    snapshotState: "complete" | "partial";
+    authoritative: boolean;
+    stoppedByCap: boolean;
+    sourceBytesRead: number;
+    records: {
+      accepted: number;
+      added: number;
+      updated: number;
+      reactivated: number;
+      unchanged: number;
+      deactivated: number;
+      preserved: number;
+      failed: number;
+    };
+    failures: RecordAdapterFailure[];
+  };
 }
 
 /** Collection sync summary */

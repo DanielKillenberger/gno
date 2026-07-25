@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { buildUri, deriveDocid, parseUri } from "../app/constants";
 import { isValidIndexName } from "../app/index-name";
+import { RECORD_METADATA_LIMITS } from "../converters/types";
 import { contextCapsuleIndexSnapshotSchema } from "./context-capsule-index-schema";
 import { contextCapsuleRetrievalSchema } from "./context-capsule-retrieval-schema";
 import {
@@ -232,6 +233,80 @@ const guidanceSchema = z
   })
   .strict();
 
+const recordAnchorSchema = z
+  .object({
+    kind: z.enum(["line", "cue", "timestamp", "message", "event", "record"]),
+    value: nonEmptyTextSchema.max(RECORD_METADATA_LIMITS.maxAnchorChars),
+    endValue: nonEmptyTextSchema
+      .max(RECORD_METADATA_LIMITS.maxAnchorChars)
+      .optional(),
+  })
+  .strict();
+
+const recordAttachmentSchema = z
+  .object({
+    name: nonEmptyTextSchema.max(RECORD_METADATA_LIMITS.maxAttachmentNameChars),
+    mime: nonEmptyTextSchema
+      .max(RECORD_METADATA_LIMITS.maxAttachmentMimeChars)
+      .optional(),
+    bytes: nonNegativeIntegerSchema.optional(),
+    disposition: z.enum(["inline", "attachment"]).optional(),
+  })
+  .strict();
+
+const recordEvidenceMetadataSchema = z
+  .object({
+    recordKey: sha256Schema,
+    sourceLocator: nonEmptyTextSchema.max(
+      RECORD_METADATA_LIMITS.maxAnchorChars
+    ),
+    anchors: z.array(recordAnchorSchema).max(RECORD_METADATA_LIMITS.maxItems),
+    adapter: z
+      .object({
+        id: nonEmptyTextSchema.max(128),
+        version: nonEmptyTextSchema.max(64),
+        fingerprint: sha256Schema,
+      })
+      .strict(),
+    author: textSchema.max(RECORD_METADATA_LIMITS.maxPersonChars).optional(),
+    participants: z
+      .array(nonEmptyTextSchema.max(RECORD_METADATA_LIMITS.maxPersonChars))
+      .max(RECORD_METADATA_LIMITS.maxItems)
+      .optional(),
+    categories: z
+      .array(nonEmptyTextSchema.max(RECORD_METADATA_LIMITS.maxCategoryChars))
+      .max(RECORD_METADATA_LIMITS.maxItems)
+      .optional(),
+    dateFields: z
+      .record(
+        z.string().max(RECORD_METADATA_LIMITS.maxDateFieldKeyChars),
+        nonEmptyTextSchema.max(RECORD_METADATA_LIMITS.maxDateFieldValueChars)
+      )
+      .superRefine((value, context) => {
+        if (Object.keys(value).length > RECORD_METADATA_LIMITS.maxItems) {
+          context.addIssue({
+            code: "custom",
+            message: "too many record date fields",
+          });
+        }
+      })
+      .optional(),
+    threadId: textSchema
+      .max(RECORD_METADATA_LIMITS.maxIdentifierChars)
+      .optional(),
+    eventId: textSchema
+      .max(RECORD_METADATA_LIMITS.maxIdentifierChars)
+      .optional(),
+    sessionId: textSchema
+      .max(RECORD_METADATA_LIMITS.maxIdentifierChars)
+      .optional(),
+    attachments: z
+      .array(recordAttachmentSchema)
+      .max(RECORD_METADATA_LIMITS.maxItems)
+      .optional(),
+  })
+  .strict();
+
 export const contextCapsuleEvidenceSchema = z
   .object({
     evidenceId: sha256Schema,
@@ -270,6 +345,7 @@ export const contextCapsuleEvidenceSchema = z
       "unclassified",
       "unavailable",
     ]),
+    record: recordEvidenceMetadataSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {

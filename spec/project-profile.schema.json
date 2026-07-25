@@ -186,6 +186,72 @@
         "modelPreset": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "recordAdapters": {
+          "$ref": "#/definitions/recordAdapters"
+        }
+      }
+    },
+    "jsonPointer": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^(?!.*(?:^|/)(?:__proto__|constructor|prototype)(?:/|$))(?:/(?:[^~/]|~[01])*){0,32}$"
+    },
+    "fieldSelector": {
+      "oneOf": [
+        { "$ref": "#/definitions/jsonPointer" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "#/definitions/jsonPointer" }
+        }
+      ]
+    },
+    "jsonlFieldMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/fieldSelector" },
+        "body": { "$ref": "#/definitions/fieldSelector" },
+        "title": { "$ref": "#/definitions/fieldSelector" },
+        "author": { "$ref": "#/definitions/fieldSelector" },
+        "participants": { "$ref": "#/definitions/fieldSelector" },
+        "categories": { "$ref": "#/definitions/fieldSelector" },
+        "sessionId": { "$ref": "#/definitions/fieldSelector" },
+        "threadId": { "$ref": "#/definitions/fieldSelector" },
+        "dateFields": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/fieldSelector"
+          }
+        }
+      }
+    },
+    "recordAdapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jsonl": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fieldMapping": {
+              "$ref": "#/definitions/jsonlFieldMapping"
+            }
+          }
+        },
+        "transcript": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format"],
+          "properties": {
+            "format": { "enum": ["json", "srt", "text", "vtt"] }
+          }
         }
       }
     },

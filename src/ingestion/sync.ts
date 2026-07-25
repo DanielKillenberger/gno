@@ -5,10 +5,10 @@
  * @module src/ingestion/sync
  */
 
-// node:fs/promises for stat (no Bun equivalent for file stats)
-import { stat } from "node:fs/promises";
+// node:fs/promises for realpath/stat (no Bun equivalent for canonical paths or file stats)
+import { realpath, stat } from "node:fs/promises";
 // node:path for join (no Bun path utils)
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 import type { NormalizedContentTypeRule } from "../config";
 import type { Collection } from "../config/types";
@@ -16,6 +16,7 @@ import type {
   ChunkInput,
   DocEdgeInput,
   DocLinkInput,
+  DocumentInput,
   DocumentRow,
   IngestErrorInput,
   StorePort,
@@ -37,12 +38,14 @@ import {
   fingerprintContentTypeMetadataRules,
   resolveContentTypeRule,
 } from "../config";
+import { createJsonlAdapter } from "../converters/adapters/jsonl/adapter";
+import { createTranscriptAdapter } from "../converters/adapters/transcript/adapter";
 import { getDefaultMimeDetector, type MimeDetector } from "../converters/mime";
 import {
   type ConversionPipeline,
   getDefaultPipeline,
 } from "../converters/pipeline";
-import { DEFAULT_LIMITS } from "../converters/types";
+import { DEFAULT_LIMITS, type RecordAdapter } from "../converters/types";
 import {
   diffDocumentStructure,
   extractDocumentStructure,
@@ -64,6 +67,7 @@ import {
   stripFrontmatter,
 } from "./frontmatter";
 import { buildLineOffsets } from "./position";
+import { processRecordContainer } from "./record-container";
 import { getExcludedRanges } from "./strip";
 import { collectionToWalkConfig, DEFAULT_CHUNK_PARAMS } from "./types";
 import { defaultWalker } from "./walker";
@@ -542,6 +546,44 @@ function mustOk<T>(
   return result.value;
 }
 
+const preserveDocumentWithError = (
+  existing: DocumentRow,
+  code: string,
+  message: string
+): DocumentInput => ({
+  collection: existing.collection,
+  relPath: existing.relPath,
+  sourceHash: existing.sourceHash,
+  sourceMime: existing.sourceMime,
+  sourceExt: existing.sourceExt,
+  sourceSize: existing.sourceSize,
+  sourceMtime: existing.sourceMtime,
+  sourceCtime: existing.sourceCtime ?? existing.sourceMtime,
+  title: existing.title ?? undefined,
+  mirrorHash: existing.mirrorHash ?? undefined,
+  converterId: existing.converterId ?? undefined,
+  converterVersion: existing.converterVersion ?? undefined,
+  languageHint: existing.languageHint ?? undefined,
+  contentType: existing.contentType ?? undefined,
+  contentTypeSource: existing.contentTypeSource ?? undefined,
+  categories: existing.categories ?? undefined,
+  author: existing.author ?? undefined,
+  frontmatterDate: existing.frontmatterDate ?? undefined,
+  dateFields: existing.dateFields ?? undefined,
+  recordKey: existing.recordKey ?? undefined,
+  recordSourcePath: existing.recordSourcePath ?? undefined,
+  recordSourceLocator: existing.recordSourceLocator ?? undefined,
+  recordMetadata: existing.recordMetadata ?? undefined,
+  recordAnchors: existing.recordAnchors ?? undefined,
+  recordAdapterFingerprint: existing.recordAdapterFingerprint ?? undefined,
+  lastErrorCode: code,
+  lastErrorMessage: message,
+  ingestVersion: existing.ingestVersion ?? undefined,
+  contentTypeRulesFingerprint:
+    existing.contentTypeRulesFingerprint ?? undefined,
+  changeJournal: false,
+});
+
 /**
  * Simple semaphore for bounded concurrency.
  */
@@ -592,6 +634,30 @@ export class SyncService {
     this.chunker = chunker ?? defaultChunker;
     this.mimeDetector = mimeDetector ?? getDefaultMimeDetector();
     this.pipeline = pipeline ?? getDefaultPipeline();
+  }
+
+  private async selectRecordAdapter(
+    collection: Collection,
+    mime: string,
+    ext: string
+  ): Promise<RecordAdapter | undefined> {
+    const transcriptConfig = collection.recordAdapters?.transcript;
+    if (transcriptConfig) {
+      const adapter = createTranscriptAdapter(transcriptConfig);
+      if (adapter.canHandle(mime, ext)) return adapter;
+    }
+    const jsonlConfig = collection.recordAdapters?.jsonl;
+    if (jsonlConfig) {
+      const adapter = createJsonlAdapter(jsonlConfig.fieldMapping);
+      if (adapter.canHandle(mime, ext)) return adapter;
+    }
+    const selectDefault = (
+      this.pipeline as ConversionPipeline & {
+        selectRecordAdapter?: ConversionPipeline["selectRecordAdapter"];
+      }
+    ).selectRecordAdapter;
+    if (!selectDefault) return undefined;
+    return selectDefault.call(this.pipeline, mime, ext);
   }
 
   /**
@@ -661,17 +727,57 @@ export class SyncService {
         };
       }
 
-      // 2. Read file bytes
+      const extensionMime = this.mimeDetector.detect(
+        entry.relPath,
+        new Uint8Array()
+      );
+      const recordAdapter = await this.selectRecordAdapter(
+        collection,
+        extensionMime.mime,
+        extensionMime.ext
+      );
+      const contentTypeRules = options.contentTypeRules ?? [];
+      const contentTypeRulesFingerprint =
+        options.contentTypeRulesFingerprint ??
+        fingerprintContentTypeMetadataRules(contentTypeRules);
+      if (recordAdapter) {
+        return await processRecordContainer({
+          adapter: recordAdapter,
+          chunker: this.chunker,
+          collection,
+          contentTypeRules,
+          contentTypeRulesFingerprint,
+          entry,
+          ext: extensionMime.ext,
+          extractMetadata: extractDocumentMetadata,
+          ingestVersion: INGEST_VERSION,
+          mime: extensionMime.mime,
+          options,
+          sourceCtime,
+          sourceMtime,
+          sourceSize,
+          store,
+        });
+      }
+
+      const sniffBytes = new Uint8Array(
+        await Bun.file(entry.absPath).slice(0, 512).arrayBuffer()
+      );
+      const mime = this.mimeDetector.detect(entry.relPath, sniffBytes);
+
+      const priorRecordDocuments = mustOk(
+        await store.listRecordDocuments(collection.name, entry.relPath),
+        "listRecordDocuments",
+        { collection: collection.name, relPath: entry.relPath }
+      );
+
+      // 2. Read byte-oriented files only after record-adapter selection.
       const bytes = await Bun.file(entry.absPath).bytes();
 
       // 3. Compute sourceHash
       const hasher = new Bun.CryptoHasher("sha256");
       hasher.update(bytes);
       const sourceHash = hasher.digest("hex");
-      const contentTypeRules = options.contentTypeRules ?? [];
-      const contentTypeRulesFingerprint =
-        options.contentTypeRulesFingerprint ??
-        fingerprintContentTypeMetadataRules(contentTypeRules);
 
       // 4. Check existing doc for skip/repair decision
       const existingResult = await store.getDocument(
@@ -686,11 +792,19 @@ export class SyncService {
       );
 
       if (decision.kind === "skip") {
+        const activeRecordPaths = priorRecordDocuments
+          .filter((document) => document.active)
+          .map((document) => document.relPath);
+        if (activeRecordPaths.length > 0) {
+          mustOk(
+            await store.markInactive(collection.name, activeRecordPaths),
+            "markInactive",
+            { collection: collection.name, relPath: entry.relPath }
+          );
+          return { relPath: entry.relPath, status: "updated" };
+        }
         return { relPath: entry.relPath, status: "unchanged" };
       }
-
-      // 5. Detect MIME (bytes is already Uint8Array from Bun.file().bytes())
-      const mime = this.mimeDetector.detect(entry.absPath, bytes);
 
       // 6. Convert via pipeline
       const convertResult = await this.pipeline.convert({
@@ -938,7 +1052,19 @@ export class SyncService {
           linkCount: linkInputs.length,
         });
 
-        const status = existing ? "updated" : "added";
+        const activeRecordPaths = priorRecordDocuments
+          .filter((document) => document.active)
+          .map((document) => document.relPath);
+        if (activeRecordPaths.length > 0) {
+          mustOk(
+            await store.markInactive(collection.name, activeRecordPaths),
+            "markInactive",
+            { collection: collection.name, relPath: entry.relPath }
+          );
+        }
+
+        const status =
+          existing || priorRecordDocuments.length > 0 ? "updated" : "added";
         return {
           relPath: entry.relPath,
           status,
@@ -982,22 +1108,10 @@ export class SyncService {
           collection.name,
           entry.relPath
         );
-        if (existingResult.ok && existingResult.value) {
-          await store.upsertDocument({
-            collection: collection.name,
-            relPath: entry.relPath,
-            sourceHash: existingResult.value.sourceHash,
-            sourceMime: existingResult.value.sourceMime,
-            sourceExt: existingResult.value.sourceExt,
-            sourceSize: existingResult.value.sourceSize,
-            sourceMtime: existingResult.value.sourceMtime,
-            sourceCtime:
-              existingResult.value.sourceCtime ??
-              existingResult.value.sourceMtime,
-            lastErrorCode: code,
-            lastErrorMessage: message,
-            changeJournal: false,
-          });
+        if (existingResult.ok && existingResult.value?.active) {
+          await store.upsertDocument(
+            preserveDocumentWithError(existingResult.value, code, message)
+          );
         }
       } catch {
         // Best-effort error recording
@@ -1065,12 +1179,33 @@ export class SyncService {
     let markedInactive = 0;
 
     for (const relPath of relPaths) {
+      const recordDocumentsResult = await store.listRecordDocuments(
+        collection.name,
+        relPath
+      );
+      if (!recordDocumentsResult.ok) {
+        results.push({
+          relPath,
+          status: "error",
+          errorCode: recordDocumentsResult.error.code,
+          errorMessage: recordDocumentsResult.error.message,
+        });
+        continue;
+      }
+      const recordDocuments = recordDocumentsResult.value;
       const existingResult = await store.getDocument(collection.name, relPath);
       const existingDoc = existingResult.ok ? existingResult.value : null;
       if (existingDoc) {
         await this.collectProjectionSourceIds(
           store,
           existingDoc.id,
+          projectionSourceIds
+        );
+      }
+      for (const recordDocument of recordDocuments) {
+        await this.collectProjectionSourceIds(
+          store,
+          recordDocument.id,
           projectionSourceIds
         );
       }
@@ -1094,10 +1229,17 @@ export class SyncService {
           });
           continue;
         }
-        if (existingDoc?.active) {
-          const inactiveResult = await store.markInactive(collection.name, [
-            relPath,
-          ]);
+        const activePaths = [
+          ...(existingDoc?.active ? [relPath] : []),
+          ...recordDocuments
+            .filter((document) => document.active)
+            .map((document) => document.relPath),
+        ];
+        if (activePaths.length > 0) {
+          const inactiveResult = await store.markInactive(
+            collection.name,
+            activePaths
+          );
           if (!inactiveResult.ok) {
             results.push({
               relPath,
@@ -1111,7 +1253,7 @@ export class SyncService {
           results.push({
             relPath,
             status: "updated",
-            docid: existingDoc.docid,
+            docid: existingDoc?.docid,
           });
           continue;
         }
@@ -1133,8 +1275,39 @@ export class SyncService {
         continue;
       }
 
+      let canonicalSourcePath: string;
+      try {
+        const [collectionRoot, sourcePath] = await Promise.all([
+          realpath(collection.path),
+          realpath(absPath),
+        ]);
+        const sourceRelative = relative(collectionRoot, sourcePath);
+        if (
+          sourceRelative === ".." ||
+          sourceRelative.startsWith(`..${sep}`) ||
+          isAbsolute(sourceRelative)
+        ) {
+          results.push({
+            relPath,
+            status: "error",
+            errorCode: "PATH_OUTSIDE_COLLECTION",
+            errorMessage: "Source path resolves outside the collection root.",
+          });
+          continue;
+        }
+        canonicalSourcePath = sourcePath;
+      } catch {
+        results.push({
+          relPath,
+          status: "error",
+          errorCode: "PATH_UNRESOLVED",
+          errorMessage: "Source path could not be resolved safely.",
+        });
+        continue;
+      }
+
       const entry: WalkEntry = {
-        absPath,
+        absPath: canonicalSourcePath,
         relPath,
         size: stats.size,
         mtime: stats.mtime.toISOString(),
@@ -1156,6 +1329,21 @@ export class SyncService {
           currentDoc.id,
           projectionSourceIds
         );
+      }
+      const currentDocuments = await store.listRecordDocuments(
+        collection.name,
+        relPath
+      );
+      if (currentDocuments.ok) {
+        for (const recordDocument of currentDocuments.value) {
+          if (recordDocument.active) {
+            await this.collectProjectionSourceIds(
+              store,
+              recordDocument.id,
+              projectionSourceIds
+            );
+          }
+        }
       }
     }
 
@@ -1600,7 +1788,11 @@ export class SyncService {
     const existingDocsResult = await store.listDocuments(collection.name);
     if (existingDocsResult.ok) {
       const missingPaths = existingDocsResult.value
-        .filter((d) => d.active && !seenPaths.has(d.relPath))
+        .filter(
+          (document) =>
+            document.active &&
+            !seenPaths.has(document.recordSourcePath ?? document.relPath)
+        )
         .map((d) => d.relPath);
 
       if (missingPaths.length > 0) {

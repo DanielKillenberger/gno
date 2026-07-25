@@ -97,6 +97,44 @@ describe("project profile schema", () => {
     );
   });
 
+  test("accepts closed declarative export-adapter configuration with schema parity", async () => {
+    const profile = {
+      schemaVersion: "1.0",
+      collection: {
+        name: "exports",
+        recordAdapters: {
+          jsonl: {
+            fieldMapping: {
+              id: "/id",
+              body: ["/text", "/content"],
+              dateFields: { created: "/created_at" },
+            },
+          },
+          transcript: { format: "text" },
+        },
+      },
+    };
+    expect(ProjectProfileSchema.safeParse(profile).success).toBe(true);
+    expect(validateJsonSchema(profile)).toBe(true);
+
+    const root = await makeRoot("record-adapters");
+    const compiled = await compile(Bun.YAML.stringify(profile), root);
+    expect(compiled.ok).toBe(true);
+    expect(
+      JSON.stringify(
+        compiled.ok
+          ? compiled.value.desiredState.collection.recordAdapters
+          : undefined
+      )
+    ).toBe(JSON.stringify(profile.collection.recordAdapters));
+
+    const unsafe = structuredClone(profile);
+    unsafe.collection.recordAdapters.jsonl.fieldMapping.id =
+      "/__proto__/polluted";
+    expect(ProjectProfileSchema.safeParse(unsafe).success).toBe(false);
+    expect(validateJsonSchema(unsafe)).toBe(false);
+  });
+
   test.each([
     ["/tmp/notes", "POSIX absolute"],
     ["\\rooted", "Windows rooted"],

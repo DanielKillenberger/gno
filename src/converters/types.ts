@@ -96,6 +96,8 @@ export interface Converter {
 
 /** Declarative limits applied to every multi-record container adapter. */
 export interface RecordAdapterLimits {
+  /** End-to-end adapter deadline; production callers always set it. */
+  timeoutMs?: number;
   /** Maximum bytes an adapter may read from the container source. */
   maxSourceBytes: number;
   /** Maximum canonical characters accepted for one logical record. */
@@ -117,7 +119,8 @@ export interface RecordAdapterInput {
   collection: string;
   mime: string;
   ext: string;
-  open: () => AsyncIterable<Uint8Array>;
+  open: (signal?: AbortSignal) => AsyncIterable<Uint8Array>;
+  signal?: AbortSignal;
   limits: RecordAdapterLimits;
 }
 
@@ -133,6 +136,23 @@ export interface RecordAttachmentInventoryItem {
   bytes?: number;
   disposition?: "inline" | "attachment";
 }
+
+/** Closed per-field limits shared by ingestion and versioned output schemas. */
+export const RECORD_METADATA_LIMITS = {
+  maxItems: 256,
+  maxAdapterIdChars: 128,
+  maxAdapterVersionChars: 64,
+  maxTitleChars: 2048,
+  maxPersonChars: 2048,
+  maxCategoryChars: 512,
+  maxIdentifierChars: 2048,
+  maxDateFieldKeyChars: 128,
+  maxDateFieldValueChars: 256,
+  maxAttachmentNameChars: 512,
+  maxAttachmentMimeChars: 256,
+  maxAnchorChars: 512,
+  maxLanguageHintChars: 64,
+} as const;
 
 /** Metadata shared by export adapters and later search/get projections. */
 export interface RecordMetadata {
@@ -165,6 +185,7 @@ export type RecordAdapterFailureCode =
   | "DUPLICATE_ID"
   | "RECORD_TOO_LARGE"
   | "SOURCE_TOO_LARGE"
+  | "TIMEOUT"
   | "RECORD_LIMIT"
   | "FAILURE_LIMIT"
   | "INVALID_LOCATOR"
@@ -189,6 +210,8 @@ export type RecordAdapterEvent =
 export interface RecordAdapter {
   readonly id: string;
   readonly version: string;
+  /** Stable fingerprint of declarative adapter configuration, when present. */
+  readonly configurationFingerprint?: string;
   canHandle(mime: string, ext: string): boolean;
   records(input: RecordAdapterInput): AsyncIterable<RecordAdapterEvent>;
 }
@@ -222,6 +245,7 @@ export const DEFAULT_LIMITS = {
 } as const;
 
 export const DEFAULT_RECORD_ADAPTER_LIMITS: RecordAdapterLimits = {
+  timeoutMs: 60_000,
   maxSourceBytes: 100 * 1024 * 1024,
   maxRecordChars: 2_000_000,
   maxMetadataChars: 100_000,

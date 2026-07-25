@@ -88,12 +88,23 @@ export async function createDefaultRegistry(): Promise<ConverterRegistry> {
   const { markitdownAdapter } = await import("./adapters/markitdownTs/adapter");
   const { officeparserAdapter } =
     await import("./adapters/officeparser/adapter");
+  const { jsonlAdapter } = await import("./adapters/jsonl/adapter");
+  const { transcriptAdapter } = await import("./adapters/transcript/adapter");
+  const { emailRecordAdapter } = await import("./adapters/email/adapter");
+  const { icalAdapter } = await import("./adapters/ical/adapter");
+  const { browserExportAdapter } =
+    await import("./adapters/browser-export/adapter");
 
   // Register in priority order
   registry.register(markdownConverter);
   registry.register(plaintextConverter);
   registry.register(markitdownAdapter);
   registry.register(officeparserAdapter);
+  registry.registerRecordAdapter(jsonlAdapter);
+  registry.registerRecordAdapter(transcriptAdapter);
+  registry.registerRecordAdapter(emailRecordAdapter);
+  registry.registerRecordAdapter(icalAdapter);
+  registry.registerRecordAdapter(browserExportAdapter);
 
   return registry;
 }

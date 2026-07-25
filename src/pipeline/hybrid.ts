@@ -21,6 +21,7 @@ import type {
 } from "./types";
 
 import { normalizeContentTypes } from "../config/content-types";
+import { projectRecordEvidenceMetadata } from "../core/record-metadata";
 import { embedTextsWithRecovery } from "../embed/batch";
 import { err, ok } from "../store/types";
 import { createChunkLookup } from "./chunk-lookup";
@@ -840,10 +841,11 @@ export async function searchHybrid(
   };
   const matchesMetadataFilters = (doc: DocumentRow): boolean => {
     const relPathPrefix = options.retrievalScope?.relPathPrefix;
+    const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
     if (
       relPathPrefix !== undefined &&
-      doc.relPath !== relPathPrefix &&
-      !doc.relPath.startsWith(`${relPathPrefix}/`)
+      sourceRelPath !== relPathPrefix &&
+      !sourceRelPath.startsWith(`${relPathPrefix}/`)
     ) {
       return false;
     }
@@ -1052,9 +1054,9 @@ export async function searchHybrid(
         snippetLanguage: chunk.language ?? undefined,
         snippetRange,
         source: {
-          relPath: doc.relPath,
+          relPath: doc.recordSourcePath ?? doc.relPath,
           absPath: collectionPath
-            ? `${collectionPath}/${doc.relPath}`
+            ? `${collectionPath}/${doc.recordSourcePath ?? doc.relPath}`
             : undefined,
           mime: doc.sourceMime,
           ext: doc.sourceExt,
@@ -1068,6 +1070,7 @@ export async function searchHybrid(
           converterId: doc.converterId ?? undefined,
           converterVersion: doc.converterVersion ?? undefined,
         },
+        record: projectRecordEvidenceMetadata(doc),
       };
       const auxiliaryBaseScore =
         auxiliaryBaseScores.get(`${candidate.mirrorHash}:${candidate.seq}`) ??

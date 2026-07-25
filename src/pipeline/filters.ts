@@ -62,7 +62,7 @@ export function evaluateDocumentChunkFilters(
     matchesExcludedText(
       [
         doc.title ?? "",
-        doc.relPath,
+        doc.recordSourcePath ?? doc.relPath,
         doc.author ?? "",
         doc.contentType ?? "",
         ...(doc.categories ?? []),

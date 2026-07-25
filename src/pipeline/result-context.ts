@@ -16,10 +16,18 @@ export async function attachSearchResultContexts(
   results: SearchResult[]
 ): Promise<void> {
   const validResults = results
-    .map((result) => ({
-      identity: contextIdentityFromUri(result.uri),
-      result,
-    }))
+    .map((result) => {
+      const uriIdentity = contextIdentityFromUri(result.uri);
+      return {
+        identity: uriIdentity
+          ? {
+              collection: uriIdentity.collection,
+              relPath: result.source.relPath,
+            }
+          : null,
+        result,
+      };
+    })
     .filter(
       (
         entry

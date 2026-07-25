@@ -36,6 +36,7 @@ const makeDoc = (
     author?: string;
     contentType?: string;
     relPath?: string;
+    recordSourcePath?: string;
   }
 ): DocumentRow => ({
   id,
@@ -64,6 +65,7 @@ const makeDoc = (
   categories: metadata?.categories ?? null,
   author: metadata?.author ?? null,
   contentType: metadata?.contentType ?? null,
+  recordSourcePath: metadata?.recordSourcePath ?? null,
 });
 
 const makeChunk = (
@@ -983,6 +985,89 @@ describe("searchHybrid targeted document lookup", () => {
     expect(
       result.value.meta.explain?.lines.some((l) => l.stage === "graph")
     ).toBe(true);
+  });
+
+  test("keeps hybrid and graph retrieval inside logical record source scopes", async () => {
+    const store = createGraphStore(
+      [
+        {
+          source: "#seed",
+          target: "#explicit",
+          type: "wiki",
+          weight: 1,
+          confidence: "explicit",
+          audit: { resolution: "exact-title", matchCount: 1 },
+        },
+      ],
+      {
+        docMetadata: {
+          seed: {
+            relPath: ".gno/records/jsonl/seed.md",
+            recordSourcePath: "exports/seed.jsonl",
+          },
+          explicit: {
+            relPath: ".gno/records/jsonl/explicit.md",
+            recordSourcePath: "exports/related.jsonl",
+          },
+        },
+      }
+    );
+
+    const result = await searchHybrid(
+      {
+        store: store as StorePort,
+        config: {} as Config,
+        vectorIndex: null,
+        embedPort: null,
+        expandPort: null,
+        rerankPort: null,
+      },
+      "seed query",
+      {
+        graph: true,
+        noExpand: true,
+        noRerank: true,
+        limit: 2,
+        retrievalScope: {
+          relPathPrefix: "exports",
+          allowedMirrorHashes: ["seed", "explicit"],
+        },
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.map((item) => item.source.relPath)).toEqual([
+      "exports/seed.jsonl",
+      "exports/related.jsonl",
+    ]);
+    expect(result.value.meta.graphExpansion?.enabled).toBe(true);
+
+    const virtualScope = await searchHybrid(
+      {
+        store: store as StorePort,
+        config: {} as Config,
+        vectorIndex: null,
+        embedPort: null,
+        expandPort: null,
+        rerankPort: null,
+      },
+      "seed query",
+      {
+        graph: true,
+        noExpand: true,
+        noRerank: true,
+        limit: 2,
+        retrievalScope: {
+          relPathPrefix: ".gno/records",
+          allowedMirrorHashes: ["seed", "explicit"],
+        },
+      }
+    );
+    expect(virtualScope.ok).toBe(true);
+    if (virtualScope.ok) {
+      expect(virtualScope.value.results).toEqual([]);
+    }
   });
 
   test("graph expansion fallback preserves current retrieval output", async () => {

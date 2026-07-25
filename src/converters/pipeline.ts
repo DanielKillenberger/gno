@@ -13,7 +13,12 @@
  * CRITICAL: Canonicalization is ONLY done here, not in individual converters.
  */
 
-import type { ConversionArtifact, ConvertInput, PipelineResult } from "./types";
+import type {
+  ConversionArtifact,
+  ConvertInput,
+  PipelineResult,
+  RecordAdapter,
+} from "./types";
 
 import { canonicalize, mirrorHash } from "./canonicalize";
 import { internalError, outputTooLargeError } from "./errors";
@@ -133,6 +138,15 @@ export class ConversionPipeline {
         ),
       };
     }
+  }
+
+  /** Select a streaming multi-record adapter without reading the full file. */
+  async selectRecordAdapter(
+    mime: string,
+    ext: string
+  ): Promise<RecordAdapter | undefined> {
+    const registry = await this.ensureRegistry();
+    return registry.selectRecordAdapter(mime, ext);
   }
 
   /**

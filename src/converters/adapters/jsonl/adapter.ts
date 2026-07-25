@@ -158,6 +158,10 @@ export const createJsonlAdapter = (
   return {
     id: ADAPTER_ID,
     version: ADAPTER_VERSION,
+    configurationFingerprint: hashRecordValue(
+      "gno-jsonl-config-v1",
+      canonicalJson(mapping)
+    ),
     canHandle: (mime, ext) =>
       mime === "application/x-ndjson" ||
       mime === "application/jsonl" ||

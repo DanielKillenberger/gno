@@ -7,11 +7,12 @@
 
 import type { Config } from "../config/types";
 import type { EmbeddingPort } from "../llm/types";
-import type { StorePort } from "../store/types";
+import type { DocumentRow, StorePort } from "../store/types";
 import type { VectorIndexPort } from "../store/vector/types";
 import type { SearchOptions, SearchResult, SearchResults } from "./types";
 
 import { normalizeContentTypes } from "../config/content-types";
+import { projectRecordEvidenceMetadata } from "../core/record-metadata";
 import { getContentBatch } from "../store/content-batch";
 import { err, ok } from "../store/types";
 import { createChunkLookup } from "./chunk-lookup";
@@ -213,11 +214,12 @@ export async function searchVectorWithEmbedding(
     const docs = auxiliaryRankingActive ? matchingDocs : [matchingDocs.at(-1)!];
     for (const doc of docs) {
       const collectionPath = collectionPaths.get(doc.collection);
+      const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
       const excluded =
         matchesExcludedText(
           [
             doc.title ?? "",
-            doc.relPath,
+            sourceRelPath,
             doc.author ?? "",
             doc.contentType ?? "",
             ...(doc.categories ?? []),
@@ -248,9 +250,9 @@ export async function searchVectorWithEmbedding(
             endLine: chunk.endLine,
           },
           source: {
-            relPath: doc.relPath,
+            relPath: sourceRelPath,
             absPath: collectionPath
-              ? `${collectionPath}/${doc.relPath}`
+              ? `${collectionPath}/${sourceRelPath}`
               : undefined,
             mime: doc.sourceMime,
             ext: doc.sourceExt,
@@ -266,6 +268,7 @@ export async function searchVectorWithEmbedding(
                 converterVersion: doc.converterVersion ?? undefined,
               }
             : undefined,
+          record: projectRecordEvidenceMetadata(doc),
         },
         doc.collection,
         contentTypeRules,
@@ -332,6 +335,7 @@ export async function searchVectorWithEmbedding(
         : undefined;
 
       const collectionPath = collectionPaths.get(doc.collection);
+      const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
 
       const result = applyContentTypeBoost(
         {
@@ -349,9 +353,9 @@ export async function searchVectorWithEmbedding(
             ? undefined
             : { startLine: chunk.startLine, endLine: chunk.endLine },
           source: {
-            relPath: doc.relPath,
+            relPath: sourceRelPath,
             absPath: collectionPath
-              ? `${collectionPath}/${doc.relPath}`
+              ? `${collectionPath}/${sourceRelPath}`
               : undefined,
             mime: doc.sourceMime,
             ext: doc.sourceExt,
@@ -367,6 +371,7 @@ export async function searchVectorWithEmbedding(
                 converterVersion: doc.converterVersion ?? undefined,
               }
             : undefined,
+          record: projectRecordEvidenceMetadata(doc),
         },
         doc.collection,
         contentTypeRules,
@@ -514,6 +519,12 @@ interface DocumentInfo {
   mirrorHash: string | null;
   converterId: string | null;
   converterVersion: string | null;
+  recordKey: DocumentRow["recordKey"];
+  recordSourcePath: DocumentRow["recordSourcePath"];
+  recordSourceLocator: DocumentRow["recordSourceLocator"];
+  recordMetadata: DocumentRow["recordMetadata"];
+  recordAnchors: DocumentRow["recordAnchors"];
+  recordAdapterFingerprint: DocumentRow["recordAdapterFingerprint"];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -611,10 +622,11 @@ async function buildDocumentMap(
   }
 
   for (const doc of activeDocs) {
+    const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
     if (
       options.relPathPrefix !== undefined &&
-      doc.relPath !== options.relPathPrefix &&
-      !doc.relPath.startsWith(`${options.relPathPrefix}/`)
+      sourceRelPath !== options.relPathPrefix &&
+      !sourceRelPath.startsWith(`${options.relPathPrefix}/`)
     ) {
       continue;
     }
@@ -655,6 +667,12 @@ async function buildDocumentMap(
       mirrorHash: doc.mirrorHash,
       converterId: doc.converterId,
       converterVersion: doc.converterVersion,
+      recordKey: doc.recordKey,
+      recordSourcePath: doc.recordSourcePath,
+      recordSourceLocator: doc.recordSourceLocator,
+      recordMetadata: doc.recordMetadata,
+      recordAnchors: doc.recordAnchors,
+      recordAdapterFingerprint: doc.recordAdapterFingerprint,
     };
     const matchingDocuments = result.get(doc.mirrorHash!) ?? [];
     matchingDocuments.push(documentInfo);

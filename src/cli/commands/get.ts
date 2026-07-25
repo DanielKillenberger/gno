@@ -22,6 +22,10 @@ import {
   type DocumentCapabilities,
 } from "../../core/document-capabilities";
 import {
+  projectRecordEvidenceMetadata,
+  type RecordEvidenceMetadata,
+} from "../../core/record-metadata";
+import {
   evidenceFromExactDocument,
   RetrievalTraceSession as TraceSession,
 } from "../../core/retrieval-trace-session";
@@ -85,6 +89,7 @@ export interface GetResponse {
     converterVersion?: string;
     mirrorHash?: string;
   };
+  record?: RecordEvidenceMetadata;
   capabilities: DocumentCapabilities;
 }
 
@@ -332,6 +337,7 @@ function buildResponse(ctx: BuildResponseContext): GetResult {
       language: doc.languageHint ?? undefined,
       source: buildSourceMeta(doc, config),
       conversion: buildConversionMeta(doc),
+      record: projectRecordEvidenceMetadata(doc),
       capabilities: buildCapabilities(doc),
     },
   };
@@ -349,6 +355,7 @@ interface DocRow {
   sourceSize: number;
   sourceMtime?: string;
   sourceHash: string;
+  recordSourcePath?: string | null;
 }
 
 function buildSourceMeta(
@@ -356,11 +363,12 @@ function buildSourceMeta(
   config: ConfigLike
 ): GetResponse["source"] {
   const coll = config.collections.find((c) => c.name === doc.collection);
-  const absPath = coll ? `${coll.path}/${doc.relPath}` : undefined;
+  const relPath = doc.recordSourcePath ?? doc.relPath;
+  const absPath = coll ? `${coll.path}/${relPath}` : undefined;
 
   return {
     absPath,
-    relPath: doc.relPath,
+    relPath,
     mime: doc.sourceMime,
     ext: doc.sourceExt,
     modifiedAt: doc.sourceMtime ?? undefined,
@@ -373,11 +381,13 @@ function buildCapabilities(doc: {
   sourceExt: string;
   sourceMime: string;
   mirrorHash?: string | null;
+  recordKey?: string | null;
 }): DocumentCapabilities {
   return getDocumentCapabilities({
     sourceExt: doc.sourceExt,
     sourceMime: doc.sourceMime,
     contentAvailable: doc.mirrorHash !== null,
+    recordKey: doc.recordKey,
   });
 }
 

@@ -233,6 +233,10 @@ export const createTranscriptAdapter = (
   return {
     id: ADAPTER_ID,
     version: ADAPTER_VERSION,
+    configurationFingerprint: hashRecordValue(
+      "gno-transcript-config-v1",
+      requested
+    ),
     canHandle: (mime, ext) => {
       if (requested === "json")
         return mime === "application/json" || ext === ".json";

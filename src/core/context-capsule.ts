@@ -129,6 +129,26 @@ const normalizePayload = (
           ),
         }),
     facets: normalizeSet(item.facets),
+    ...(item.record === undefined
+      ? {}
+      : {
+          record: {
+            ...item.record,
+            anchors: item.record.anchors.map((anchor) => ({
+              ...anchor,
+              value: normalizeText(anchor.value),
+              ...(anchor.endValue === undefined
+                ? {}
+                : { endValue: normalizeText(anchor.endValue) }),
+            })),
+            ...(item.record.participants === undefined
+              ? {}
+              : { participants: normalizeSet(item.record.participants) }),
+            ...(item.record.categories === undefined
+              ? {}
+              : { categories: normalizeSet(item.record.categories) }),
+          },
+        }),
   })),
   guidance: {
     ...value.guidance,

@@ -15,6 +15,10 @@ import {
   type DocumentCapabilities,
 } from "../../core/document-capabilities";
 import { resolveEffectiveIndex } from "../../core/indexed-reference";
+import {
+  projectRecordEvidenceMetadata,
+  type RecordEvidenceMetadata,
+} from "../../core/record-metadata";
 import { parseRef } from "../../core/ref-parser";
 import {
   attachRetrievalTraceMetadata,
@@ -54,6 +58,7 @@ interface GetResponse {
     converterVersion?: string;
     mirrorHash?: string;
   };
+  record?: RecordEvidenceMetadata;
   capabilities: DocumentCapabilities;
 }
 
@@ -210,13 +215,14 @@ export function handleGet(
 
         // Build absPath
         const uriParsed = parseUri(doc.uri);
+        const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
         let absPath: string | undefined;
         if (uriParsed) {
           const collection = ctx.collections.find(
             (c) => c.name === uriParsed.collection
           );
           if (collection) {
-            absPath = pathJoin(collection.path, doc.relPath);
+            absPath = pathJoin(collection.path, sourceRelPath);
           }
         }
 
@@ -230,7 +236,7 @@ export function handleGet(
           language: doc.languageHint ?? undefined,
           source: {
             absPath,
-            relPath: doc.relPath,
+            relPath: sourceRelPath,
             mime: doc.sourceMime,
             ext: doc.sourceExt,
             modifiedAt: doc.sourceMtime,
@@ -244,10 +250,12 @@ export function handleGet(
                 mirrorHash: doc.mirrorHash,
               }
             : undefined,
+          record: projectRecordEvidenceMetadata(doc),
           capabilities: getDocumentCapabilities({
             sourceExt: doc.sourceExt,
             sourceMime: doc.sourceMime,
             contentAvailable: doc.mirrorHash !== null,
+            recordKey: doc.recordKey,
           }),
         };
 

@@ -8,6 +8,7 @@ import type {
 import type { StoredRecordState } from "../../src/store/types";
 
 import {
+  recordAdapterFingerprint,
   recordKeyFor,
   runRecordAdapter,
 } from "../../src/ingestion/record-adapter";
@@ -58,6 +59,7 @@ const prior = (stableId: string, active = true): StoredRecordState => ({
   recordKey: recordKeyFor("adapter/test-records", stableId),
   sourceHash: "a".repeat(64),
   adapterVersion: "1.0.0",
+  adapterFingerprint: recordAdapterFingerprint(adapter([])),
   active,
   relativePath: `container/.gno-records/${stableId}.md`,
 });

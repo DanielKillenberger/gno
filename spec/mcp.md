@@ -697,6 +697,11 @@ Search result items include `contentType` when available and always include
 human-oriented; structured clients should read `structuredContent.results`.
 Structured result items also preserve optional `context` guidance in
 global-to-specific order without changing the result `uri` or `docid`.
+File/export records also include bounded `record` provenance in structured
+search/get/multi-get/Ask output. Their `source.relPath` is the real local export
+container while the unique `uri` remains the required exact retrieval ref. The
+closed `record.adapter` object identifies the adapter ID, version, and
+configuration fingerprint used to produce the logical record.
 When `explain: true`, `structuredContent.meta.explain` includes deterministic
 stage lines and per-result score receipts. Non-neutral configured content-type
 rules add `contentTypeBoost` with base/raw scores, factor, capped contribution,

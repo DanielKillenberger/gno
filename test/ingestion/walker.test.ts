@@ -323,5 +323,30 @@ describe("FileWalker", () => {
       });
       expect(extensionlessEntries).toEqual([]);
     });
+
+    test("always excludes the internal virtual-record namespace", async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-walker-record-path-"));
+      try {
+        await mkdir(join(root, ".gno", "records", "deadbeef"), {
+          recursive: true,
+        });
+        await Bun.write(
+          join(root, ".gno", "records", "deadbeef", "collision.md"),
+          "physical collision"
+        );
+        await Bun.write(join(root, "visible.md"), "visible");
+        const { entries } = await walker.walk({
+          root,
+          pattern: "**/*",
+          include: [".md"],
+          exclude: [],
+          maxBytes: 10_000,
+        });
+
+        expect(entries.map(({ relPath }) => relPath)).toEqual(["visible.md"]);
+      } finally {
+        await safeRm(root);
+      }
+    });
   });
 });

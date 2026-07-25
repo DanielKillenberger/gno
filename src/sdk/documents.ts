@@ -23,6 +23,7 @@ import type {
 } from "./types";
 
 import { getDocumentCapabilities } from "../core/document-capabilities";
+import { projectRecordEvidenceMetadata } from "../core/record-metadata";
 import { isGlobPattern, parseRef, splitRefs } from "../core/ref-parser";
 import {
   attachRetrievalTraceMetadata,
@@ -53,9 +54,10 @@ function buildSourceMeta(
   config: Config
 ): GetResponse["source"] {
   const coll = config.collections.find((c) => c.name === doc.collection);
+  const relPath = doc.recordSourcePath ?? doc.relPath;
   return {
-    absPath: coll ? `${coll.path}/${doc.relPath}` : undefined,
-    relPath: doc.relPath,
+    absPath: coll ? `${coll.path}/${relPath}` : undefined,
+    relPath,
     mime: doc.sourceMime,
     ext: doc.sourceExt,
     sizeBytes: doc.sourceSize,
@@ -129,10 +131,12 @@ async function getDocumentByRefUntraced(
       language: doc.languageHint ?? undefined,
       source: buildSourceMeta(doc, config),
       conversion: buildConversionMeta(doc),
+      record: projectRecordEvidenceMetadata(doc),
       capabilities: getDocumentCapabilities({
         sourceExt: doc.sourceExt,
         sourceMime: doc.sourceMime,
         contentAvailable: doc.mirrorHash !== null,
+        recordKey: doc.recordKey,
       }),
     };
   }
@@ -156,10 +160,12 @@ async function getDocumentByRefUntraced(
     language: doc.languageHint ?? undefined,
     source: buildSourceMeta(doc, config),
     conversion: buildConversionMeta(doc),
+    record: projectRecordEvidenceMetadata(doc),
     capabilities: getDocumentCapabilities({
       sourceExt: doc.sourceExt,
       sourceMime: doc.sourceMime,
       contentAvailable: doc.mirrorHash !== null,
+      recordKey: doc.recordKey,
     }),
   };
 }
@@ -318,6 +324,7 @@ export async function multiGetDocuments(
       maxBytes
     );
     const coll = config.collections.find((c) => c.name === doc.collection);
+    const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
     documents.push({
       docid: doc.docid,
       uri: doc.uri,
@@ -326,11 +333,12 @@ export async function multiGetDocuments(
       truncated: truncated || undefined,
       totalLines: content.split("\n").length,
       source: {
-        absPath: coll ? `${coll.path}/${doc.relPath}` : undefined,
-        relPath: doc.relPath,
+        absPath: coll ? `${coll.path}/${sourceRelPath}` : undefined,
+        relPath: sourceRelPath,
         mime: doc.sourceMime,
         ext: doc.sourceExt,
       },
+      record: projectRecordEvidenceMetadata(doc),
     });
   }
 
@@ -385,7 +393,7 @@ export async function listDocuments(
       uri: d.uri,
       title: d.title ?? undefined,
       source: {
-        relPath: d.relPath,
+        relPath: d.recordSourcePath ?? d.relPath,
         mime: d.sourceMime,
         ext: d.sourceExt,
       },

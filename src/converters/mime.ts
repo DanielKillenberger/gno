@@ -35,6 +35,14 @@ const EXTENSION_MAP: Record<string, string> = {
   ".pptx":
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".jsonl": "application/x-ndjson",
+  ".ndjson": "application/x-ndjson",
+  ".eml": "message/rfc822",
+  ".mbox": "application/mbox",
+  ".ics": "text/calendar",
+  ".vtt": "text/vtt",
+  ".srt": "application/x-subrip",
+  ".browser-export": "application/x-gno-browser-export+json",
 };
 
 /** OOXML extension to MIME mapping */

@@ -1034,6 +1034,24 @@ broad-to-specific path-prefix order. The field is absent when no scope matches;
 `uri` and `docid` remain the exact source identity. The same contract applies to
 `vsearch`, `query`, and the `results` array returned by `ask`.
 
+Logical documents created from file/export adapters additionally include a
+bounded `record` object with their opaque record key, exact export locator,
+people/dates, thread/event/session identity, attachment inventory, and anchors.
+`source.relPath` names the real export container; `uri` and `docid` address the
+individual virtual document. The closed `record.adapter` identity contains the
+adapter ID, version, and configuration fingerprint. `get` and `multi-get`
+preserve the same fields.
+
+File/export adapter iteration has a 60-second deadline in addition to the byte,
+record, metadata, and total-character caps. A partial import that retains valid
+siblings exits successfully but is never silent: terminal output includes the
+file, bounded warning count, and snapshot state; `--verbose` adds stable failure
+codes, bounded source locators, retryability, and redacted messages. Internal
+and SDK-facing sync results include a `recordImport` receipt with adapter
+identity, configuration fingerprint, snapshot authority, cap state, bytes read,
+per-action counts, and bounded failures. `.gno/records/` is a reserved virtual
+namespace and is never walked as physical collection content.
+
 **Exit Codes:**
 
 - 0: Success (including zero results)

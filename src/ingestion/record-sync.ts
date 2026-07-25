@@ -46,7 +46,8 @@ export function reconcileRecordSnapshot(
     }
     if (
       previous.sourceHash === record.sourceHash &&
-      previous.adapterVersion === record.adapterVersion
+      previous.adapterVersion === record.adapterVersion &&
+      previous.adapterFingerprint === record.adapterFingerprint
     ) {
       actions.push({ type: "unchanged", previous, record });
       continue;

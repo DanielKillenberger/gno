@@ -11,16 +11,22 @@ import {
   adapterFailureMessage,
   canonicalRecord,
   type CanonicalRecord,
+  normalizeRecordAdapterIdentity,
   recordKeyFor,
+  recordAdapterFingerprint,
   safeFailure,
 } from "./record-adapter-canonical";
 
 export type { CanonicalRecord } from "./record-adapter-canonical";
-export { recordKeyFor } from "./record-adapter-canonical";
+export {
+  recordAdapterFingerprint,
+  recordKeyFor,
+} from "./record-adapter-canonical";
 
 export interface RecordAdapterRunResult {
   adapterId: string;
   adapterVersion: string;
+  adapterFingerprint: string;
   records: CanonicalRecord[];
   failures: RecordAdapterFailure[];
   failedRecordKeys: string[];
@@ -36,6 +42,31 @@ class SourceLimitError extends Error {
     this.name = "SourceLimitError";
   }
 }
+
+const TIMEOUT = Symbol("record-adapter-timeout");
+
+const nextBeforeDeadline = async <T>(
+  iterator: AsyncIterator<T>,
+  deadlineMs: number
+): Promise<IteratorResult<T> | typeof TIMEOUT> => {
+  const remainingMs = deadlineMs - Date.now();
+  if (remainingMs <= 0) return TIMEOUT;
+  return await new Promise<IteratorResult<T> | typeof TIMEOUT>(
+    (resolve, reject) => {
+      const timer = setTimeout(() => resolve(TIMEOUT), remainingMs);
+      void iterator.next().then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    }
+  );
+};
 
 const closeIterator = async (
   iterator: AsyncIterator<unknown>
@@ -54,6 +85,8 @@ export async function runRecordAdapter(
   adapter: RecordAdapter,
   input: RecordAdapterInput
 ): Promise<RecordAdapterRunResult> {
+  const adapterIdentity = normalizeRecordAdapterIdentity(adapter);
+  const adapterFingerprint = recordAdapterFingerprint(adapter);
   const accepted = new Map<string, AccountedCanonicalRecord>();
   const seenKeys = new Set<string>();
   const failedRecordKeys = new Set<string>();
@@ -68,6 +101,9 @@ export async function runRecordAdapter(
   let terminalState: "complete" | "partial" = "partial";
   let iteratorCloseFailed = false;
   let stoppedByFailureLimit = false;
+  let timedOut = false;
+  const abortController = new AbortController();
+  const deadlineMs = Date.now() + (input.limits.timeoutMs ?? 60_000);
 
   const appendFailure = (failure: RecordAdapterFailure): boolean => {
     if (stoppedByFailureLimit) return true;
@@ -93,7 +129,7 @@ export async function runRecordAdapter(
       sourceOpened = true;
       let iterator: AsyncIterator<Uint8Array>;
       try {
-        iterator = input.open()[Symbol.asyncIterator]();
+        iterator = input.open(abortController.signal)[Symbol.asyncIterator]();
       } catch {
         sourceReadFailed = true;
         throw new Error("Record adapter source could not be opened.");
@@ -127,10 +163,28 @@ export async function runRecordAdapter(
   let iterator: AsyncIterator<RecordAdapterEvent> | undefined;
   try {
     iterator = adapter
-      .records({ ...input, open: boundedOpen })
+      .records({
+        ...input,
+        open: boundedOpen,
+        signal: abortController.signal,
+      })
       [Symbol.asyncIterator]();
     while (true) {
-      const next = await iterator.next();
+      const next = await nextBeforeDeadline(iterator, deadlineMs);
+      if (next === TIMEOUT) {
+        timedOut = true;
+        stoppedByCap = true;
+        abortController.abort();
+        failures.push(
+          safeFailure(
+            input,
+            "TIMEOUT",
+            "Record adapter exceeded its time limit.",
+            true
+          )
+        );
+        break;
+      }
       if (next.done) break;
       const event = next.value;
       if (event.type === "snapshot") {
@@ -184,7 +238,10 @@ export async function runRecordAdapter(
               : error instanceof Error &&
                   error.message === "invalid source hash"
                 ? "INVALID_SOURCE_HASH"
-                : "MISSING_ID";
+                : error instanceof Error &&
+                    error.message === "record metadata out of bounds"
+                  ? "RECORD_TOO_LARGE"
+                  : "MISSING_ID";
           const reachedFailureLimit = appendFailure(
             safeFailure(
               input,
@@ -278,7 +335,11 @@ export async function runRecordAdapter(
     stoppedByCap ||= error instanceof SourceLimitError;
   } finally {
     if (iterator) {
-      iteratorCloseFailed ||= !(await closeIterator(iterator));
+      if (timedOut) {
+        void closeIterator(iterator);
+      } else {
+        iteratorCloseFailed ||= !(await closeIterator(iterator));
+      }
     }
   }
 
@@ -338,9 +399,25 @@ export async function runRecordAdapter(
     terminalState === "complete" &&
     failures.length === 0 &&
     !stoppedByCap;
+  const failureLimit = Math.max(0, input.limits.maxFailures);
+  const boundedFailures =
+    failures.length <= failureLimit
+      ? failures
+      : failureLimit === 0
+        ? []
+        : [
+            ...failures.slice(0, failureLimit - 1),
+            safeFailure(
+              input,
+              "FAILURE_LIMIT",
+              "Record snapshot reached its failure limit.",
+              true
+            ),
+          ];
   return {
-    adapterId: adapter.id,
-    adapterVersion: adapter.version,
+    adapterId: adapterIdentity.id,
+    adapterVersion: adapterIdentity.version,
+    adapterFingerprint,
     records: [...accepted.values()]
       .sort((left, right) => left.recordKey.localeCompare(right.recordKey))
       .map(
@@ -350,7 +427,7 @@ export async function runRecordAdapter(
           ...record
         }) => record
       ),
-    failures,
+    failures: boundedFailures,
     failedRecordKeys: [...failedRecordKeys].sort(),
     snapshotState: terminalState,
     authoritative,

@@ -141,11 +141,13 @@ function ensureEditable(doc: {
   sourceExt: string;
   sourceMime: string;
   mirrorHash: string | null;
+  recordKey?: string | null;
 }) {
   const capabilities = getDocumentCapabilities({
     sourceExt: doc.sourceExt,
     sourceMime: doc.sourceMime,
     contentAvailable: doc.mirrorHash !== null,
+    recordKey: doc.recordKey,
   });
   if (!capabilities.editable) {
     throw new Error(

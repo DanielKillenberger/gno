@@ -5,6 +5,7 @@ import { hasLikelySecretPath } from "../core/path-rules";
 import {
   CONTENT_TYPE_SEARCH_BOOST_MAX,
   CONTENT_TYPE_SEARCH_BOOST_MIN,
+  CollectionSchema,
   isValidLanguageHint,
   PROJECT_AFFINITY_MAX_CONTRIBUTION,
 } from "./types";
@@ -218,6 +219,7 @@ export const ProjectProfileCollectionSchema = z
       .refine(isValidLanguageHint, "Invalid BCP-47 language hint")
       .optional(),
     modelPreset: z.string().regex(REFERENCE_PATTERN).optional(),
+    recordAdapters: CollectionSchema.shape.recordAdapters,
   })
   .strict();
 

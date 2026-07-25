@@ -80,7 +80,7 @@ const evidenceBlock = (
   item: ContextCapsuleV1["evidence"][number]
 ): string[] => {
   const metadata = [
-    `{"title":${json(item.title)},"heading":${json(item.heading)}}`,
+    `{"title":${json(item.title)},"heading":${json(item.heading)},"record":${json(item.record ?? null)}}`,
     "configuredContexts:",
     ...configuredContextLines(capsule, item.contextIds).map((line) =>
       line.startsWith("    ") ? line.slice(4) : line
