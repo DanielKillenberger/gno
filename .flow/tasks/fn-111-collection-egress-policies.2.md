@@ -33,17 +33,18 @@ Deliver build conservative destination and network-zone classification as one im
 
 
 ## Done summary
-Implemented conservative destination and network-zone classification plus DNS-pinned outbound HTTP seams.
+Implemented and review-hardened conservative destination/network-zone classification plus DNS-pinned outbound HTTP seams.
 
 - Added stable redacted classification for local process, loopback, private LAN/VPN, proven Tailscale IPv6, public, wildcard, provider, and unknown destinations across IPv4/IPv6, DNS answers, and explicit binds.
-- Kept shared CGNAT, IPv4 link-local/metadata, mixed answer classes, unresolved names, malformed answers, and friendly hostnames fail-closed as remote/unknown.
-- Added bounded Bun DNS resolution, exact pre-connection rechecks, IP-literal request pinning, original Host/SNI certificate verification, manual redirects, HTTPS downgrade and redirect-zone checks, provider-origin checks, and restricted proxy-environment denial.
+- Kept shared CGNAT, IPv4 link-local/AWS metadata, AWS IPv6 IMDS, mixed answer classes, unresolved names, malformed answers, and friendly hostnames fail-closed as remote/unknown.
+- Added bounded Bun DNS resolution, exact pre-connection rechecks, IP-literal request pinning, original Host/SNI certificate verification, manual redirects, HTTPS downgrade and redirect-zone checks, provider-origin checks, HTTPS-only provider URLs, and restricted proxy-environment denial.
+- Forced TLS certificate validation even when the process sets `NODE_TLS_REJECT_UNAUTHORIZED=0` or callers supply `rejectUnauthorized: false`, a custom identity callback, or a different SNI name.
 - Added an opaque connection object whose JSON/log projection excludes URLs, hostnames, addresses, credentials, and paths.
 - Propagated one classifier result from the single Bun socket-peer sample through HTTP MCP authorization; forwarded headers remain ignored and stripped.
-- Added adversarial unit/integration fixtures plus a live local HTTPS test proving IP rewrite with the original DNS certificate.
+- Added adversarial unit/integration fixtures plus a live local HTTPS test proving IP rewrite with the original DNS certificate and rejection for a wrong SAN under process/caller verification overrides.
 
 Current HTTP model adapters remain unchanged intentionally; task 3 owns invoking this seam at every outbound callsite and intersecting it with collection policy.
 ## Evidence
-- Commits: b46797e7
-- Tests: bun test test/egress/destination-classifier.test.ts test/egress/policy.test.ts test/mcp/http-security.test.ts (36 pass, 0 fail), bun test test/egress test/mcp test/llm test/serve (760 pass, 0 fail), live local HTTPS fixture: pinned IP request verified original model.test certificate via SNI and preserved Host, bun run lint:check (0 warnings, 0 errors; formatting current), .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json (valid, 0 errors, 0 warnings), git diff --cached --check (clean before commit)
+- Commits: b46797e7, 3ba27107
+- Tests: bun test test/egress/destination-classifier.test.ts test/egress/destination-http-security.test.ts test/egress/policy.test.ts test/mcp/http-security.test.ts (37 pass, 0 fail), bun test test/egress test/mcp test/llm test/serve (761 pass, 0 fail), live local HTTPS fixture: pinned IP verified original model.test certificate and rejected wrong SAN despite process/caller TLS overrides, bun run lint:check (0 warnings, 0 errors; formatting current), .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json (valid, 0 errors, 0 warnings), git diff --check (clean)
 - PRs:
