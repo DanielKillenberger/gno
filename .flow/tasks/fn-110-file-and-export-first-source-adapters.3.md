@@ -37,9 +37,8 @@ Deliver implement safe eml and streaming mbox adapters as one implementation-siz
 
 
 ## Done summary
-TBD
-
+Added safe EML and streaming MBOX adapters with folded RFC headers, MIME nesting and transfer decoding, sanitized plain/HTML bodies, stable duplicate/missing Message-ID handling, thread metadata, attachment inventory, bounded physical lines and attachment expansion, mboxrd and Content-Length framing, and no remote fetch or execution.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 11d2b40e, 533bfd14
+- Tests: bun test test/converters/email.test.ts (15 pass), bun test focused fn110 integration suite (190 pass)
 - PRs:

@@ -34,9 +34,8 @@ Deliver implement jsonl and transcript export adapters as one implementation-siz
 
 
 ## Done summary
-TBD
-
+Added streaming JSONL and transcript adapters with declarative JSON-pointer field mapping, deterministic configured/content identities, exact line/cue anchors, VTT/SRT/JSON/text support, bounded UTF-8 line/cue handling, isolated failures, and authoritative-only tombstone semantics. Adversarial hardening keeps Markdown and truncated snapshots inert and non-authoritative.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6626754e, 5147e87d
+- Tests: bun test test/converters/jsonl.test.ts test/converters/transcript.test.ts (20 pass), bun test focused fn110 integration suite (190 pass)
 - PRs:

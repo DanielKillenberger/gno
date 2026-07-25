@@ -34,9 +34,8 @@ Deliver implement explicit browser export adapters as one implementation-sized i
 
 
 ## Done summary
-TBD
-
+Added explicit browser bookmark, history, and reading-list export adapters with stable export identities, URL/title/folder/tag/date provenance, strict closed export shapes, bounded fields and record counts, inert HTML/Markdown, credential and dangerous-scheme rejection, and fail-closed denial of live browser profiles and databases.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 36ca546d, 5147e87d
+- Tests: bun test test/converters/browser-export.test.ts (11 pass), bun test focused fn110 integration suite (190 pass)
 - PRs:
