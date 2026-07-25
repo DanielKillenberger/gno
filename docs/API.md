@@ -2053,6 +2053,13 @@ collection, and path-prefix configuration. It is trusted user guidance for the
 same `uri`/`docid`, not retrieved evidence or a ranking signal. The optional
 field is omitted when no configured scope matches.
 
+Results derived from JSONL, mail, calendar, transcript, or browser exports also
+include a bounded `record` object. It carries the exact export locator, anchors,
+people/dates, available thread/event/session or attachment metadata, and exact
+adapter ID/version/configuration fingerprint. `source.relPath` points to the
+real export file; the result `uri` addresses the individual logical record and
+is the correct value for subsequent get calls.
+
 **Response**:
 
 ```json

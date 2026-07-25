@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added streaming, bounded file/export ingestion for JSONL, EML/MBOX, ICS,
+  WebVTT/SRT, explicit browser exports, and configured JSON/text transcripts.
+  Logical records retain exact export lineage and metadata across search, get,
+  Ask, and Context Capsules; partial snapshots cannot tombstone unseen records.
+
+### Security
+
+- Added a central adapter deadline, closed and bounded record metadata,
+  configuration-bound provenance, a reserved virtual-record namespace, and
+  redacted partial-import receipts. Export adapters never inspect live account
+  or browser state, execute content, fetch remote data, or unpack archives.
+
 ## [1.27.1] - 2026-07-24
 
 ### Changed

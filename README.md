@@ -112,7 +112,7 @@ gno daemon --detach  # headless continuous indexing (background; --status / --st
 
 <!-- public-truth:current-version -->
 
-> Current release: **v1.26.0** — see [CHANGELOG.md](./CHANGELOG.md)
+> Current release: **v1.27.1** — see [CHANGELOG.md](./CHANGELOG.md)
 
 <!-- /public-truth -->
 
@@ -904,7 +904,7 @@ graph TD
 | **Document Editor**  | Create, edit, delete docs with live markdown preview                           |
 | **Web UI**           | Visual dashboard for search, browse, edit, and AI Q&A                          |
 | **REST API**         | HTTP API for custom tools and integrations                                     |
-| **Multi-Format**     | Markdown, PDF, DOCX, XLSX, PPTX, plain text                                    |
+| **Multi-Format**     | Markdown, PDF, Office, JSONL, EML/MBOX, ICS, transcript, and browser exports   |
 | **Local LLM**        | AI answers via llama.cpp, no API keys                                          |
 | **Remote Inference** | Optional HTTP endpoints for embedding, reranking, expansion, and generation    |
 | **Privacy First**    | Local by default; no telemetry; network use is explicit or model provisioning  |

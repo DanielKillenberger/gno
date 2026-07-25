@@ -745,6 +745,14 @@ Use `gno update` when you only need keyword search, or when you want to quickly 
 Password-protected PDFs and XLSX files are recorded as per-file `PERMISSION`
 errors and skipped without aborting the rest of the run.
 
+Portable JSONL, EML/MBOX, ICS, WebVTT/SRT, and explicit browser-export files
+are streamed into independently searchable logical records. A malformed partial
+snapshot preserves unseen records; only a complete snapshot can deactivate a
+record removed from the export. Partial imports remain successful when valid
+siblings were indexed, but terminal output always reports their warning count;
+`--verbose` adds stable codes, source locators, retryability, and redacted
+messages. See [File and Export Adapters](guides/file-export-adapters.md).
+
 ### gno index
 
 Full index end-to-end: runs `gno update` then `gno embed`. This is the recommended command for most users.

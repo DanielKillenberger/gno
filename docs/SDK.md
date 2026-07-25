@@ -58,6 +58,12 @@ console.log(results.results.map((r) => r.uri));
 await client.close();
 ```
 
+For logical records indexed from portable exports, search and document methods
+return optional `record` provenance (locator, anchors, people/dates, and
+thread/event/session metadata) plus exact adapter ID, version, and configuration
+fingerprint. `source.relPath` is the real export container; use the unique
+result `uri` or `docid` to retrieve the logical record.
+
 ---
 
 ## Open A Client

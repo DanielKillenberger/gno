@@ -192,7 +192,16 @@ gno get gno://work/report.md --json
 gno multi-get gno://work/doc1.md gno://work/doc2.md
 ```
 
-**Editable vs read-only**: `gno get --json` returns a `capabilities` field showing whether a document is editable at its source. Markdown and plain text files are editable in place. Converted documents (PDF, DOCX, XLSX) are read-only -- to edit their content, create a new markdown note instead of overwriting the binary source.
+**Editable vs read-only**: `gno get --json` returns a `capabilities` field showing whether a document is editable at its source. Markdown and plain text files are editable in place. Converted documents (PDF, DOCX, XLSX) and logical records from JSONL, mail, calendar, transcript, or browser exports are read-only -- edit/regenerate the source export or create a new markdown note instead of overwriting GNO's virtual record.
+
+**Export records**: search/get JSON may include a `record` object containing an
+exact bounded source locator, people/dates, thread/event/session identity,
+attachment inventory, and cue/message/event anchors. `source.relPath` is the
+real export file; `record.adapter` identifies the exact adapter version and
+configuration fingerprint. Use the result's unique `uri` or `docid` with
+`gno get`. If update/index reports a partial export snapshot, valid siblings
+were indexed but unseen old records were intentionally preserved; regenerate
+the export and rerun the command.
 
 ## Search Then Get (common pipeline)
 

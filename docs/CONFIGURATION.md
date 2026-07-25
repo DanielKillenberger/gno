@@ -119,6 +119,16 @@ affinity without filesystem probing. All auxiliary contributions share the
 
 See [Project-Local Retrieval Profiles](guides/project-profiles.md).
 
+## File and export adapters
+
+Collections automatically recognize `.jsonl`, `.ndjson`, `.eml`, `.mbox`,
+`.ics`, `.vtt`, `.srt`, and explicit `.browser-export` files. Optional
+`recordAdapters` configuration provides closed JSONL field mappings and
+explicit JSON/text transcript selection; it cannot execute code. See
+[File and Export Adapters](guides/file-export-adapters.md) for the support
+matrix, fixed resource and 60-second adapter deadline caps, partial-import
+receipts, snapshot/tombstone semantics, and no-live-account security boundary.
+
 ## Resident HTTP MCP Gateway
 
 `gno serve` and `gno daemon` expose `/mcp`. The default configuration binds
