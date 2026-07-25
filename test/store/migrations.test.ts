@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { verifyLexicalActivation } from "../../src/core/activation-verifier";
 import { getSchemaVersion, migrations, runMigrations } from "../../src/store";
 import { migration as collectionEgressMigration } from "../../src/store/migrations/023-collection-egress-policy";
+import { migration as derivedEgressMigration } from "../../src/store/migrations/024-egress-derived-lineage";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
 
@@ -89,6 +90,129 @@ describe("store migrations", () => {
     }
   });
 
+  test("backfills derived lineage, journal bytes, and supports rollback", () => {
+    const db = new Database(dbPath);
+    const hash = "a".repeat(64);
+    try {
+      expect(runMigrations(db, migrations.slice(0, 23), "unicode61").ok).toBe(
+        true
+      );
+      db.exec(`
+        INSERT INTO retrieval_traces (
+          trace_id, schema_version, redaction_mode, replay_capable,
+          query_text, query_digest, query_shape_json,
+          goal_text, goal_digest, goal_shape_json, filters_json,
+          pipeline_fingerprint, model_fingerprint, config_fingerprint,
+          index_fingerprint, status, created_at_ms, updated_at_ms,
+          expires_at_ms, byte_size, creation_digest
+        ) VALUES (
+          'legacy-trace', '1.0', 'metadata', 0,
+          NULL, NULL, '{"characters":0,"terms":0}',
+          NULL, NULL, '{"characters":0,"terms":0}', '{}',
+          '${hash}', '${hash}', '${hash}', '${hash}',
+          'completed', 1, 2, 10,
+          length(CAST('{"characters":0,"terms":0}' AS BLOB)) * 2
+            + length(CAST('{}' AS BLOB)),
+          '${hash}'
+        );
+        INSERT INTO retrieval_trace_exports (
+          export_id, format, artifact_hash, created_at_ms
+        ) VALUES ('legacy-export', 'agentic-receipt', '${hash}', 3);
+        INSERT INTO document_changes (
+          document_id, collection, change_kind, new_rel_path, new_docid,
+          new_uri, new_source_hash, new_mirror_hash, new_active,
+          observed_at_ms, byte_size
+        ) VALUES (
+          1, 'notes', 'create', 'legacy.md', '#legacy',
+          'gno://notes/legacy.md', '${hash}', '${hash}', 1, 4, 100
+        );
+        UPDATE document_change_journal_state
+        SET last_sequence = 1, retained_entries = 1, retained_bytes = 100
+        WHERE singleton_id = 1;
+      `);
+
+      derivedEgressMigration.up(db, "unicode61");
+      const expectedDigest =
+        "87b249b76459c91c172da6be6cbe3f93b61c44869eb196f3470ec36ebb50b8b0";
+      for (const table of [
+        "retrieval_traces",
+        "retrieval_trace_exports",
+        "document_changes",
+      ]) {
+        expect(
+          db
+            .query<
+              {
+                effective_egress_policy: string;
+                egress_lineage_digest: string;
+              },
+              []
+            >(
+              `SELECT effective_egress_policy, egress_lineage_digest FROM ${table}`
+            )
+            .get()
+        ).toEqual({
+          effective_egress_policy: "local_only",
+          egress_lineage_digest: expectedDigest,
+        });
+      }
+      const journal = db
+        .query<{ byte_size: number; egress_lineage_bytes: number }, []>(
+          "SELECT byte_size, egress_lineage_bytes FROM document_changes"
+        )
+        .get();
+      expect(journal?.byte_size).toBe(
+        100 + (journal?.egress_lineage_bytes ?? 0)
+      );
+      expect(
+        db
+          .query<{ retained_bytes: number }, []>(
+            "SELECT retained_bytes FROM document_change_journal_state"
+          )
+          .get()?.retained_bytes
+      ).toBe(journal?.byte_size);
+      expect(
+        db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name = 'egress_audit_receipts'`
+          )
+          .get()
+      ).toEqual({ name: "egress_audit_receipts" });
+
+      derivedEgressMigration.down?.(db);
+      expect(
+        db
+          .query<{ retained_bytes: number }, []>(
+            "SELECT retained_bytes FROM document_change_journal_state"
+          )
+          .get()?.retained_bytes
+      ).toBe(100);
+      expect(
+        db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name = 'egress_audit_receipts'`
+          )
+          .get()
+      ).toBeNull();
+      for (const table of [
+        "retrieval_traces",
+        "retrieval_trace_exports",
+        "document_changes",
+      ]) {
+        expect(
+          db
+            .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+            .all()
+            .map((column) => column.name)
+        ).not.toContain("egress_lineage_json");
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   test("upgrades v5 databases without non-constant ALTER TABLE defaults", () => {
     const db = new Database(dbPath);
 
@@ -121,7 +245,7 @@ describe("store migrations", () => {
 
       const upgradeResult = runMigrations(db, migrations, "unicode61");
       expect(upgradeResult.ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
 
       const indexedRow = db
         .query<{ indexed_at: string | null }, []>(
@@ -199,7 +323,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
       db.run(
         `INSERT INTO contexts (scope_type, scope_key, text)
          VALUES ('collection', 'notes:', 'Additional guidance')`
@@ -227,7 +351,7 @@ describe("store migrations", () => {
 
     try {
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
 
       const savedTables = db
         .query<{ name: string }, []>(
@@ -376,7 +500,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
       expect(
         db
           .query<{ retained_entries: number; retained_bytes: number }, []>(
@@ -385,7 +509,15 @@ describe("store migrations", () => {
              WHERE singleton_id = 1`
           )
           .get()
-      ).toEqual({ retained_entries: 2, retained_bytes: 100 });
+      ).toEqual({
+        retained_entries: 2,
+        retained_bytes:
+          db
+            .query<{ total: number }, []>(
+              "SELECT SUM(byte_size) AS total FROM document_changes"
+            )
+            .get()?.total ?? 0,
+      });
       expect(() =>
         db.run(
           `UPDATE document_change_journal_state
@@ -411,7 +543,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
       expect(
         db
           .query<
@@ -470,7 +602,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
       expect(
         db
           .query<
@@ -562,7 +694,7 @@ describe("store migrations", () => {
 
       const upgraded = runMigrations(db, migrations, "unicode61");
       expect(upgraded.ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(23);
+      expect(getSchemaVersion(db)).toBe(24);
       const rows = db
         .query<{ rel_path: string; fts_mirror_hash: string | null }, []>(
           "SELECT rel_path, fts_mirror_hash FROM documents ORDER BY rel_path"

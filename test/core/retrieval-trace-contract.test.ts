@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import type { RetrievalTraceInput } from "../../src/store/types";
 
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { RetrievalTraceRecorder } from "../../src/core/retrieval-trace";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import { SqliteAdapter } from "../../src/store";
@@ -37,6 +38,7 @@ const traceInput = (
     goalDigest: null,
     goalShape: { characters: 0, terms: 0 },
     filters: mode === "replay" ? { collection: "notes" } : { shape: {} },
+    egressLineage: legacyLocalOnlyEgressLineage("notes"),
     fingerprints: {
       pipeline: HASH_A,
       model: HASH_A,

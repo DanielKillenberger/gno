@@ -113,6 +113,7 @@ export const createTrace = (
     const queryShapeJson = canonicalTraceJson(trace.queryShape);
     const goalShapeJson = canonicalTraceJson(trace.goalShape);
     const filtersJson = canonicalTraceJson(trace.filters);
+    const egressLineageJson = canonicalTraceJson(trace.egressLineage);
     const queryBytes = enforceByteLimit(
       trace.queryText ?? "",
       8192,
@@ -138,16 +139,23 @@ export const createTrace = (
       16_384,
       "Retrieval trace filters"
     );
+    const egressLineageBytes = enforceByteLimit(
+      egressLineageJson,
+      32_768,
+      "Retrieval trace egress lineage"
+    );
     const creationDigest = hashRetrievalTraceCreation(trace);
     const insert = db.run(
       `INSERT OR IGNORE INTO retrieval_traces (
          trace_id, schema_version, redaction_mode, replay_capable,
          query_text, query_digest, query_shape_json,
          goal_text, goal_digest, goal_shape_json, filters_json,
+         effective_egress_policy, egress_lineage_digest,
+         egress_lineage_json, egress_lineage_bytes,
          pipeline_fingerprint, model_fingerprint, config_fingerprint,
          index_fingerprint, status, created_at_ms, updated_at_ms,
          expires_at_ms, byte_size, creation_digest
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         trace.traceId,
         trace.schemaVersion,
@@ -160,6 +168,10 @@ export const createTrace = (
         trace.goalDigest,
         goalShapeJson,
         filtersJson,
+        trace.egressLineage.effectivePolicy,
+        trace.egressLineage.digest,
+        egressLineageJson,
+        egressLineageBytes,
         trace.fingerprints.pipeline,
         trace.fingerprints.model,
         trace.fingerprints.config,

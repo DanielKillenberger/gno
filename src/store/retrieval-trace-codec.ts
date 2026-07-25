@@ -10,6 +10,7 @@ import type {
   RetrievalTraceRunInput,
 } from "./types";
 
+import { egressLineageSchema } from "../core/egress-provenance";
 const MAX_ID_LENGTH = 128;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -134,6 +135,7 @@ const traceInputBaseSchema = z
     goalDigest: sha256Schema.nullable(),
     goalShape: queryShapeSchema,
     filters: traceJsonObjectSchema,
+    egressLineage: egressLineageSchema,
     fingerprints: z
       .object({
         pipeline: sha256Schema,

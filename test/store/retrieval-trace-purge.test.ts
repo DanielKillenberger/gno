@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import type { RetrievalTraceInput } from "../../src/store/types";
 
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
 
@@ -37,6 +38,7 @@ const traceInput = (
   goalDigest: null,
   goalShape: { characters: 0, terms: 0 },
   filters: mode === "replay" ? { collection: "notes" } : { shape: {} },
+  egressLineage: legacyLocalOnlyEgressLineage("notes"),
   fingerprints: {
     pipeline: HASH,
     model: HASH,
@@ -231,6 +233,7 @@ describe("retrieval trace secure deletion", () => {
           traceIds: ["aggregate-a", "aggregate-b"],
           format: "qrels",
           artifactHash: HASH,
+          egressLineage: legacyLocalOnlyEgressLineage("notes"),
           createdAtMs: 3000,
         })
       ).ok

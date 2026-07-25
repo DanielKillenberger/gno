@@ -13,6 +13,7 @@ import type {
   FtsTokenizer,
 } from "../config/types";
 import type { RecordAnchor, RecordMetadata } from "../converters/types";
+import type { EgressLineage } from "../core/egress-provenance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Types
@@ -407,6 +408,7 @@ export interface DocumentChangeRow {
   oldActive: boolean | null;
   newActive: boolean | null;
   structureDelta: DocumentChangeStructureDelta;
+  egressLineage: EgressLineage;
   observedAtMs: number;
   byteSize: number;
 }
@@ -1103,6 +1105,8 @@ export interface RetrievalTraceInput {
     terms: number;
   };
   filters: Record<string, unknown>;
+  /** Trusted collection ownership, independent from privacy-redacted filters. */
+  egressLineage: EgressLineage;
   fingerprints: RetrievalTraceFingerprints;
   status: "open";
   createdAtMs: number;
@@ -1187,6 +1191,7 @@ export interface RetrievalTraceExportManifestInput {
   traceIds: string[];
   format: RetrievalTraceExportFormat;
   artifactHash: string;
+  egressLineage: EgressLineage;
   createdAtMs: number;
 }
 
@@ -1195,6 +1200,54 @@ export interface RetrievalTraceExportManifestRow extends Omit<
   "traceIds"
 > {
   traceIds: string[];
+}
+
+export type EgressAuditDecision = "allow" | "deny";
+
+export interface EgressAuditReceiptInput {
+  auditId: string;
+  decision: EgressAuditDecision;
+  action: import("../core/egress-policy").EgressAction;
+  destinationZone: import("../core/egress-policy").EgressDestinationZone;
+  contentClass: import("../core/egress-policy").EgressContentClass;
+  effectivePolicy: EgressPolicy;
+  reasonCode: import("../core/egress-policy").EgressReasonCode;
+  lineageDigest: string;
+  createdAtMs: number;
+  expiresAtMs: number;
+}
+
+export interface EgressAuditReceiptRow extends EgressAuditReceiptInput {
+  byteSize: number;
+}
+
+export interface EgressAuditCursor {
+  createdAtMs: number;
+  auditId: string;
+}
+
+export interface EgressAuditPage {
+  receipts: EgressAuditReceiptRow[];
+  nextCursor: EgressAuditCursor | null;
+}
+
+export interface EgressAuditRetentionPolicy {
+  maxAgeDays: number;
+  maxReceipts: number;
+  maxBytes: number;
+}
+
+export interface EgressAuditRetentionResult {
+  deleted: number;
+  remainingReceipts: number;
+  remainingBytes: number;
+}
+
+export interface EgressAuditPurgeResult {
+  deleted: number;
+  physicalCleanup: RetrievalTracePhysicalCleanupStatus;
+  checkpointedFrames: number;
+  remainingWalFrames: number;
 }
 
 export interface RetrievalTraceBundle {
@@ -1446,6 +1499,26 @@ export interface StorePort {
     policy: RetrievalTraceRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceRetentionResult>>;
+
+  /** Append one content-free egress decision receipt. */
+  appendEgressAuditReceipt(
+    receipt: EgressAuditReceiptInput
+  ): Promise<StoreResult<RetrievalTraceAppendResult>>;
+
+  /** Inspect bounded receipts newest-first through an opaque cursor. */
+  listEgressAuditReceipts(
+    limit: number,
+    cursor?: EgressAuditCursor
+  ): Promise<StoreResult<EgressAuditPage>>;
+
+  /** Enforce the audit domain's independent age/count/byte policy. */
+  enforceEgressAuditRetention(
+    policy: EgressAuditRetentionPolicy,
+    nowMs: number
+  ): Promise<StoreResult<EgressAuditRetentionResult>>;
+
+  /** Purge only audit receipts with truthful SQLite physical cleanup status. */
+  purgeEgressAuditReceipts(): Promise<StoreResult<EgressAuditPurgeResult>>;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Documents

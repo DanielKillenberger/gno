@@ -10,6 +10,7 @@ import type {
   RetrievalTraceTerminalStatus,
 } from "../../src/store/types";
 
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import { SqliteAdapter } from "../../src/store";
 import { safeRm } from "../helpers/cleanup";
@@ -42,6 +43,7 @@ const traceInput = (
     goalDigest: null,
     goalShape: { characters: 0, terms: 0 },
     filters: mode === "replay" ? { collection: "notes" } : { shape: {} },
+    egressLineage: legacyLocalOnlyEgressLineage("notes"),
     fingerprints: {
       pipeline: HASH_A,
       model: HASH_A,
@@ -360,6 +362,7 @@ describe("retrieval trace management", () => {
       traceIds: ["complete", "does-not-exist"],
       format: "agentic-receipt",
       artifactHash: HASH_B,
+      egressLineage: legacyLocalOnlyEgressLineage("notes"),
       createdAtMs: 2000,
     });
     expect(missingMember.ok).toBeFalse();

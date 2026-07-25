@@ -43,6 +43,12 @@ import type {
   DocumentInput,
   DocumentRow,
   EmbeddingCleanupStats,
+  EgressAuditCursor,
+  EgressAuditPage,
+  EgressAuditPurgeResult,
+  EgressAuditReceiptInput,
+  EgressAuditRetentionPolicy,
+  EgressAuditRetentionResult,
   FtsResult,
   FtsSearchOptions,
   GetGraphOptions,
@@ -134,6 +140,12 @@ import {
   purgeDocumentChanges as purgeStoredDocumentChanges,
   snapshotDocumentChange,
 } from "./change-journal-store";
+import {
+  appendEgressAuditReceipt as appendStoredEgressAuditReceipt,
+  enforceEgressAuditRetention as enforceStoredEgressAuditRetention,
+  listEgressAuditReceipts as listStoredEgressAuditReceipts,
+  purgeEgressAuditReceipts as purgeStoredEgressAuditReceipts,
+} from "./egress-audit-store";
 import { loadFts5Snowball } from "./fts5-snowball";
 import {
   appendExportManifest as appendStoredTraceExportManifest,
@@ -1089,6 +1101,32 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceRetentionResult>> {
     return enforceStoredTraceRetention(this.ensureOpen(), policy, nowMs);
+  }
+
+  async appendEgressAuditReceipt(
+    receipt: EgressAuditReceiptInput
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    return appendStoredEgressAuditReceipt(this.ensureOpen(), receipt);
+  }
+
+  async listEgressAuditReceipts(
+    limit: number,
+    cursor?: EgressAuditCursor
+  ): Promise<StoreResult<EgressAuditPage>> {
+    return listStoredEgressAuditReceipts(this.ensureOpen(), limit, cursor);
+  }
+
+  async enforceEgressAuditRetention(
+    policy: EgressAuditRetentionPolicy,
+    nowMs: number
+  ): Promise<StoreResult<EgressAuditRetentionResult>> {
+    return enforceStoredEgressAuditRetention(this.ensureOpen(), policy, nowMs);
+  }
+
+  async purgeEgressAuditReceipts(): Promise<
+    StoreResult<EgressAuditPurgeResult>
+  > {
+    return purgeStoredEgressAuditReceipts(this.ensureOpen());
   }
 
   getContextGeneration(): number {

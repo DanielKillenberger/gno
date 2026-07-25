@@ -47,6 +47,7 @@ const storageRows = (db: Database): StorageRow[] =>
            + length(CAST(COALESCE(t.goal_digest, '') AS BLOB))
            + length(CAST(t.goal_shape_json AS BLOB))
            + length(CAST(t.filters_json AS BLOB))
+           + t.egress_lineage_bytes
            + length(CAST(t.pipeline_fingerprint AS BLOB))
            + length(CAST(t.model_fingerprint AS BLOB))
            + length(CAST(t.config_fingerprint AS BLOB))
@@ -101,6 +102,7 @@ const storageRows = (db: Database): StorageRow[] =>
                    + length(CAST(et.trace_id AS BLOB))
                    + length(CAST(x.format AS BLOB))
                    + length(CAST(x.artifact_hash AS BLOB))
+                   + x.egress_lineage_bytes
                    + 8
                )
                FROM retrieval_trace_export_traces et

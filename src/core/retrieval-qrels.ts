@@ -7,10 +7,12 @@ import type {
   RetrievalTraceTerminalStatus,
   StoreResult,
 } from "../store/types";
+import type { EgressLineage } from "./egress-provenance";
 import type { EvidenceTarget } from "./retrieval-trace-management-helpers";
 
 import { hashTraceCanonical } from "../store/retrieval-trace-codec";
 import { err, ok } from "../store/types";
+import { createEgressLineage } from "./egress-provenance";
 import { parseRetrievalTraceFilters } from "./retrieval-trace-filters";
 import { stableTarget, targetKey } from "./retrieval-trace-management-helpers";
 
@@ -85,6 +87,7 @@ export interface RetrievalQrelsCase {
 export interface RetrievalTraceQrelsArtifact {
   schemaVersion: "1.0";
   format: "qrels";
+  egressLineage: EgressLineage;
   cases: RetrievalQrelsCase[];
 }
 
@@ -400,6 +403,9 @@ export const buildRetrievalQrelsArtifact = (
   return ok({
     schemaVersion: "1.0",
     format: "qrels",
+    egressLineage: createEgressLineage(
+      bundles.flatMap(({ trace }) => trace.egressLineage.sources)
+    ),
     cases: cases.sort((a, b) => a.caseId.localeCompare(b.caseId)),
   });
 };

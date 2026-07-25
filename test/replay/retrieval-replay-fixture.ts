@@ -13,6 +13,7 @@ import type {
   StoreResult,
 } from "../../src/store/types";
 
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import { SqliteAdapter } from "../../src/store";
 import { ok } from "../../src/store/types";
@@ -141,6 +142,7 @@ export const createReplayTestHarness = async (): Promise<ReplayTestHarness> => {
       goalDigest: null,
       goalShape: { characters: 0, terms: 0 },
       filters: input?.filters ?? { collection: "notes", limit: 5 },
+      egressLineage: legacyLocalOnlyEgressLineage("notes"),
       fingerprints: {
         pipeline: replaySha256("pipeline"),
         model: replaySha256("model"),
@@ -266,6 +268,7 @@ export const createReplayTestHarness = async (): Promise<ReplayTestHarness> => {
       goalDigest: null,
       goalShape: { characters: 0, terms: 0 },
       filters: { collection: "notes", limit: 5 },
+      egressLineage: legacyLocalOnlyEgressLineage("notes"),
       fingerprints: {
         pipeline: replaySha256("zero-pipeline"),
         model: replaySha256("zero-model"),

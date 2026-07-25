@@ -16,6 +16,7 @@ import type {
   StoreResult,
 } from "../types";
 
+import { egressLineageSchema } from "../../core/egress-provenance";
 import { traceJsonObjectSchema } from "../retrieval-trace-codec";
 import { err } from "../types";
 
@@ -31,6 +32,10 @@ export interface DbRetrievalTraceRow {
   goal_digest: string | null;
   goal_shape_json: string;
   filters_json: string;
+  effective_egress_policy: RetrievalTraceRow["egressLineage"]["effectivePolicy"];
+  egress_lineage_digest: string;
+  egress_lineage_json: string;
+  egress_lineage_bytes: number;
   pipeline_fingerprint: string;
   model_fingerprint: string;
   config_fingerprint: string;
@@ -105,6 +110,7 @@ export const mapTraceRow = (row: DbRetrievalTraceRow): RetrievalTraceRow => ({
   goalDigest: row.goal_digest,
   goalShape: JSON.parse(row.goal_shape_json) as RetrievalTraceRow["goalShape"],
   filters: parseJsonObject(row.filters_json),
+  egressLineage: egressLineageSchema.parse(JSON.parse(row.egress_lineage_json)),
   fingerprints: {
     pipeline: row.pipeline_fingerprint,
     model: row.model_fingerprint,
@@ -115,7 +121,7 @@ export const mapTraceRow = (row: DbRetrievalTraceRow): RetrievalTraceRow => ({
   createdAtMs: row.created_at_ms,
   updatedAtMs: row.updated_at_ms,
   expiresAtMs: row.expires_at_ms,
-  byteSize: row.byte_size,
+  byteSize: row.byte_size + row.egress_lineage_bytes,
   creationDigest: row.creation_digest,
 });
 

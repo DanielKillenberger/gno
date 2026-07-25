@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import type { ToolContext } from "../../src/mcp/server";
 
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import {
   handleTraceLabel as handleMcpTraceLabel,
@@ -55,6 +56,7 @@ describe("retrieval trace cross-surface management", () => {
           goalDigest: null,
           goalShape: { characters: 0, terms: 0 },
           filters: {},
+          egressLineage: legacyLocalOnlyEgressLineage("notes"),
           fingerprints: {
             pipeline: HASH_A,
             model: HASH_B,

@@ -3,6 +3,17 @@ import { describe, expect, test } from "bun:test";
 import { assertInvalid, assertValid, loadSchema } from "./validator";
 
 const HASH = "a".repeat(64);
+const egressLineage = {
+  effectivePolicy: "local_only",
+  digest: HASH,
+  sources: [
+    {
+      collection: "notes",
+      policy: "local_only",
+      source: "legacy_default",
+    },
+  ],
+} as const;
 const summary = {
   traceId: "trace-1",
   schemaVersion: "1.0",
@@ -11,6 +22,7 @@ const summary = {
   status: "completed",
   queryShape: { characters: 8, terms: 2 },
   goalShape: { characters: 0, terms: 0 },
+  egressLineage,
   fingerprints: {
     pipeline: HASH,
     model: HASH,
@@ -102,11 +114,13 @@ describe("retrieval trace management schemas", () => {
             traceIds: ["trace-1"],
             format: "agentic-receipt",
             artifactHash: HASH,
+            egressLineage,
             createdAtMs: 202,
           },
           artifact: {
             schemaVersion: "1.0",
             format: "agentic-receipt",
+            egressLineage,
             traces: [
               {
                 trace,

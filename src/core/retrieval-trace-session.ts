@@ -17,6 +17,10 @@ import {
 } from "../pipeline/types";
 import { err, ok } from "../store/types";
 import {
+  createEgressLineage,
+  legacyLocalOnlyEgressLineage,
+} from "./egress-provenance";
+import {
   MIN_RETRIEVAL_TRACE_RECORDS,
   RetrievalTraceRecorder,
   type RetrievalTraceWriteResult,
@@ -180,11 +184,24 @@ export class RetrievalTraceSession {
       clock,
       idFactory: input.idFactory,
     });
+    const collections = await input.store.getCollections();
+    if (!collections.ok) return collections;
+    const egressLineage =
+      collections.value.length === 0
+        ? legacyLocalOnlyEgressLineage()
+        : createEgressLineage(
+            collections.value.map((collection) => ({
+              collection: collection.name,
+              policy: collection.egressPolicy,
+              source: collection.egressPolicySource,
+            }))
+          );
     const started = await recorder.start({
       query: input.query,
       goal: input.goal,
       filters: input.filters,
       fingerprints: await input.fingerprints(),
+      egressLineage,
     });
     if (!started.ok) return started;
     if (!started.value.recorded) return ok(null);

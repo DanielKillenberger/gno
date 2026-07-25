@@ -13,6 +13,7 @@ import {
   ensureDirectories,
   saveConfig,
 } from "../../src/config";
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { SqliteAdapter } from "../../src/store";
 import { safeRm } from "../helpers/cleanup";
 import { assertValid, loadSchema } from "../spec/schemas/validator";
@@ -108,6 +109,7 @@ describe("trace CLI contract", () => {
           goalDigest: null,
           goalShape: { characters: 0, terms: 0 },
           filters: { shape: { type: "object", fields: {} } },
+          egressLineage: legacyLocalOnlyEgressLineage("notes"),
           fingerprints: {
             pipeline: HASH,
             model: HASH,

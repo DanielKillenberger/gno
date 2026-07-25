@@ -26,6 +26,9 @@
         "config": { "$ref": "#/definitions/sha256" },
         "index": { "$ref": "#/definitions/sha256" }
       }
+    },
+    "egressLineage": {
+      "$ref": "gno://schemas/retrieval-trace-common@1.0#/definitions/egressLineage"
     }
   },
   "type": "object",
@@ -55,6 +58,7 @@
     },
     "queryShape": { "$ref": "#/definitions/textShape" },
     "goalShape": { "$ref": "#/definitions/textShape" },
+    "egressLineage": { "$ref": "#/definitions/egressLineage" },
     "fingerprints": { "$ref": "#/definitions/fingerprints" },
     "createdAtMs": { "type": "integer", "minimum": 0 },
     "updatedAtMs": { "type": "integer", "minimum": 0 },

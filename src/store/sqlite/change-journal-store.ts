@@ -22,6 +22,11 @@ import {
   serializeDocumentChangeStructureDelta,
   validateDocumentChangeRetentionPolicy,
 } from "../../core/change-journal";
+import {
+  createEgressLineage,
+  egressLineageSchema,
+  legacyLocalOnlyEgressLineage,
+} from "../../core/egress-provenance";
 import { err, ok } from "../types";
 
 const DAY_MS = 86_400_000;
@@ -74,6 +79,8 @@ interface DbDocumentChangeRow {
   structure_truncated: number;
   observed_at_ms: number;
   byte_size: number;
+  egress_lineage_json: string;
+  egress_lineage_bytes: number;
 }
 
 const utf8ByteLength = (value: string | null): number =>
@@ -127,6 +134,7 @@ const mapRow = (row: DbDocumentChangeRow): DocumentChangeRow => ({
     dates: JSON.parse(row.date_delta_json),
     truncated: row.structure_truncated === 1,
   },
+  egressLineage: egressLineageSchema.parse(JSON.parse(row.egress_lineage_json)),
   observedAtMs: row.observed_at_ms,
   byteSize: row.byte_size,
 });
@@ -249,11 +257,35 @@ export const appendDocumentChange = (
   } = serializeDocumentChangeStructureDelta(draft.structureDelta);
   const old = draft.oldSnapshot;
   const next = draft.newSnapshot;
+  const collectionPolicy = db
+    .query<
+      {
+        egress_policy: "local_only" | "lan" | "remote";
+        egress_policy_source: "explicit" | "config_default" | "legacy_default";
+      },
+      [string]
+    >(
+      `SELECT egress_policy, egress_policy_source
+       FROM collections WHERE name = ?`
+    )
+    .get(draft.collection);
+  const egressLineage = collectionPolicy
+    ? createEgressLineage([
+        {
+          collection: draft.collection,
+          policy: collectionPolicy.egress_policy,
+          source: collectionPolicy.egress_policy_source,
+        },
+      ])
+    : legacyLocalOnlyEgressLineage(draft.collection);
+  const egressLineageJson = JSON.stringify(egressLineage);
+  const egressLineageBytes = UTF8_ENCODER.encode(egressLineageJson).byteLength;
   const storedByteSize = byteSize(draft, [
     headingDeltaJson,
     linkDeltaJson,
     typedEdgeDeltaJson,
     dateDeltaJson,
+    egressLineageJson,
   ]);
   const inserted = db.run(
     `INSERT INTO document_changes (
@@ -262,8 +294,9 @@ export const appendDocumentChange = (
        old_source_hash, new_source_hash, old_mirror_hash, new_mirror_hash,
        old_active, new_active, heading_delta_json, link_delta_json,
        typed_edge_delta_json, date_delta_json, structure_truncated,
-       observed_at_ms, byte_size
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       effective_egress_policy, egress_lineage_digest, egress_lineage_json,
+       egress_lineage_bytes, observed_at_ms, byte_size
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       draft.documentId,
       draft.collection,
@@ -285,6 +318,10 @@ export const appendDocumentChange = (
       typedEdgeDeltaJson,
       dateDeltaJson,
       delta.truncated ? 1 : 0,
+      egressLineage.effectivePolicy,
+      egressLineage.digest,
+      egressLineageJson,
+      egressLineageBytes,
       draft.observedAtMs,
       storedByteSize,
     ]

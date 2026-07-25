@@ -180,6 +180,11 @@ export const legacyLocalOnlyEgressLineage = (
     { collection, policy: "local_only", source: "legacy_default" },
   ]);
 
+/** True only for the exact migration projection used by pre-lineage rows. */
+export const isMigratedLegacyEgressLineage = (
+  lineage: EgressLineage
+): boolean => lineage.digest === legacyLocalOnlyEgressLineage().digest;
+
 export const egressLineageByteSize = (lineage: EgressLineage): number =>
   new TextEncoder().encode(canonicalJson(lineage)).byteLength;
 
