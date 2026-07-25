@@ -1,7 +1,12 @@
 /** Attach complete collection policy ownership to observable search results. */
 
 import type { EgressLineage } from "../core/egress-provenance";
-import type { StorePort, StoreResult } from "../store/types";
+import type {
+  CollectionRow,
+  DocumentRow,
+  StorePort,
+  StoreResult,
+} from "../store/types";
 import type { SearchResult } from "./types";
 
 import { parseUri } from "../app/constants";
@@ -16,28 +21,43 @@ type EgressLineageStore = Pick<
 export const attachSearchResultEgressLineage = async (
   store: EgressLineageStore,
   results: SearchResult[],
-  ownershipHashes?: readonly string[]
+  options: {
+    ownershipHashes?: readonly string[];
+    ownershipDocuments?: readonly Pick<
+      DocumentRow,
+      "collection" | "mirrorHash"
+    >[];
+    collections?: readonly CollectionRow[];
+  } = {}
 ): Promise<StoreResult<void>> => {
   if (results.length === 0) return ok(undefined);
   const mirrorHashes = [
     ...new Set(
-      ownershipHashes ??
+      options.ownershipHashes ??
         results
           .map((result) => result.conversion?.mirrorHash)
           .filter((hash): hash is string => Boolean(hash))
     ),
   ];
-  const documentsResult =
-    typeof store.getDocumentsByMirrorHashes === "function"
-      ? await store.getDocumentsByMirrorHashes(mirrorHashes, {
-          activeOnly: true,
-        })
-      : ok([]);
-  const collectionsResult = await store.getCollections();
-  if (!collectionsResult.ok) return collectionsResult;
-  if (!documentsResult.ok) return documentsResult;
+  let ownershipDocuments = options.ownershipDocuments;
+  if (ownershipDocuments === undefined) {
+    const documentsResult = await store.getDocumentsByMirrorHashes(
+      mirrorHashes,
+      {
+        activeOnly: true,
+      }
+    );
+    if (!documentsResult.ok) return documentsResult;
+    ownershipDocuments = documentsResult.value;
+  }
+  let collectionRows = options.collections;
+  if (collectionRows === undefined) {
+    const collectionsResult = await store.getCollections();
+    if (!collectionsResult.ok) return collectionsResult;
+    collectionRows = collectionsResult.value;
+  }
   const policyByCollection = new Map(
-    collectionsResult.value.map((collection) => [
+    collectionRows.map((collection) => [
       collection.name,
       {
         collection: collection.name,
@@ -50,7 +70,7 @@ export const attachSearchResultEgressLineage = async (
   for (const mirrorHash of mirrorHashes) {
     const ownerCollections = [
       ...new Set([
-        ...documentsResult.value
+        ...ownershipDocuments
           .filter((document) => document.mirrorHash === mirrorHash)
           .map((owner) => owner.collection),
         ...results

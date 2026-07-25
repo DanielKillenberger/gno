@@ -144,17 +144,18 @@ export async function searchVectorWithEmbedding(
   }
 
   // Cache docs to avoid N+1 queries (filtered by collection and tags)
-  const docsByMirrorHash = await buildDocumentMap(store, {
-    collection: options.collection,
-    relPathPrefix: options.retrievalScope?.relPathPrefix,
-    tagsAll: options.tagsAll,
-    tagsAny: options.tagsAny,
-    since: temporalRange.since,
-    until: temporalRange.until,
-    categories: options.categories,
-    author: options.author,
-    mirrorHashes: uniqueHashes,
-  });
+  const { documents: docsByMirrorHash, ownershipDocuments } =
+    await buildDocumentMap(store, {
+      collection: options.collection,
+      relPathPrefix: options.retrievalScope?.relPathPrefix,
+      tagsAll: options.tagsAll,
+      tagsAny: options.tagsAny,
+      since: temporalRange.since,
+      until: temporalRange.until,
+      categories: options.categories,
+      author: options.author,
+      mirrorHashes: uniqueHashes,
+    });
 
   // Pre-fetch all chunks in one batch query (eliminates N+1)
   const chunksMapResult = await store.getChunksBatch(uniqueHashes);
@@ -427,7 +428,11 @@ export async function searchVectorWithEmbedding(
   const lineageResult = await attachSearchResultEgressLineage(
     store,
     finalResults,
-    uniqueHashes
+    {
+      ownershipHashes: uniqueHashes,
+      ownershipDocuments,
+      collections: collectionsResult.ok ? collectionsResult.value : undefined,
+    }
   );
   if (!lineageResult.ok) {
     return err("QUERY_FAILED", lineageResult.error.message);
@@ -569,28 +574,35 @@ function matchesCategoryFilter(
 async function buildDocumentMap(
   store: StorePort,
   options: DocumentMapOptions = {}
-): Promise<Map<string, DocumentInfo[]>> {
-  const result = new Map<string, DocumentInfo[]>();
+): Promise<{
+  documents: Map<string, DocumentInfo[]>;
+  ownershipDocuments: DocumentRow[];
+}> {
+  const documents = new Map<string, DocumentInfo[]>();
 
   if (options.mirrorHashes && options.mirrorHashes.length === 0) {
-    return result;
+    return { documents, ownershipDocuments: [] };
   }
 
   const docs = options.mirrorHashes
     ? await store.getDocumentsByMirrorHashes(options.mirrorHashes, {
-        collection: options.collection,
         activeOnly: true,
       })
     : await store.listDocuments(options.collection);
   if (!docs.ok) {
-    return result;
+    return { documents, ownershipDocuments: [] };
   }
 
   // Filter docs with mirrorHash.
   // listDocuments path still needs explicit active filter.
-  const activeDocs = options.mirrorHashes
+  const ownershipDocuments = options.mirrorHashes
     ? docs.value.filter((d) => d.mirrorHash)
     : docs.value.filter((d) => d.mirrorHash && d.active);
+  const activeDocs = options.collection
+    ? ownershipDocuments.filter(
+        (document) => document.collection === options.collection
+      )
+    : ownershipDocuments;
   const temporalRange: TemporalRange = {
     since: options.since,
     until: options.until,
@@ -683,10 +695,10 @@ async function buildDocumentMap(
       recordAnchors: doc.recordAnchors,
       recordAdapterFingerprint: doc.recordAdapterFingerprint,
     };
-    const matchingDocuments = result.get(doc.mirrorHash!) ?? [];
+    const matchingDocuments = documents.get(doc.mirrorHash!) ?? [];
     matchingDocuments.push(documentInfo);
-    result.set(doc.mirrorHash!, matchingDocuments);
+    documents.set(doc.mirrorHash!, matchingDocuments);
   }
 
-  return result;
+  return { documents, ownershipDocuments };
 }

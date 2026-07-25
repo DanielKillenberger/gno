@@ -1173,7 +1173,12 @@ export async function searchHybrid(
   const lineageResult = await attachSearchResultEgressLineage(
     store,
     finalResults,
-    [...neededHashes]
+    {
+      ownershipHashes: [...neededHashes],
+      ownershipDocuments:
+        options.collection === undefined ? documents : undefined,
+      collections: collectionsResult.ok ? collectionsResult.value : undefined,
+    }
   );
   if (!lineageResult.ok) {
     return err("QUERY_FAILED", lineageResult.error.message);

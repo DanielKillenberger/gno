@@ -437,7 +437,10 @@ export async function searchBm25(
   const lineageResult = await attachSearchResultEgressLineage(
     store,
     finalResults,
-    uniqueHashes
+    {
+      ownershipHashes: uniqueHashes,
+      collections: collectionsResult.ok ? collectionsResult.value : undefined,
+    }
   );
   if (!lineageResult.ok) {
     return err("QUERY_FAILED", lineageResult.error.message);
