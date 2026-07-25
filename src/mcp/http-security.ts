@@ -4,8 +4,13 @@
 import { lstat, open } from "node:fs/promises";
 
 import type { HttpGatewayConfig } from "../config/types";
+import type { DestinationClassification } from "../core/destination-classifier";
 
 import { expandPath } from "../config/paths";
+import {
+  classifyBindDestination,
+  classifyDestination,
+} from "../core/destination-classifier";
 
 export const DEFAULT_HTTP_GATEWAY_HOST = "127.0.0.1";
 export const DEFAULT_HTTP_GATEWAY_PORT = 3000;
@@ -55,6 +60,7 @@ export interface HttpGatewayOverrides {
 
 export interface AuthorizedHttpMcpRequest {
   identity: string;
+  peerClassification: DestinationClassification;
   parsedBody?: unknown;
   request: Request;
 }
@@ -97,29 +103,21 @@ function securityError(status: 401 | 403 | 413 | 429 | 503): Response {
   );
 }
 
-function isLoopbackAddress(address: string): boolean {
-  const normalized = address.toLowerCase();
-  if (normalized === "::1") return true;
-  const mapped = normalized.startsWith("::ffff:")
-    ? normalized.slice("::ffff:".length)
-    : normalized;
-  const octets = mapped.split(".");
-  return (
-    octets.length === 4 &&
-    octets.every((octet) => /^\d{1,3}$/.test(octet)) &&
-    Number(octets[0]) === 127 &&
-    octets.every((octet) => Number(octet) <= 255)
-  );
-}
-
 export function isHttpGatewayLoopbackBind(host: string): boolean {
-  return host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  return classifyBindDestination(host).zone === "loopback";
 }
 
 function defaultAllowedHosts(host: string, port: number): string[] {
-  if (host === "127.0.0.1") return [`127.0.0.1:${port}`, `localhost:${port}`];
-  if (host === "::1" || host === "[::1]") return [`[::1]:${port}`];
-  return [];
+  if (!isHttpGatewayLoopbackBind(host)) return [];
+  const normalized =
+    host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const rawAuthority = normalized.includes(":")
+    ? `[${normalized}]:${port}`
+    : `${normalized}:${port}`;
+  const authority = new URL(`http://${rawAuthority}`).host;
+  return normalized === "127.0.0.1"
+    ? [authority, `localhost:${port}`]
+    : [authority];
 }
 
 function defaultAllowedOrigins(host: string, port: number): string[] {
@@ -370,9 +368,13 @@ export class HttpMcpSecurity {
   ): Promise<HttpMcpAuthorizationResult> {
     const peer = server.requestIP(request);
     if (!peer) return { ok: false, response: securityError(403) };
+    const peerClassification = classifyDestination({
+      kind: "network",
+      hostname: peer.address,
+    });
     if (
       isHttpGatewayLoopbackBind(this.#config.host) &&
-      !isLoopbackAddress(peer.address)
+      peerClassification.zone !== "loopback"
     )
       return { ok: false, response: securityError(403) };
 
@@ -435,7 +437,12 @@ export class HttpMcpSecurity {
 
     return {
       ok: true,
-      value: { identity, parsedBody, request: sanitizedRequest },
+      value: {
+        identity,
+        peerClassification,
+        parsedBody,
+        request: sanitizedRequest,
+      },
     };
   }
 

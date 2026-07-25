@@ -1,0 +1,442 @@
+import { describe, expect, mock, test } from "bun:test";
+
+import {
+  classifyBindDestination,
+  classifyDestination,
+  classifyNetworkAddress,
+} from "../../src/core/destination-classifier";
+import {
+  MAX_HTTP_DESTINATION_ADDRESSES,
+  type HttpDestinationResolver,
+  type PinnedHttpFetch,
+  prepareHttpDestination,
+} from "../../src/llm/http-policy";
+import {
+  HttpMcpSecurity,
+  resolveHttpGatewayConfig,
+} from "../../src/mcp/http-security";
+
+function sequenceResolver(
+  ...answers: Array<readonly string[] | Error>
+): HttpDestinationResolver {
+  let index = 0;
+  return {
+    lookup(): Promise<readonly string[]> {
+      const answer = answers[Math.min(index, answers.length - 1)];
+      index += 1;
+      return answer instanceof Error
+        ? Promise.reject(answer)
+        : Promise.resolve(answer ?? []);
+    },
+  };
+}
+
+describe("conservative destination classification", () => {
+  test("classifies IPv4, IPv6, private, Tailscale, public, and unsafe ranges", () => {
+    const fixtures = [
+      ["127.0.0.1", "loopback"],
+      ["127.99.1.2", "loopback"],
+      ["::1", "loopback"],
+      ["::ffff:127.0.0.1", "loopback"],
+      ["10.0.0.1", "private"],
+      ["172.16.0.1", "private"],
+      ["172.31.255.255", "private"],
+      ["192.168.1.1", "private"],
+      ["fc00::1", "private"],
+      ["fe80::1%en0", "private"],
+      ["fd7a:115c:a1e0::1", "tailscale"],
+      ["8.8.8.8", "public"],
+      ["2001:4860:4860::8888", "public"],
+      ["0.0.0.0", "unknown"],
+      ["::", "unknown"],
+      ["100.64.0.1", "unknown"],
+      ["100.127.255.254", "unknown"],
+      ["169.254.169.254", "unknown"],
+      ["224.0.0.1", "unknown"],
+    ] as const;
+    for (const [address, expected] of fixtures) {
+      expect(classifyNetworkAddress(address)).toBe(expected);
+    }
+  });
+
+  test("requires homogeneous DNS proof and never trusts a friendly name", () => {
+    expect(
+      classifyDestination({ kind: "network", hostname: "localhost" })
+    ).toMatchObject({
+      zone: "remote",
+      addressClass: "unknown",
+      reason: "UNPROVEN_REMOTE",
+    });
+    expect(
+      classifyDestination({
+        kind: "network",
+        hostname: "model.internal",
+        addresses: ["10.0.0.2", "10.0.0.3"],
+      })
+    ).toMatchObject({
+      zone: "lan",
+      addressClass: "private",
+      reason: "PRIVATE_ADDRESS",
+    });
+    expect(
+      classifyDestination({
+        kind: "network",
+        hostname: "mixed.internal",
+        addresses: ["10.0.0.2", "8.8.8.8"],
+      })
+    ).toMatchObject({
+      zone: "remote",
+      addressClass: "unknown",
+      reason: "MIXED_DNS_ANSWERS",
+    });
+    expect(
+      classifyDestination({
+        kind: "network",
+        hostname: "mixed-vpn.internal",
+        addresses: ["10.0.0.2", "fd7a:115c:a1e0::2"],
+      })
+    ).toMatchObject({
+      zone: "remote",
+      reason: "MIXED_DNS_ANSWERS",
+    });
+  });
+
+  test("IP literals ignore contradictory caller-supplied DNS answers", () => {
+    expect(
+      classifyDestination({
+        kind: "network",
+        hostname: "8.8.8.8",
+        addresses: ["127.0.0.1"],
+      })
+    ).toMatchObject({
+      zone: "remote",
+      addressClass: "public",
+    });
+  });
+
+  test("classifies explicit bind interfaces without broadening loopback", () => {
+    expect(classifyBindDestination("127.0.0.2").zone).toBe("loopback");
+    expect(classifyBindDestination("[::1]").zone).toBe("loopback");
+    expect(classifyBindDestination("10.1.2.3").zone).toBe("lan");
+    expect(classifyBindDestination("0.0.0.0")).toMatchObject({
+      zone: "remote",
+      reason: "WILDCARD_BIND",
+    });
+    expect(classifyBindDestination("::")).toMatchObject({
+      zone: "remote",
+      reason: "WILDCARD_BIND",
+    });
+    expect(classifyBindDestination("gateway.internal").zone).toBe("remote");
+  });
+
+  test("provider identity stays remote and output is stable and redacted", () => {
+    const decision = classifyDestination({
+      kind: "network",
+      hostname: "provider.secret.example",
+      addresses: ["203.0.113.9"],
+      remoteProvider: true,
+    });
+    expect(decision).toMatchObject({
+      zone: "remote",
+      reason: "REMOTE_PROVIDER",
+      audit: { source: "provider", addressCount: 1 },
+    });
+    const serialized = JSON.stringify(decision);
+    expect(serialized).not.toContain("provider.secret.example");
+    expect(serialized).not.toContain("203.0.113.9");
+    expect(serialized).toBe(JSON.stringify(decision));
+  });
+});
+
+describe("DNS-pinned outbound HTTP policy", () => {
+  test("connects to a pinned HTTPS IP while verifying the original DNS certificate", async () => {
+    const proxyActive = [
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "ALL_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "all_proxy",
+    ].some((name) => Boolean(process.env[name]?.trim()));
+    if (proxyActive) {
+      expect(
+        await prepareHttpDestination("https://model.test/health", {
+          maximumZone: "loopback",
+          resolver: sequenceResolver(["127.0.0.1"]),
+        })
+      ).toMatchObject({
+        ok: false,
+        reason: "PROXY_ENVIRONMENT_ACTIVE",
+      });
+      return;
+    }
+
+    const cert = await Bun.file(
+      `${import.meta.dir}/../fixtures/tls/model.test-cert.pem`
+    ).text();
+    const key = await Bun.file(
+      `${import.meta.dir}/../fixtures/tls/model.test-key.pem`
+    ).text();
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      tls: { cert, key },
+      fetch(request) {
+        return Response.json({
+          host: request.headers.get("host"),
+          pathname: new URL(request.url).pathname,
+        });
+      },
+    });
+    try {
+      const prepared = await prepareHttpDestination(
+        `https://model.test:${server.port}/health`,
+        {
+          maximumZone: "loopback",
+          resolver: sequenceResolver(["127.0.0.1"], ["127.0.0.1"]),
+          env: {},
+        }
+      );
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) return;
+      const acquired = await prepared.value.acquireConnection();
+      expect(acquired.ok).toBe(true);
+      if (!acquired.ok) return;
+
+      const response = await acquired.value.request({ tls: { ca: cert } });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        host: `model.test:${server.port}`,
+        pathname: "/health",
+      });
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("pins and rechecks an exact address set before a manual-redirect request", async () => {
+    const resolver = sequenceResolver(
+      ["10.0.0.3", "10.0.0.2"],
+      ["10.0.0.2", "10.0.0.3"]
+    );
+    const prepared = await prepareHttpDestination(
+      "https://models.secret.internal:8443/v1/embed?token=secret",
+      { maximumZone: "lan", resolver, env: {} }
+    );
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+
+    const acquired = await prepared.value.acquireConnection();
+    expect(acquired.ok).toBe(true);
+    if (!acquired.ok) return;
+    expect(JSON.stringify(acquired.value)).not.toContain("secret");
+    expect(JSON.stringify(acquired.value)).not.toContain("10.0.0");
+
+    let observedUrl = "";
+    let observedInit: BunFetchRequestInit | undefined;
+    const fetchSpy: PinnedHttpFetch = mock(
+      async (
+        input: string | URL | Request,
+        init?: BunFetchRequestInit
+      ): Promise<Response> => {
+        observedUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url;
+        observedInit = init;
+        return new Response(null, { status: 302 });
+      }
+    );
+    const response = await acquired.value.request(
+      { redirect: "follow", proxy: "http://attacker.proxy:8080" },
+      fetchSpy
+    );
+    expect(response.status).toBe(302);
+    expect(observedUrl).toBe("https://10.0.0.2:8443/v1/embed?token=secret");
+    expect(observedInit?.redirect).toBe("manual");
+    expect(observedInit?.proxy).toBeUndefined();
+    expect(new Headers(observedInit?.headers).get("host")).toBe(
+      "models.secret.internal:8443"
+    );
+    expect(observedInit?.tls?.serverName).toBe("models.secret.internal");
+  });
+
+  test("fails closed on rebinding, mixed answers, invalid answers, and DNS overflow", async () => {
+    const rebinding = await prepareHttpDestination("http://model.internal/v1", {
+      maximumZone: "lan",
+      resolver: sequenceResolver(["10.0.0.2"], ["8.8.8.8"]),
+      env: {},
+    });
+    expect(rebinding.ok).toBe(true);
+    if (rebinding.ok) {
+      expect(await rebinding.value.acquireConnection()).toMatchObject({
+        ok: false,
+        reason: "DNS_REBINDING",
+      });
+    }
+
+    const mixed = await prepareHttpDestination("http://model.internal/v1", {
+      maximumZone: "lan",
+      resolver: sequenceResolver(["10.0.0.2", "8.8.8.8"]),
+      env: {},
+    });
+    expect(mixed).toMatchObject({ ok: false, reason: "ZONE_NOT_ALLOWED" });
+
+    for (const answer of [["garbage"], ["fe80::1%en0"]] as const) {
+      expect(
+        await prepareHttpDestination("http://model.internal/v1", {
+          maximumZone: "remote",
+          resolver: sequenceResolver(answer),
+          env: {},
+        })
+      ).toMatchObject({ ok: false, reason: "DNS_INVALID_ANSWER" });
+    }
+
+    const excessive = Array.from(
+      { length: MAX_HTTP_DESTINATION_ADDRESSES + 1 },
+      (_, index) => `10.0.0.${(index % 250) + 1}`
+    );
+    expect(
+      await prepareHttpDestination("http://model.internal/v1", {
+        maximumZone: "lan",
+        resolver: sequenceResolver(excessive),
+        env: {},
+      })
+    ).toMatchObject({ ok: false, reason: "DNS_RESULT_LIMIT" });
+  });
+
+  test("fails restricted requests closed when a process proxy is active", async () => {
+    const lookup = mock(() => Promise.resolve(["10.0.0.2"]));
+    expect(
+      await prepareHttpDestination("http://model.internal/v1", {
+        maximumZone: "lan",
+        resolver: { lookup },
+        env: { HTTPS_PROXY: "http://proxy.internal:8080" },
+      })
+    ).toMatchObject({
+      ok: false,
+      reason: "PROXY_ENVIRONMENT_ACTIVE",
+    });
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  test("rejects provider-to-private resolution and redirect zone changes", async () => {
+    expect(
+      await prepareHttpDestination("https://provider.example/v1", {
+        maximumZone: "remote",
+        remoteProvider: true,
+        resolver: sequenceResolver(["10.0.0.2"]),
+        env: {},
+      })
+    ).toMatchObject({
+      ok: false,
+      reason: "PROVIDER_ADDRESS_NOT_PUBLIC",
+    });
+
+    const initial = await prepareHttpDestination("https://public.example/v1", {
+      maximumZone: "remote",
+      resolver: sequenceResolver(["8.8.8.8"], ["10.0.0.2"]),
+      env: {},
+    });
+    expect(initial.ok).toBe(true);
+    if (initial.ok) {
+      expect(
+        await initial.value.followRedirect("https://private.example/v1")
+      ).toMatchObject({
+        ok: false,
+        reason: "REDIRECT_ZONE_CHANGED",
+      });
+      expect(
+        await initial.value.followRedirect("http://public.example/v2")
+      ).toMatchObject({
+        ok: false,
+        reason: "HTTPS_DOWNGRADE",
+      });
+    }
+
+    const provider = await prepareHttpDestination(
+      "https://provider.example/v1",
+      {
+        maximumZone: "remote",
+        remoteProvider: true,
+        resolver: sequenceResolver(["8.8.8.8"]),
+        env: {},
+      }
+    );
+    expect(provider.ok).toBe(true);
+    if (provider.ok) {
+      expect(
+        await provider.value.followRedirect("https://attacker.example/collect")
+      ).toMatchObject({
+        ok: false,
+        reason: "PROVIDER_REDIRECT_ORIGIN_CHANGED",
+      });
+    }
+  });
+
+  test("denials and pins omit credentials, hostnames, paths, and addresses", async () => {
+    const credentialed = await prepareHttpDestination(
+      "https://user:password@secret.example/private/path?api_key=token",
+      {
+        maximumZone: "remote",
+        resolver: sequenceResolver(["8.8.8.8"]),
+        env: {},
+      }
+    );
+    const serialized = JSON.stringify(credentialed);
+    for (const secret of [
+      "user",
+      "password",
+      "secret.example",
+      "private/path",
+      "api_key",
+      "8.8.8.8",
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+});
+
+describe("HTTP MCP peer integration", () => {
+  test("uses one socket peer classification and ignores forwarded headers", async () => {
+    let samples = 0;
+    const security = new HttpMcpSecurity(resolveHttpGatewayConfig(undefined));
+    await security.initialize();
+    const request = new Request("http://127.0.0.1:3000/mcp", {
+      headers: {
+        host: "127.0.0.1:3000",
+        forwarded: "for=203.0.113.9",
+        "x-forwarded-for": "203.0.113.9",
+      },
+    });
+    const result = await security.authorize(request, {
+      requestIP: () => {
+        samples += 1;
+        return { address: "127.0.0.2", port: 50_000 };
+      },
+      timeout: () => undefined,
+    });
+    expect(samples).toBe(1);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.peerClassification.zone).toBe("loopback");
+      expect(result.value.request.headers.has("forwarded")).toBe(false);
+      expect(result.value.request.headers.has("x-forwarded-for")).toBe(false);
+    }
+  });
+
+  test("derives exact defaults for every accepted loopback bind literal", () => {
+    expect(resolveHttpGatewayConfig({ host: "127.0.0.2" })).toMatchObject({
+      allowedHosts: ["127.0.0.2:3000"],
+      allowedOrigins: ["http://127.0.0.2:3000"],
+    });
+    expect(resolveHttpGatewayConfig({ host: "0:0:0:0:0:0:0:1" })).toMatchObject(
+      {
+        allowedHosts: ["[::1]:3000"],
+        allowedOrigins: ["http://[::1]:3000"],
+      }
+    );
+  });
+});
