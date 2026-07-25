@@ -38,9 +38,8 @@ Deliver complete record metadata parity security packaging and support docs as o
 
 
 ## Done summary
-TBD
-
+Completed portable export-record integration across storage, retrieval, CLI, SDK, MCP, REST, Ask, Context Capsules, project profiles, packaging, and documentation. Logical records retain stable source lineage, bounded metadata and exact anchors while remaining read-only projections of their source containers. Added atomic snapshot reconciliation, safe partial/authoritative tombstone semantics, deterministic timezone handling, canonical adapter fingerprints, logical-source filtering/context parity across BM25/vector/hybrid/graph, live-browser-profile and symlink denial, global control-character sanitization, closed output schemas, packed-package coverage, hosted documentation, and refreshed deterministic benchmark/demo artifacts.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 869b40df, ec8a27bd, 70cba6fe, 28138a00
+- Tests: bun run lint:check (0 warnings/errors; formatting clean), bun test (3327 pass, 2 expected skips, 0 fail), bun run docs:verify (13 pass, 2 model-cache skips), bun run test:package (packed npm smoke passed; real-user sentinel unchanged), bun run eval:agentic -- --write (144/144 scored; Capsule promotion passed), gno skill evaluator (47/47, 100%), gno.sh ultracite/typecheck/test/build (111 pass, 7 skipped; 68 routes prerendered)
 - PRs:
