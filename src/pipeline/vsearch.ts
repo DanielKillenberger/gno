@@ -22,6 +22,7 @@ import {
   sortByFinalScoreStable,
 } from "./content-type-boost";
 import { formatQueryForEmbedding } from "./contextual";
+import { attachSearchResultEgressLineage } from "./egress-lineage";
 import { matchesExcludedChunks, matchesExcludedText } from "./exclude";
 import { selectBestChunkForSteering } from "./intent";
 import { hasProjectAffinity } from "./project-affinity";
@@ -423,6 +424,14 @@ export async function searchVectorWithEmbedding(
     if (metadata) metadata.retrievalRank = index + 1;
   }
   await attachSearchResultContexts(store, finalResults);
+  const lineageResult = await attachSearchResultEgressLineage(
+    store,
+    finalResults,
+    uniqueHashes
+  );
+  if (!lineageResult.ok) {
+    return err("QUERY_FAILED", lineageResult.error.message);
+  }
 
   const output: SearchResults = {
     results: finalResults,

@@ -15,6 +15,7 @@ import {
   maximumDestinationZoneForCollections,
 } from "../core/egress-enforcement";
 import { evaluateEgressPolicy } from "../core/egress-policy";
+import { EgressProvenanceError } from "../core/egress-provenance";
 import { classifyHttpDestination, prepareHttpDestination } from "./http-policy";
 
 const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
@@ -32,7 +33,12 @@ export interface HttpInferenceOptions {
 const scopedStates = (
   options: HttpInferenceOptions
 ): readonly CollectionEgressState[] => {
-  return collectionEgressStates(options.collections, options.collectionNames);
+  try {
+    return collectionEgressStates(options.collections, options.collectionNames);
+  } catch (error) {
+    if (error instanceof EgressProvenanceError) return [];
+    throw error;
+  }
 };
 
 const enforce = (

@@ -21,7 +21,7 @@
     "evidence"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.0" },
+    "schemaVersion": { "enum": ["1.0", "1.1"] },
     "coordinateSpace": { "const": "canonical_mirror" },
     "capsuleId": { "$ref": "#/definitions/sha256" },
     "operationStatus": { "const": "completed" },

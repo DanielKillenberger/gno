@@ -151,7 +151,6 @@ describe("Context Capsule CLI and SDK", () => {
         { mode: "term", text: "launch" },
       ]);
       expect(sdkCapsule.fallbacks.map((fallback) => fallback.code)).toEqual([
-        "egress_policy_unavailable",
         "tokenizer_unavailable",
       ]);
 

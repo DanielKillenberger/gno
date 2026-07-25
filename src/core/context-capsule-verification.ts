@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   CONTEXT_CAPSULE_COORDINATE_SPACE,
+  CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION,
   CONTEXT_CAPSULE_SCHEMA_VERSION,
   contextCapsuleGnoUriSchema,
   contextCapsuleIndexSnapshotSchema,
@@ -120,7 +121,10 @@ export const contextCapsuleVerificationEvidenceSchema = z
 
 export const contextCapsuleVerificationSchema = z
   .object({
-    schemaVersion: z.literal(CONTEXT_CAPSULE_SCHEMA_VERSION),
+    schemaVersion: z.union([
+      z.literal(CONTEXT_CAPSULE_SCHEMA_VERSION),
+      z.literal(CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION),
+    ]),
     coordinateSpace: z.literal(CONTEXT_CAPSULE_COORDINATE_SPACE),
     capsuleId: sha256Schema,
     operationStatus: z.literal("completed"),

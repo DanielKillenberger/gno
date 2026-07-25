@@ -11,6 +11,7 @@ import type {
 
 import { resolveConfiguredEgressPolicy } from "../config/types";
 import { evaluateEgressPolicy } from "./egress-policy";
+import { resolveEgressLineage } from "./egress-provenance";
 
 export const EGRESS_DENIED_MESSAGE =
   "Operation blocked by collection egress policy";
@@ -45,21 +46,17 @@ export const collectionEgressStates = (
   collections: readonly Collection[],
   names?: readonly string[]
 ) => {
-  const requested = names
-    ? new Set(names.map((name) => name.trim().toLowerCase()).filter(Boolean))
-    : null;
-  return collections
-    .filter(
-      (collection) => requested === null || requested.has(collection.name)
-    )
-    .map((collection) => {
+  return resolveEgressLineage(
+    collections.map((collection) => {
       const effective = resolveConfiguredEgressPolicy(collection);
       return {
         collection: collection.name,
         policy: effective.policy,
         source: effective.source,
       };
-    });
+    }),
+    names
+  ).sources;
 };
 
 export interface EnforceCollectionEgressInput {
@@ -93,7 +90,6 @@ export const maximumDestinationZoneForCollections = (
   names?: readonly string[]
 ): Exclude<EgressDestinationZone, "local_process"> => {
   const states = collectionEgressStates(collections, names);
-  if (states.length === 0) return "loopback";
   if (states.some(({ policy }) => policy === "local_only")) return "loopback";
   if (states.some(({ policy }) => policy === "lan")) return "lan";
   return "remote";

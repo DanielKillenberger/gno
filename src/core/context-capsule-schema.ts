@@ -11,10 +11,12 @@ import {
   sha256Text,
   validateContextCapsulePayload,
 } from "./context-capsule-validation";
+import { egressLineageSchema } from "./egress-provenance";
 
 export { contextCapsuleIndexSnapshotSchema } from "./context-capsule-index-schema";
 
 export const CONTEXT_CAPSULE_SCHEMA_VERSION = "1.0" as const;
+export const CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION = "1.1" as const;
 export const CONTEXT_CAPSULE_COORDINATE_SPACE = "canonical_mirror" as const;
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -356,6 +358,7 @@ export const contextCapsuleEvidenceSchema = z
       "unclassified",
       "unavailable",
     ]),
+    egressLineage: egressLineageSchema.optional(),
     record: recordEvidenceMetadataSchema.optional(),
   })
   .strict()
@@ -405,6 +408,11 @@ export const contextCapsuleEvidenceSchema = z
       });
     }
   });
+
+export const contextCapsuleEvidenceV1_1Schema =
+  contextCapsuleEvidenceSchema.and(
+    z.object({ egressLineage: egressLineageSchema }).passthrough()
+  );
 
 const coveredFacetSchema = z
   .object({
@@ -570,8 +578,50 @@ export const contextCapsulePayloadV1Schema = z
     warnings: z.array(warningSchema).max(32),
   })
   .strict()
-  .superRefine(validateContextCapsulePayload);
+  .superRefine((value, context) => {
+    validateContextCapsulePayload(value, context);
+    if (
+      value.evidence.some((evidence) => evidence.egressLineage !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Context Capsule 1.0 cannot contain egress lineage",
+        path: ["evidence"],
+      });
+    }
+  });
 
 export type ContextCapsulePayloadV1 = z.infer<
   typeof contextCapsulePayloadV1Schema
 >;
+
+export const contextCapsulePayloadV1_1Schema = z
+  .object({
+    schemaVersion: z.literal(CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION),
+    coordinateSpace: z.literal(CONTEXT_CAPSULE_COORDINATE_SPACE),
+    goal: nonEmptyTextSchema,
+    query: nonEmptyTextSchema,
+    scope: scopeSchema,
+    budget: budgetSchema,
+    retrieval: contextCapsuleRetrievalSchema,
+    fingerprints: fingerprintsSchema,
+    capabilities: capabilitiesSchema,
+    fallbacks: z.array(fallbackSchema).max(16),
+    guidance: guidanceSchema,
+    egressLineage: egressLineageSchema,
+    evidence: z.array(contextCapsuleEvidenceV1_1Schema).min(1),
+    coverage: coverageSchema,
+    omissions: omissionsSchema,
+    truncated: z.boolean(),
+    warnings: z.array(warningSchema).max(32),
+  })
+  .strict()
+  .superRefine(validateContextCapsulePayload);
+
+export type ContextCapsulePayloadV1_1 = z.infer<
+  typeof contextCapsulePayloadV1_1Schema
+>;
+
+export type ContextCapsulePayload =
+  | ContextCapsulePayloadV1
+  | ContextCapsulePayloadV1_1;

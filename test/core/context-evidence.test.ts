@@ -301,7 +301,10 @@ describe("Context evidence materialization", () => {
       sha256Text("context-one")
     );
     expect(materialized[0]?.value.trust).toBe("untrusted");
-    expect(materialized[0]?.value.egress).toBe("unavailable");
+    expect(materialized[0]?.value.egress).toBe("local_only");
+    expect(materialized[0]?.value.egressLineage?.effectivePolicy).toBe(
+      "local_only"
+    );
     expect(materialized[1]?.value.documentDate).toBeNull();
 
     const selected = materialized[0];
@@ -320,7 +323,8 @@ describe("Context evidence materialization", () => {
     );
     expect(evidence.text).toBe(injection);
     expect(evidence.trust).toBe("untrusted");
-    expect(evidence.egress).toBe("unavailable");
+    expect(evidence.egress).toBe("local_only");
+    expect(evidence.egressLineage.effectivePolicy).toBe("local_only");
     expect(evidence.evidenceId).toMatch(/^[a-f0-9]{64}$/);
   });
 
