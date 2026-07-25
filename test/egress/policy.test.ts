@@ -9,6 +9,8 @@ import {
 import {
   EGRESS_ACTIONS,
   EGRESS_CONTENT_CLASSES,
+  EGRESS_DESTINATION_ZONES,
+  EGRESS_MAX_COLLECTIONS,
   EGRESS_REASON_CODES,
   type EgressAction,
   type EgressContentClass,
@@ -88,6 +90,51 @@ describe("collection egress policy", () => {
         expect(result.allowed).toBe(true);
         expect(result.code).toBe("EGRESS_ALLOWED");
       }
+    }
+  });
+
+  test("defines every action and destination-zone decision", () => {
+    const matrix = [
+      ["retrieve", "local_process", true, "LOCAL_DESTINATION"],
+      ["retrieve", "loopback", true, "LOCAL_DESTINATION"],
+      ["retrieve", "lan", true, "LAN_POLICY_AUTHENTICATED"],
+      ["retrieve", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
+      ["serve", "local_process", false, "ACTION_DESTINATION_MISMATCH"],
+      ["serve", "loopback", true, "LOCAL_DESTINATION"],
+      ["serve", "lan", true, "LAN_POLICY_AUTHENTICATED"],
+      ["serve", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
+      ["publish", "local_process", false, "ACTION_DESTINATION_MISMATCH"],
+      ["publish", "loopback", false, "ACTION_DESTINATION_MISMATCH"],
+      ["publish", "lan", false, "ACTION_DESTINATION_MISMATCH"],
+      ["publish", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
+      [
+        "remote_inference",
+        "local_process",
+        false,
+        "ACTION_DESTINATION_MISMATCH",
+      ],
+      ["remote_inference", "loopback", false, "ACTION_DESTINATION_MISMATCH"],
+      ["remote_inference", "lan", false, "ACTION_DESTINATION_MISMATCH"],
+      ["remote_inference", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
+      ["export", "local_process", true, "LOCAL_DESTINATION"],
+      ["export", "loopback", false, "ACTION_DESTINATION_MISMATCH"],
+      ["export", "lan", true, "LAN_POLICY_AUTHENTICATED"],
+      ["export", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
+      ["clip_write", "local_process", true, "LOCAL_DESTINATION"],
+      ["clip_write", "loopback", true, "LOCAL_DESTINATION"],
+      ["clip_write", "lan", true, "LAN_POLICY_AUTHENTICATED"],
+      ["clip_write", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
+    ] as const;
+    expect(matrix).toHaveLength(
+      EGRESS_ACTIONS.length * EGRESS_DESTINATION_ZONES.length
+    );
+    for (const [action, zone, allowed, reason] of matrix) {
+      const input = request(action);
+      input.destination.zone = zone;
+      expect(evaluateEgressPolicy(input)).toMatchObject({
+        allowed,
+        reason,
+      });
     }
   });
 
@@ -191,6 +238,157 @@ describe("collection egress policy", () => {
         effectivePolicySource: "mixed",
       },
     });
+  });
+
+  test("rejects every non-explicit non-local policy pair", () => {
+    for (const source of ["config_default", "legacy_default"] as const) {
+      for (const policy of ["lan", "remote"] as const) {
+        const input = request();
+        input.collections = [{ collection: "notes", policy, source }];
+        expect(evaluateEgressPolicy(input)).toMatchObject({
+          allowed: false,
+          code: "EGRESS_DENIED",
+          reason: "INVALID_POLICY_SOURCE_PAIR",
+        });
+      }
+    }
+
+    const mixed = request("serve");
+    mixed.destination.zone = "lan";
+    mixed.collections = [
+      { collection: "explicit", policy: "remote", source: "explicit" },
+      {
+        collection: "invalid_default",
+        policy: "lan",
+        source: "config_default",
+      },
+    ];
+    expect(evaluateEgressPolicy(mixed).reason).toBe(
+      "INVALID_POLICY_SOURCE_PAIR"
+    );
+
+    for (const source of ["config_default", "legacy_default"] as const) {
+      const input = request();
+      input.collections = [
+        { collection: "notes", policy: "local_only", source },
+      ];
+      expect(evaluateEgressPolicy(input)).toMatchObject({
+        allowed: true,
+        reason: "LOCAL_DESTINATION",
+      });
+    }
+  });
+
+  test("bounds collection evaluation and audit projection before iteration", () => {
+    const atLimit = request();
+    atLimit.collections = Array.from(
+      { length: EGRESS_MAX_COLLECTIONS },
+      (_, index) => ({
+        collection: `collection_${index}`,
+        policy: "remote" as const,
+        source: "explicit" as const,
+      })
+    );
+    const allowed = evaluateEgressPolicy(atLimit);
+    expect(allowed.allowed).toBe(true);
+    expect(allowed.audit.collectionCount).toBe(EGRESS_MAX_COLLECTIONS);
+    expect(allowed.audit.collections).toHaveLength(EGRESS_MAX_COLLECTIONS);
+
+    const overLimit = request();
+    overLimit.collections = [
+      ...atLimit.collections,
+      {
+        collection: "one_too_many",
+        policy: "remote",
+        source: "explicit",
+      },
+    ];
+    const denied = evaluateEgressPolicy(overLimit);
+    expect(denied).toMatchObject({
+      allowed: false,
+      reason: "COLLECTION_LIMIT_EXCEEDED",
+      audit: {
+        collectionCount: EGRESS_MAX_COLLECTIONS + 1,
+        collections: [],
+      },
+    });
+
+    const hugeSparse: unknown[] = [];
+    hugeSparse.length = 1_000_000_000;
+    const sparseInput = {
+      ...request(),
+      collections: hugeSparse,
+    };
+    const sparseDecision = evaluateEgressPolicy(sparseInput);
+    expect(sparseDecision.reason).toBe("COLLECTION_LIMIT_EXCEEDED");
+    expect(JSON.stringify(sparseDecision).length).toBeLessThan(512);
+  });
+
+  test("contains hostile getters proxies and sparse entries", () => {
+    const throwingTopLevel = {};
+    Object.defineProperty(throwingTopLevel, "collections", {
+      get(): never {
+        throw new Error("secret getter");
+      },
+    });
+
+    const throwingCollection = {};
+    Object.defineProperty(throwingCollection, "collection", {
+      get(): never {
+        throw new Error("secret collection");
+      },
+    });
+    const nested = {
+      ...request(),
+      collections: [throwingCollection],
+    };
+
+    const sparseCollections: unknown[] = [];
+    sparseCollections.length = 4;
+    const sparseWithinLimit = {
+      ...request(),
+      collections: sparseCollections,
+    };
+
+    const revocable = Proxy.revocable({}, {});
+    revocable.revoke();
+
+    for (const hostile of [
+      throwingTopLevel,
+      nested,
+      sparseWithinLimit,
+      revocable.proxy,
+    ]) {
+      expect(() => evaluateEgressPolicy(hostile)).not.toThrow();
+      const result = evaluateEgressPolicy(hostile);
+      expect(result.allowed).toBe(false);
+      if (hostile === sparseWithinLimit) {
+        expect(result.reason).toBe("INVALID_COLLECTION");
+        expect(result.audit.collections).toEqual([
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown",
+        ]);
+      } else {
+        expect(result).toEqual({
+          allowed: false,
+          code: "EGRESS_DENIED",
+          reason: "INVALID_INPUT",
+          audit: {
+            action: "unknown",
+            destinationZone: "unknown",
+            contentClass: "unknown",
+            collectionCount: 0,
+            collections: [],
+            effectivePolicy: "unknown",
+            effectivePolicySource: "unknown",
+            callerAuthenticated: null,
+            callerOperationAuthorized: null,
+          },
+        });
+      }
+    }
   });
 
   test("structured-denies malformed and unknown inputs without throwing", () => {

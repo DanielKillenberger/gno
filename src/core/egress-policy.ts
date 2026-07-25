@@ -39,12 +39,16 @@ export const EGRESS_CONTENT_CLASSES = [
 ] as const;
 export type EgressContentClass = (typeof EGRESS_CONTENT_CLASSES)[number];
 
+/** Hard cap for one decision and its bounded audit projection. */
+export const EGRESS_MAX_COLLECTIONS = 64;
+
 export const EGRESS_REASON_CODES = [
   "LOCAL_DESTINATION",
   "LAN_POLICY_AUTHENTICATED",
   "REMOTE_POLICY_AUTHENTICATED",
   "INVALID_INPUT",
   "NO_COLLECTION_POLICY",
+  "COLLECTION_LIMIT_EXCEEDED",
   "INVALID_COLLECTION",
   "UNKNOWN_ACTION",
   "UNKNOWN_DESTINATION",
@@ -52,6 +56,7 @@ export const EGRESS_REASON_CODES = [
   "UNKNOWN_CONTENT_CLASS",
   "UNKNOWN_POLICY",
   "UNKNOWN_POLICY_SOURCE",
+  "INVALID_POLICY_SOURCE_PAIR",
   "INVALID_CALLER",
   "CALLER_NOT_AUTHORIZED",
   "AUTHENTICATION_REQUIRED",
@@ -121,6 +126,26 @@ export interface EgressPolicyPort {
   evaluate(input: EgressEvaluationInput): EgressDecision;
 }
 
+interface RuntimeCollectionEgressState {
+  collection: unknown;
+  policy: unknown;
+  source: unknown;
+}
+
+interface EgressEvaluationSnapshot {
+  collections: RuntimeCollectionEgressState[];
+  action: unknown;
+  destinationZone: unknown;
+  callerAuthenticated: unknown;
+  callerOperationAuthorized: unknown;
+  contentClass: unknown;
+}
+
+type EgressSnapshotResult =
+  | { kind: "invalid" }
+  | { kind: "limit_exceeded" }
+  | { kind: "snapshot"; value: EgressEvaluationSnapshot };
+
 const ACTIONS = new Set<unknown>(EGRESS_ACTIONS);
 const DESTINATION_ZONES = new Set<unknown>(EGRESS_DESTINATION_ZONES);
 const CONTENT_CLASSES = new Set<unknown>(EGRESS_CONTENT_CLASSES);
@@ -146,39 +171,105 @@ const isPolicySource = (value: unknown): value is EgressPolicySource =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-function createAudit(input: unknown): EgressDecisionMetadata {
-  const record = isRecord(input) ? input : {};
-  const destination = isRecord(record.destination) ? record.destination : {};
-  const caller = isRecord(record.caller) ? record.caller : {};
-  const rawCollections = Array.isArray(record.collections)
-    ? record.collections
-    : [];
-  const collections = rawCollections
-    .map((collection) =>
-      isRecord(collection) &&
-      typeof collection.collection === "string" &&
-      COLLECTION_NAME_PATTERN.test(collection.collection)
-        ? collection.collection
+function invalidInputAudit(): EgressDecisionMetadata {
+  return {
+    action: "unknown",
+    destinationZone: "unknown",
+    contentClass: "unknown",
+    collectionCount: 0,
+    collections: [],
+    effectivePolicy: "unknown",
+    effectivePolicySource: "unknown",
+    callerAuthenticated: null,
+    callerOperationAuthorized: null,
+  };
+}
+
+function limitExceededAudit(): EgressDecisionMetadata {
+  return {
+    ...invalidInputAudit(),
+    collectionCount: EGRESS_MAX_COLLECTIONS + 1,
+  };
+}
+
+/**
+ * Read untrusted object graphs once into bounded plain data. Any throwing
+ * getter or revoked proxy escapes to the evaluator's fixed fail-closed catch.
+ */
+function snapshotInput(input: unknown): EgressSnapshotResult {
+  if (!isRecord(input)) return { kind: "invalid" };
+
+  const rawCollections = input.collections;
+  if (!Array.isArray(rawCollections)) return { kind: "invalid" };
+  const collectionCount = rawCollections.length;
+  if (collectionCount > EGRESS_MAX_COLLECTIONS) {
+    return { kind: "limit_exceeded" };
+  }
+
+  const collections: RuntimeCollectionEgressState[] = [];
+  for (let index = 0; index < collectionCount; index += 1) {
+    const collection = rawCollections[index];
+    if (!isRecord(collection)) {
+      collections.push({
+        collection: undefined,
+        policy: undefined,
+        source: undefined,
+      });
+      continue;
+    }
+    collections.push({
+      collection: collection.collection,
+      policy: collection.policy,
+      source: collection.source,
+    });
+  }
+
+  const destination = input.destination;
+  const caller = input.caller;
+  return {
+    kind: "snapshot",
+    value: {
+      collections,
+      action: input.action,
+      destinationZone: isRecord(destination) ? destination.zone : undefined,
+      callerAuthenticated: isRecord(caller) ? caller.authenticated : undefined,
+      callerOperationAuthorized: isRecord(caller)
+        ? caller.operationAuthorized
+        : undefined,
+      contentClass: input.contentClass,
+    },
+  };
+}
+
+function snapshotAudit(
+  snapshot: EgressEvaluationSnapshot
+): EgressDecisionMetadata {
+  const collections = snapshot.collections
+    .map(({ collection }) =>
+      typeof collection === "string" && COLLECTION_NAME_PATTERN.test(collection)
+        ? collection
         : "unknown"
     )
     .sort();
   return {
-    action: isAction(record.action) ? record.action : "unknown",
-    destinationZone: isDestinationZone(destination.zone)
-      ? destination.zone
+    action: isAction(snapshot.action) ? snapshot.action : "unknown",
+    destinationZone: isDestinationZone(snapshot.destinationZone)
+      ? snapshot.destinationZone
       : "unknown",
-    contentClass: isContentClass(record.contentClass)
-      ? record.contentClass
+    contentClass: isContentClass(snapshot.contentClass)
+      ? snapshot.contentClass
       : "unknown",
-    collectionCount: rawCollections.length,
+    collectionCount: snapshot.collections.length,
     collections,
     effectivePolicy: "unknown",
     effectivePolicySource: "unknown",
     callerAuthenticated:
-      typeof caller.authenticated === "boolean" ? caller.authenticated : null,
+      typeof snapshot.callerAuthenticated === "boolean"
+        ? snapshot.callerAuthenticated
+        : null,
     callerOperationAuthorized:
-      typeof caller.operationAuthorized === "boolean"
-        ? caller.operationAuthorized
+      typeof snapshot.callerOperationAuthorized === "boolean"
+        ? snapshot.callerOperationAuthorized
         : null,
   };
 }
@@ -244,81 +335,98 @@ function actionAllowsDestination(
  * malformed JavaScript callers fail-closed even though TypeScript callers get
  * the narrower contract.
  */
-export function evaluateEgressPolicy(
-  input: EgressEvaluationInput | null | undefined
-): EgressDecision {
-  const audit = createAudit(input);
-  if (!isRecord(input)) {
-    return decision(false, "INVALID_INPUT", audit);
-  }
-  if (!Array.isArray(input.collections) || input.collections.length === 0) {
+function evaluateSnapshot(snapshot: EgressEvaluationSnapshot): EgressDecision {
+  const audit = snapshotAudit(snapshot);
+  if (snapshot.collections.length === 0) {
     return decision(false, "NO_COLLECTION_POLICY", audit);
   }
-  if (!isAction(input.action)) {
+  if (!isAction(snapshot.action)) {
     return decision(false, "UNKNOWN_ACTION", audit);
   }
-  if (
-    !isRecord(input.destination) ||
-    !isDestinationZone(input.destination.zone)
-  ) {
+  if (!isDestinationZone(snapshot.destinationZone)) {
     return decision(false, "UNKNOWN_DESTINATION", audit);
   }
-  if (!actionAllowsDestination(input.action, input.destination.zone)) {
+  if (!actionAllowsDestination(snapshot.action, snapshot.destinationZone)) {
     return decision(false, "ACTION_DESTINATION_MISMATCH", audit);
   }
-  if (!isContentClass(input.contentClass)) {
+  if (!isContentClass(snapshot.contentClass)) {
     return decision(false, "UNKNOWN_CONTENT_CLASS", audit);
   }
   if (
-    !isRecord(input.caller) ||
-    typeof input.caller.authenticated !== "boolean" ||
-    typeof input.caller.operationAuthorized !== "boolean"
+    typeof snapshot.callerAuthenticated !== "boolean" ||
+    typeof snapshot.callerOperationAuthorized !== "boolean"
   ) {
     return decision(false, "INVALID_CALLER", audit);
   }
 
-  for (const collection of input.collections) {
+  const collections: CollectionEgressState[] = [];
+  for (const collection of snapshot.collections) {
     if (
-      !isRecord(collection) ||
       typeof collection.collection !== "string" ||
       !COLLECTION_NAME_PATTERN.test(collection.collection)
     ) {
       return decision(false, "INVALID_COLLECTION", audit);
     }
-    if (!isPolicy(collection?.policy)) {
+    if (!isPolicy(collection.policy)) {
       return decision(false, "UNKNOWN_POLICY", audit);
     }
-    if (!isPolicySource(collection?.source)) {
+    if (!isPolicySource(collection.source)) {
       return decision(false, "UNKNOWN_POLICY_SOURCE", audit);
     }
+    if (
+      collection.source !== "explicit" &&
+      collection.policy !== "local_only"
+    ) {
+      return decision(false, "INVALID_POLICY_SOURCE_PAIR", audit);
+    }
+    collections.push({
+      collection: collection.collection,
+      policy: collection.policy,
+      source: collection.source,
+    });
   }
 
-  const effective = effectiveCollectionPolicy(input.collections);
+  const effective = effectiveCollectionPolicy(collections);
   audit.effectivePolicy = effective.policy;
   audit.effectivePolicySource = effective.source;
 
-  if (!input.caller.operationAuthorized) {
+  if (!snapshot.callerOperationAuthorized) {
     return decision(false, "CALLER_NOT_AUTHORIZED", audit);
   }
   if (
-    input.destination.zone === "local_process" ||
-    input.destination.zone === "loopback"
+    snapshot.destinationZone === "local_process" ||
+    snapshot.destinationZone === "loopback"
   ) {
     return decision(true, "LOCAL_DESTINATION", audit);
   }
   if (effective.policy === "local_only") {
     return decision(false, "POLICY_LOCAL_ONLY", audit);
   }
-  if (input.destination.zone === "remote" && effective.policy === "lan") {
+  if (snapshot.destinationZone === "remote" && effective.policy === "lan") {
     return decision(false, "POLICY_LAN_ONLY", audit);
   }
-  if (!input.caller.authenticated) {
+  if (!snapshot.callerAuthenticated) {
     return decision(false, "AUTHENTICATION_REQUIRED", audit);
   }
-  if (input.destination.zone === "lan") {
+  if (snapshot.destinationZone === "lan") {
     return decision(true, "LAN_POLICY_AUTHENTICATED", audit);
   }
   return decision(true, "REMOTE_POLICY_AUTHENTICATED", audit);
+}
+
+export function evaluateEgressPolicy(input: unknown): EgressDecision {
+  try {
+    const result = snapshotInput(input);
+    if (result.kind === "invalid") {
+      return decision(false, "INVALID_INPUT", invalidInputAudit());
+    }
+    if (result.kind === "limit_exceeded") {
+      return decision(false, "COLLECTION_LIMIT_EXCEEDED", limitExceededAudit());
+    }
+    return evaluateSnapshot(result.value);
+  } catch {
+    return decision(false, "INVALID_INPUT", invalidInputAudit());
+  }
 }
 
 export const defaultEgressPolicyPort: EgressPolicyPort = Object.freeze({

@@ -57,12 +57,18 @@ describe("store migrations", () => {
            WHERE name = 'legacy'`
         )
       ).toThrow();
-      expect(() =>
-        db.run(
-          `UPDATE collections SET egress_policy = 'remote'
-           WHERE name = 'legacy'`
-        )
-      ).toThrow();
+      for (const source of ["config_default", "legacy_default"]) {
+        for (const policy of ["lan", "remote"]) {
+          expect(() =>
+            db.run(
+              `UPDATE collections
+               SET egress_policy = ?, egress_policy_source = ?
+               WHERE name = 'legacy'`,
+              [policy, source]
+            )
+          ).toThrow();
+        }
+      }
 
       collectionEgressMigration.down?.(db);
       const columns = db
