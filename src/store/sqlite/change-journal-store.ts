@@ -25,7 +25,6 @@ import {
 import {
   createEgressLineage,
   egressLineageSchema,
-  legacyLocalOnlyEgressLineage,
 } from "../../core/egress-provenance";
 import { err, ok } from "../types";
 
@@ -269,15 +268,18 @@ export const appendDocumentChange = (
        FROM collections WHERE name = ?`
     )
     .get(draft.collection);
-  const egressLineage = collectionPolicy
-    ? createEgressLineage([
-        {
-          collection: draft.collection,
-          policy: collectionPolicy.egress_policy,
-          source: collectionPolicy.egress_policy_source,
-        },
-      ])
-    : legacyLocalOnlyEgressLineage(draft.collection);
+  if (!collectionPolicy) {
+    throw new Error(
+      `Document change policy lineage references unknown collection ${draft.collection}`
+    );
+  }
+  const egressLineage = createEgressLineage([
+    {
+      collection: draft.collection,
+      policy: collectionPolicy.egress_policy,
+      source: collectionPolicy.egress_policy_source,
+    },
+  ]);
   const egressLineageJson = JSON.stringify(egressLineage);
   const egressLineageBytes = UTF8_ENCODER.encode(egressLineageJson).byteLength;
   const storedByteSize = byteSize(draft, [

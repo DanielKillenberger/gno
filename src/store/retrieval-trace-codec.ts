@@ -364,6 +364,19 @@ export const hashRetrievalTraceCreation = (
   return hashTraceCanonical(immutable);
 };
 
+/** Exact pre-v24 creation projection, used only for marked migrated rows. */
+export const hashLegacyRetrievalTraceCreation = (
+  trace: RetrievalTraceInput
+): string => {
+  const {
+    status: _status,
+    updatedAtMs: _updatedAtMs,
+    egressLineage: _egressLineage,
+    ...immutable
+  } = trace;
+  return hashTraceCanonical(immutable);
+};
+
 export const parseRetrievalTraceInput = (
   input: RetrievalTraceInput
 ): RetrievalTraceInput => retrievalTraceInputSchema.parse(input);

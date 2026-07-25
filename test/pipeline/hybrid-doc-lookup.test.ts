@@ -233,6 +233,18 @@ const TEST_COLLECTIONS: CollectionRow[] = [
     egressPolicySource: "legacy_default",
     syncedAt: NOW,
   },
+  {
+    name: "archive",
+    path: "/tmp/archive",
+    pattern: "**/*",
+    include: null,
+    exclude: null,
+    updateCmd: null,
+    languageHint: null,
+    egressPolicy: "local_only",
+    egressPolicySource: "legacy_default",
+    syncedAt: NOW,
+  },
 ];
 
 describe("searchHybrid targeted document lookup", () => {

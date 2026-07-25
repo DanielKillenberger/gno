@@ -24,13 +24,16 @@ const lineage = createEgressLineage([
   { collection: "public", policy: "remote", source: "explicit" },
 ]);
 
-const decision = (zone: "loopback" | "remote"): EgressDecision =>
+const decision = (
+  zone: "loopback" | "remote",
+  contentClass: "capsule" | "retrieval_trace" = "capsule"
+): EgressDecision =>
   defaultEgressPolicyPort.evaluate({
     collections: lineage.sources,
     action: zone === "loopback" ? "serve" : "publish",
     destination: { zone },
     caller: { authenticated: true, operationAuthorized: true },
-    contentClass: "capsule",
+    contentClass,
   });
 
 describe("egress audit receipts", () => {
@@ -136,7 +139,7 @@ describe("egress audit receipts", () => {
       expect(
         (
           await service.record({
-            decision: decision("loopback"),
+            decision: decision("loopback", "retrieval_trace"),
             lineage,
             contentClass: "retrieval_trace",
             retention,
@@ -174,5 +177,121 @@ describe("egress audit receipts", () => {
         .query<{ secure_delete: number }, []>("PRAGMA secure_delete")
         .get()?.secure_delete
     ).toBe(priorSecureDelete);
+  });
+
+  test("rejects caller-forged decision metadata before persistence", async () => {
+    const service = new EgressAuditService(store, {
+      clock: () => 50_000,
+      idFactory: () => "forged",
+    });
+    const valid = decision("loopback");
+    const forgeries: EgressDecision[] = [
+      { ...valid, reason: "POLICY_LOCAL_ONLY" },
+      {
+        ...valid,
+        audit: { ...valid.audit, action: "publish" },
+      },
+      {
+        ...valid,
+        audit: { ...valid.audit, contentClass: "retrieval_trace" },
+      },
+      {
+        ...valid,
+        audit: { ...valid.audit, collectionCount: 1 },
+      },
+      {
+        ...valid,
+        audit: { ...valid.audit, collections: ["notes"] },
+      },
+      {
+        ...valid,
+        audit: { ...valid.audit, effectivePolicy: "remote" },
+      },
+    ];
+    for (const forgedDecision of forgeries) {
+      expect(
+        (
+          await service.record({
+            decision: forgedDecision,
+            lineage,
+            contentClass: "capsule",
+            retention,
+          })
+        ).ok
+      ).toBe(false);
+    }
+    const listed = await service.list();
+    expect(listed.ok).toBe(true);
+    if (listed.ok) expect(listed.value.receipts).toHaveLength(0);
+  });
+
+  test("rolls back the inserted receipt when retention fails", async () => {
+    let now = 60_000;
+    let nextId = 0;
+    const service = new EgressAuditService(store, {
+      clock: () => now,
+      idFactory: () => `atomic-${++nextId}`,
+    });
+    expect(
+      (
+        await service.record({
+          decision: decision("loopback"),
+          lineage,
+          contentClass: "capsule",
+          retention,
+        })
+      ).ok
+    ).toBe(true);
+    store.getRawDb().exec(`
+      CREATE TRIGGER fail_egress_retention
+      BEFORE DELETE ON egress_audit_receipts
+      BEGIN
+        SELECT RAISE(ABORT, 'retention fault');
+      END;
+    `);
+    now += 1;
+    const failed = await service.record({
+      decision: decision("loopback"),
+      lineage,
+      contentClass: "capsule",
+      retention: { ...retention, maxReceipts: 1 },
+    });
+    expect(failed.ok).toBe(false);
+    const rows = store
+      .getRawDb()
+      .query<{ audit_id: string }, []>(
+        "SELECT audit_id FROM egress_audit_receipts ORDER BY audit_id"
+      )
+      .all();
+    expect(rows).toEqual([{ audit_id: "atomic-1" }]);
+  });
+
+  test("keeps concurrent writes within deterministic count and byte bounds", async () => {
+    let nextId = 0;
+    const bounded = { ...retention, maxReceipts: 5, maxBytes: 2048 };
+    const service = new EgressAuditService(store, {
+      clock: () => 70_000,
+      idFactory: () => `concurrent-${++nextId}`,
+    });
+    const writes = await Promise.all(
+      Array.from({ length: 25 }, () =>
+        service.record({
+          decision: decision("loopback"),
+          lineage,
+          contentClass: "capsule",
+          retention: bounded,
+        })
+      )
+    );
+    expect(writes.every((result) => result.ok)).toBe(true);
+    const aggregate = store
+      .getRawDb()
+      .query<{ count: number; bytes: number }, []>(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(byte_size), 0) AS bytes
+         FROM egress_audit_receipts`
+      )
+      .get();
+    expect(aggregate?.count).toBeLessThanOrEqual(bounded.maxReceipts);
+    expect(aggregate?.bytes).toBeLessThanOrEqual(bounded.maxBytes);
   });
 });

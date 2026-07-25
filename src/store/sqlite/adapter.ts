@@ -15,6 +15,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // node:path basename: no Bun path utilities.
 import { basename } from "node:path";
 
+import type { EgressLineage } from "../../core/egress-provenance";
 import type {
   ActivationIndexDocument,
   ActivationIndexIdentity,
@@ -142,6 +143,7 @@ import {
 } from "./change-journal-store";
 import {
   appendEgressAuditReceipt as appendStoredEgressAuditReceipt,
+  appendEgressAuditReceiptWithRetention as appendStoredEgressAuditReceiptWithRetention,
   enforceEgressAuditRetention as enforceStoredEgressAuditRetention,
   listEgressAuditReceipts as listStoredEgressAuditReceipts,
   purgeEgressAuditReceipts as purgeStoredEgressAuditReceipts,
@@ -168,6 +170,7 @@ import {
   finalizeTrace as finalizeStoredTrace,
   getTrace as getStoredTrace,
   listTraces as listStoredTraces,
+  mergeTraceEgressLineage as mergeStoredTraceEgressLineage,
 } from "./retrieval-trace-store";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1008,6 +1011,13 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     return createStoredTrace(this.ensureOpen(), input);
   }
 
+  async mergeRetrievalTraceEgressLineage(
+    traceId: string,
+    lineage: EgressLineage
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    return mergeStoredTraceEgressLineage(this.ensureOpen(), traceId, lineage);
+  }
+
   async getRetrievalTrace(
     traceId: string
   ): Promise<StoreResult<RetrievalTraceBundle | null>> {
@@ -1107,6 +1117,19 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     receipt: EgressAuditReceiptInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
     return appendStoredEgressAuditReceipt(this.ensureOpen(), receipt);
+  }
+
+  async appendEgressAuditReceiptWithRetention(
+    receipt: EgressAuditReceiptInput,
+    policy: EgressAuditRetentionPolicy,
+    nowMs: number
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    return appendStoredEgressAuditReceiptWithRetention(
+      this.ensureOpen(),
+      receipt,
+      policy,
+      nowMs
+    );
   }
 
   async listEgressAuditReceipts(

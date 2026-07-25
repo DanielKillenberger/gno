@@ -19,6 +19,7 @@ import {
   toContextCapsuleEvidence,
 } from "../core/context-evidence";
 import { canonicalVerifierJson } from "../core/context-verifier-canonical";
+import { mergeEgressLineages } from "../core/egress-provenance";
 import { resolveModelUri } from "../llm/registry";
 
 const fingerprint = (value: unknown): string =>
@@ -159,6 +160,10 @@ export const projectContextCapsule = (
   const evidence = draft.selection.selected.map((candidate, index) =>
     toContextCapsuleEvidence(candidate, index + 1)
   );
+  const egressLineage = mergeEgressLineages([
+    snapshots.egressLineage,
+    ...evidence.map((item) => item.egressLineage),
+  ]);
   const evidenceIdsByFacet = new Map<string, string[]>();
   for (const item of evidence) {
     for (const facet of item.facets) {
@@ -249,7 +254,7 @@ export const projectContextCapsule = (
       instructionBoundary: "hard_delimited",
       configuredContexts: draft.configuredContexts,
     },
-    egressLineage: snapshots.egressLineage,
+    egressLineage,
     evidence,
     coverage: {
       complete: draft.selection.coverage.unresolvedFacets.length === 0,

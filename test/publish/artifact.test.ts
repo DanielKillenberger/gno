@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 
 import type { Collection } from "../../src/config/types";
+import type { EgressLineage } from "../../src/core/egress-provenance";
 import type { DocumentRow, StorePort, TagRow } from "../../src/store/types";
 
 import { createEgressLineage } from "../../src/core/egress-provenance";
@@ -196,6 +197,8 @@ describe("publish artifact contract", () => {
     const tags = new Map<number, TagRow[]>();
     const store = {
       appendEgressAuditReceipt: async () => ok("inserted" as const),
+      appendEgressAuditReceiptWithRetention: async () =>
+        ok("inserted" as const),
       enforceEgressAuditRetention: async () =>
         ok({ deleted: 0, remainingReceipts: 1, remainingBytes: 128 }),
       getContentBatch: async () => ok(content),
@@ -360,6 +363,63 @@ describe("publish artifact contract", () => {
     });
     expect(projected.spaces[0]?.notes[0]).not.toHaveProperty("ignored");
     expect(assertValid(projected, schema)).toBe(true);
+  });
+
+  test("rejects forged lineage before every artifact or manifest boundary", () => {
+    const validLineage = createEgressLineage([
+      { collection: "atlas", policy: "remote", source: "explicit" },
+    ]);
+    const forged = [
+      { ...structuredClone(validLineage), digest: "f".repeat(64) },
+      { ...structuredClone(validLineage), effectivePolicy: "local_only" },
+      {
+        ...structuredClone(validLineage),
+        sources: [...validLineage.sources, ...validLineage.sources],
+      },
+      {
+        ...structuredClone(validLineage),
+        sources: [{ ...validLineage.sources[0]!, collection: "" }],
+      },
+    ] as EgressLineage[];
+    for (const egressLineage of forged) {
+      expect(() =>
+        buildPublicPublishManifest({
+          egressLineage,
+          exportedAt: "2026-07-23T10:00:00.000Z",
+          notes: [NOTE],
+          routeSlug: "atlas",
+          sourceType: "note",
+          summary: NOTE.summary,
+          title: NOTE.title,
+          visibility: "public",
+        })
+      ).toThrow();
+      expect(() =>
+        buildPublishArtifact({
+          egressLineage,
+          notes: [NOTE],
+          routeSlug: "atlas",
+          sourceType: "note",
+          summary: NOTE.summary,
+          title: NOTE.title,
+          visibility: "invite-only",
+        })
+      ).toThrow();
+      expect(() =>
+        buildEncryptedPublishArtifact({
+          egressLineage,
+          encryptedPayload: {
+            ciphertext: "Y2lwaGVydGV4dA==",
+            iterations: 210_000,
+            iv: "aXY=",
+            salt: "c2FsdA==",
+          },
+          routeSlug: "atlas",
+          secretToken: "opaque-token",
+          sourceType: "note",
+        })
+      ).toThrow();
+    }
   });
 
   test("fails closed and projects only schema-valid encrypted V2 fields", () => {

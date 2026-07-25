@@ -12,7 +12,10 @@ import {
   contextCapsuleEvidenceIdentity,
   sha256Text,
 } from "../core/context-capsule-validation";
-import { legacyLocalOnlyEgressLineage } from "../core/egress-provenance";
+import {
+  egressLineageSchema,
+  legacyLocalOnlyEgressLineage,
+} from "../core/egress-provenance";
 import { stripFrontmatter } from "../ingestion/frontmatter";
 import {
   MAX_PUBLISH_SLUG_LENGTH,
@@ -296,8 +299,9 @@ export const buildPublicPublishManifest = (input: {
 }): PublicPublishManifest => {
   const { egressLineage: providedLineage, ...spaceInput } = input;
   const validated = validateAndProjectPublishSpaceInput(spaceInput);
-  const egressLineage =
-    providedLineage ?? legacyLocalOnlyEgressLineage("legacy");
+  const egressLineage = egressLineageSchema.parse(
+    providedLineage ?? legacyLocalOnlyEgressLineage("legacy")
+  );
   if (validated.visibility !== "public") {
     throw new Error("Public publish manifests require public visibility");
   }
@@ -354,8 +358,9 @@ export const buildPublishArtifact = (input: {
 }): PublishArtifactV1 => {
   const { egressLineage: providedLineage, ...spaceInput } = input;
   const validated = validateAndProjectPublishSpaceInput(spaceInput);
-  const egressLineage =
-    providedLineage ?? legacyLocalOnlyEgressLineage("legacy");
+  const egressLineage = egressLineageSchema.parse(
+    providedLineage ?? legacyLocalOnlyEgressLineage("legacy")
+  );
   const exportedAt = new Date().toISOString();
   const base = {
     ...(validated.homeNoteSlug === undefined
@@ -407,8 +412,9 @@ export const buildEncryptedPublishArtifact = (input: {
 }): PublishArtifactV2 => {
   const { egressLineage: providedLineage, ...encryptedInput } = input;
   const validated = validateAndProjectEncryptedPublishInput(encryptedInput);
-  const egressLineage =
-    providedLineage ?? legacyLocalOnlyEgressLineage("legacy");
+  const egressLineage = egressLineageSchema.parse(
+    providedLineage ?? legacyLocalOnlyEgressLineage("legacy")
+  );
   const exportedAt = requirePublishDateTime(new Date().toISOString());
   return {
     egressLineage,

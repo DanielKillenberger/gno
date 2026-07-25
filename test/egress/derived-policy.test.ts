@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import type { Collection } from "../../src/config/types";
+import type { SearchResult } from "../../src/pipeline/types";
+import type { StorePort } from "../../src/store/types";
 
 import {
   EgressDeniedError,
@@ -11,11 +13,12 @@ import {
   EgressProvenanceError,
   resolveEgressLineage,
 } from "../../src/core/egress-provenance";
+import { attachSearchResultEgressLineage } from "../../src/pipeline/egress-lineage";
 
 const sources = [
   { collection: "remote", policy: "remote", source: "explicit" },
   { collection: "local", policy: "local_only", source: "legacy_default" },
-  { collection: "lan", policy: "lan", source: "config_default" },
+  { collection: "lan", policy: "lan", source: "explicit" },
 ] as const;
 
 describe("derived egress policy lineage", () => {
@@ -35,7 +38,7 @@ describe("derived egress policy lineage", () => {
   });
 
   test("fails closed for empty and unknown requested scopes", () => {
-    for (const requested of [[], ["missing"]] as const) {
+    for (const requested of [[], ["missing"], [""], [" "]] as const) {
       expect(() => resolveEgressLineage(sources, requested)).toThrow(
         EgressProvenanceError
       );
@@ -46,6 +49,14 @@ describe("derived egress policy lineage", () => {
     expect(() =>
       createEgressLineage([sources[0], { ...sources[0], policy: "local_only" }])
     ).toThrow("Conflicting policy lineage");
+    expect(() => createEgressLineage([sources[0], sources[0]])).toThrow(
+      "Duplicate policy lineage"
+    );
+    expect(() =>
+      createEgressLineage([
+        { collection: "remote", policy: "remote", source: "config_default" },
+      ])
+    ).toThrow("invalid collection or policy");
   });
 
   test("denies mixed transfer by default and discloses explicit partial output", () => {
@@ -93,5 +104,47 @@ describe("derived egress policy lineage", () => {
         omittedCollections: ["local"],
       },
     });
+  });
+
+  test("fails search attachment for an unknown mirror owner", async () => {
+    const result: SearchResult = {
+      docid: "#abcdef",
+      score: 1,
+      uri: "gno://remote/shared.md",
+      snippet: "shared",
+      source: {
+        relPath: "shared.md",
+        mime: "text/markdown",
+        ext: ".md",
+        sourceHash: "a".repeat(64),
+      },
+      conversion: { mirrorHash: "b".repeat(64) },
+    };
+    const attached = await attachSearchResultEgressLineage(
+      {} as Pick<StorePort, "getCollections" | "getDocumentsByMirrorHashes">,
+      [result],
+      {
+        ownershipHashes: ["b".repeat(64)],
+        ownershipDocuments: [
+          { collection: "unknown", mirrorHash: "b".repeat(64) },
+        ],
+        collections: [
+          {
+            name: "remote",
+            path: "/remote",
+            pattern: "**/*",
+            include: [],
+            exclude: [],
+            updateCmd: null,
+            languageHint: null,
+            egressPolicy: "remote",
+            egressPolicySource: "explicit",
+            syncedAt: "",
+          },
+        ],
+      }
+    );
+    expect(attached.ok).toBe(false);
+    expect(result.egressLineage).toBeUndefined();
   });
 });

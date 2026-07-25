@@ -379,6 +379,20 @@ export class RetrievalTraceRecorder {
     }
   }
 
+  async mergeEgressLineage(
+    traceId: string,
+    lineage: EgressLineage
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    if (!this.config?.enabled) return ok("duplicate");
+    if (!this.store.mergeRetrievalTraceEgressLineage) {
+      return err(
+        "CONSTRAINT_VIOLATION",
+        "Store cannot widen retrieval trace policy lineage"
+      );
+    }
+    return this.store.mergeRetrievalTraceEgressLineage(traceId, lineage);
+  }
+
   async appendEvent(
     input: RetrievalTraceEventInput
   ): Promise<StoreResult<RetrievalTraceAppendResult | "disabled">> {

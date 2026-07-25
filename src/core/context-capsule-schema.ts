@@ -595,6 +595,63 @@ export type ContextCapsulePayloadV1 = z.infer<
   typeof contextCapsulePayloadV1Schema
 >;
 
+const validateContextCapsuleV1_1Lineage = (
+  value: {
+    scope: { collections: string[] };
+    egressLineage: z.infer<typeof egressLineageSchema>;
+    evidence: z.infer<typeof contextCapsuleEvidenceV1_1Schema>[];
+  },
+  context: z.RefinementCtx
+): void => {
+  const aggregateByCollection = new Map(
+    value.egressLineage.sources.map((source) => [source.collection, source])
+  );
+  const requiredCollections = new Set(value.scope.collections);
+  for (const [evidenceIndex, evidence] of value.evidence.entries()) {
+    const evidenceCollection = evidence.collection;
+    const evidenceOwnSource = evidence.egressLineage.sources.find(
+      (source) => source.collection === evidenceCollection
+    );
+    if (!evidenceOwnSource) {
+      context.addIssue({
+        code: "custom",
+        message: "Evidence lineage must include its source collection",
+        path: ["evidence", evidenceIndex, "egressLineage"],
+      });
+    }
+    for (const source of evidence.egressLineage.sources) {
+      requiredCollections.add(source.collection);
+      const aggregateSource = aggregateByCollection.get(source.collection);
+      if (
+        !aggregateSource ||
+        aggregateSource.policy !== source.policy ||
+        aggregateSource.source !== source.source
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Aggregate lineage must preserve every evidence policy source",
+          path: ["egressLineage"],
+        });
+      }
+    }
+  }
+  if (value.scope.collections.length > 0) {
+    const aggregateCollections = value.egressLineage.sources.map(
+      ({ collection }) => collection
+    );
+    const required = [...requiredCollections].sort(compareCodeUnits);
+    if (JSON.stringify(aggregateCollections) !== JSON.stringify(required)) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Aggregate lineage membership must equal requested scope and evidence ownership",
+        path: ["egressLineage", "sources"],
+      });
+    }
+  }
+};
+
 export const contextCapsulePayloadV1_1Schema = z
   .object({
     schemaVersion: z.literal(CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION),
@@ -616,7 +673,10 @@ export const contextCapsulePayloadV1_1Schema = z
     warnings: z.array(warningSchema).max(32),
   })
   .strict()
-  .superRefine(validateContextCapsulePayload);
+  .superRefine((value, context) => {
+    validateContextCapsulePayload(value, context);
+    validateContextCapsuleV1_1Lineage(value, context);
+  });
 
 export type ContextCapsulePayloadV1_1 = z.infer<
   typeof contextCapsulePayloadV1_1Schema

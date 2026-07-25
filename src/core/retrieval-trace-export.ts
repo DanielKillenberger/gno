@@ -14,7 +14,7 @@ import type {
 
 import { hashTraceCanonical } from "../store/retrieval-trace-codec";
 import { err, ok } from "../store/types";
-import { createEgressLineage } from "./egress-provenance";
+import { mergeEgressLineages } from "./egress-provenance";
 import { buildRetrievalQrelsArtifact } from "./retrieval-qrels";
 
 const validateTraceIds = (traceIds: unknown): StoreResult<string[]> => {
@@ -39,8 +39,8 @@ const agenticArtifact = (
 ): RetrievalTraceArtifact => ({
   schemaVersion: "1.0",
   format: "agentic-receipt",
-  egressLineage: createEgressLineage(
-    bundles.flatMap(({ trace }) => trace.egressLineage.sources)
+  egressLineage: mergeEgressLineages(
+    bundles.map(({ trace }) => trace.egressLineage)
   ),
   traces: bundles.map(({ exports: _exports, ...trace }) => trace),
 });

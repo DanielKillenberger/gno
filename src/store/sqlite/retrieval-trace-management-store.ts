@@ -12,8 +12,8 @@ import type {
 } from "../types";
 
 import {
-  createEgressLineage,
   egressLineageSchema,
+  mergeEgressLineages,
 } from "../../core/egress-provenance";
 import { canonicalTraceJson, traceUtf8Bytes } from "../retrieval-trace-codec";
 import { ok } from "../types";
@@ -264,9 +264,7 @@ export const appendExportManifest = (
           egressLineageSchema.parse(JSON.parse(trace.egress_lineage_json))
         );
       }
-      const aggregateLineage = createEgressLineage(
-        sourceLineages.flatMap((lineage) => lineage.sources)
-      );
+      const aggregateLineage = mergeEgressLineages(sourceLineages);
       if (aggregateLineage.digest !== manifest.egressLineage.digest) {
         throw new RetrievalTraceConflictError(
           "Export manifest policy lineage does not match trace membership"

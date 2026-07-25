@@ -83,17 +83,23 @@ export const attachSearchResultEgressLineage = async (
           .filter((collection): collection is string => Boolean(collection)),
       ]),
     ];
-    const policies = ownerCollections.map(
-      (collection) =>
-        policyByCollection.get(collection) ?? {
-          collection,
-          policy: "local_only" as const,
-          source: "legacy_default" as const,
-        }
+    const policies = ownerCollections.map((collection) =>
+      policyByCollection.get(collection)
     );
+    if (policies.some((policy) => policy === undefined)) {
+      return err(
+        "INVALID_INPUT",
+        "Search result policy lineage references an unknown collection"
+      );
+    }
     if (policies.length === 0) continue;
     try {
-      lineageByMirrorHash.set(mirrorHash, createEgressLineage(policies));
+      lineageByMirrorHash.set(
+        mirrorHash,
+        createEgressLineage(
+          policies as NonNullable<(typeof policies)[number]>[]
+        )
+      );
     } catch (error) {
       return err(
         "INVALID_INPUT",

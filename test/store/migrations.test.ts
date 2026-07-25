@@ -5,10 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { verifyLexicalActivation } from "../../src/core/activation-verifier";
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { getSchemaVersion, migrations, runMigrations } from "../../src/store";
 import { migration as collectionEgressMigration } from "../../src/store/migrations/023-collection-egress-policy";
 import { migration as derivedEgressMigration } from "../../src/store/migrations/024-egress-derived-lineage";
+import {
+  hashLegacyRetrievalTraceCreation,
+  hashRetrievalTraceCreation,
+} from "../../src/store/retrieval-trace-codec";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
+import { createTrace } from "../../src/store/sqlite/retrieval-trace-store";
 import { safeRm } from "../helpers/cleanup";
 
 describe("store migrations", () => {
@@ -208,6 +214,122 @@ describe("store migrations", () => {
             .map((column) => column.name)
         ).not.toContain("egress_lineage_json");
       }
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves v23 trace retries with a provable one-way digest marker", () => {
+    const db = new Database(dbPath);
+    const hash = "a".repeat(64);
+    const trace = {
+      traceId: "migrated-retry",
+      schemaVersion: "1.0" as const,
+      redactionMode: "metadata" as const,
+      replayCapable: false,
+      queryText: null,
+      queryDigest: null,
+      queryShape: { characters: 0, terms: 0 },
+      goalText: null,
+      goalDigest: null,
+      goalShape: { characters: 0, terms: 0 },
+      filters: {},
+      egressLineage: legacyLocalOnlyEgressLineage(),
+      fingerprints: {
+        pipeline: hash,
+        model: hash,
+        config: hash,
+        index: hash,
+      },
+      status: "open" as const,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      expiresAtMs: 10,
+    };
+    const traceByteSize = new TextEncoder().encode(
+      `${JSON.stringify(trace.queryShape)}${JSON.stringify(trace.goalShape)}${JSON.stringify(trace.filters)}`
+    ).byteLength;
+    try {
+      expect(runMigrations(db, migrations.slice(0, 23), "unicode61").ok).toBe(
+        true
+      );
+      db.run(
+        `INSERT INTO retrieval_traces (
+           trace_id, schema_version, redaction_mode, replay_capable,
+           query_text, query_digest, query_shape_json,
+           goal_text, goal_digest, goal_shape_json, filters_json,
+           pipeline_fingerprint, model_fingerprint, config_fingerprint,
+           index_fingerprint, status, created_at_ms, updated_at_ms,
+           expires_at_ms, byte_size, creation_digest
+         ) VALUES (?, '1.0', 'metadata', 0, NULL, NULL, ?, NULL, NULL, ?, ?,
+                   ?, ?, ?, ?, 'open', 1, 1, 10, ?, ?)`,
+        [
+          trace.traceId,
+          JSON.stringify(trace.queryShape),
+          JSON.stringify(trace.goalShape),
+          JSON.stringify(trace.filters),
+          hash,
+          hash,
+          hash,
+          hash,
+          traceByteSize,
+          hashLegacyRetrievalTraceCreation(trace),
+        ]
+      );
+      derivedEgressMigration.up(db, "unicode61");
+      expect(createTrace(db, trace)).toEqual({ ok: true, value: "duplicate" });
+      expect(
+        db
+          .query<
+            { creation_digest: string; creation_digest_version: number },
+            []
+          >(
+            `SELECT creation_digest, creation_digest_version
+             FROM retrieval_traces WHERE trace_id = 'migrated-retry'`
+          )
+          .get()
+      ).toEqual({
+        creation_digest: hashRetrievalTraceCreation(trace),
+        creation_digest_version: 1,
+      });
+      expect(
+        createTrace(db, {
+          ...trace,
+          fingerprints: { ...trace.fingerprints, pipeline: "b".repeat(64) },
+        }).ok
+      ).toBe(false);
+
+      derivedEgressMigration.down?.(db);
+      derivedEgressMigration.up(db, "unicode61");
+      expect(createTrace(db, trace)).toEqual({ ok: true, value: "duplicate" });
+      expect(
+        db
+          .query<{ creation_digest_version: number }, []>(
+            `SELECT creation_digest_version
+             FROM retrieval_traces WHERE trace_id = 'migrated-retry'`
+          )
+          .get()?.creation_digest_version
+      ).toBe(1);
+
+      const postMigration = { ...trace, traceId: "post-migration-sentinel" };
+      expect(createTrace(db, postMigration)).toEqual({
+        ok: true,
+        value: "inserted",
+      });
+      db.run(
+        `UPDATE retrieval_traces SET creation_digest = ?
+         WHERE trace_id = 'post-migration-sentinel'`,
+        [hashLegacyRetrievalTraceCreation(postMigration)]
+      );
+      expect(createTrace(db, postMigration).ok).toBe(false);
+      expect(
+        db
+          .query<{ creation_digest_version: number }, []>(
+            `SELECT creation_digest_version FROM retrieval_traces
+             WHERE trace_id = 'post-migration-sentinel'`
+          )
+          .get()?.creation_digest_version
+      ).toBe(1);
     } finally {
       db.close();
     }

@@ -13,6 +13,8 @@ import type { EgressLineage } from "./egress-provenance";
 
 import { canonicalTraceJson } from "../store/retrieval-trace-codec";
 import { err, ok } from "../store/types";
+import { defaultEgressPolicyPort } from "./egress-policy";
+import { egressLineageSchema } from "./egress-provenance";
 
 const CURSOR_PREFIX = "gno-egress-audit-v1.";
 const DEFAULT_RETENTION: EgressAuditRetentionPolicy = {
@@ -89,31 +91,66 @@ export class EgressAuditService {
     contentClass: EgressContentClass;
     retention?: EgressAuditRetentionPolicy;
   }): Promise<StoreResult<"inserted" | "duplicate">> {
-    const action = input.decision.audit.action;
-    const destinationZone = input.decision.audit.destinationZone;
-    if (action === "unknown" || destinationZone === "unknown") {
+    const lineage = egressLineageSchema.safeParse(input.lineage);
+    const audit = input.decision.audit;
+    if (
+      !lineage.success ||
+      audit.action === "unknown" ||
+      audit.destinationZone === "unknown" ||
+      audit.contentClass !== input.contentClass ||
+      typeof audit.callerAuthenticated !== "boolean" ||
+      typeof audit.callerOperationAuthorized !== "boolean"
+    ) {
       return err("INVALID_INPUT", "Invalid egress audit decision metadata");
     }
-    const nowMs = this.clock();
-    const appended = await this.store.appendEgressAuditReceipt({
-      auditId: this.idFactory(),
-      decision: input.decision.allowed ? "allow" : "deny",
-      action,
-      destinationZone,
+    const expected = defaultEgressPolicyPort.evaluate({
+      collections: lineage.data.sources,
+      action: audit.action,
+      destination: { zone: audit.destinationZone },
+      caller: {
+        authenticated: audit.callerAuthenticated,
+        operationAuthorized: audit.callerOperationAuthorized,
+      },
       contentClass: input.contentClass,
-      effectivePolicy: input.lineage.effectivePolicy,
-      reasonCode: input.decision.reason,
-      lineageDigest: input.lineage.digest,
-      createdAtMs: nowMs,
-      expiresAtMs:
-        nowMs + (input.retention ?? DEFAULT_RETENTION).maxAgeDays * 86_400_000,
     });
-    if (!appended.ok) return appended;
-    const retained = await this.store.enforceEgressAuditRetention(
-      input.retention ?? DEFAULT_RETENTION,
+    if (
+      canonicalTraceJson(expected) !== canonicalTraceJson(input.decision) ||
+      audit.collectionCount !== lineage.data.sources.length ||
+      canonicalTraceJson(audit.collections) !==
+        canonicalTraceJson(
+          lineage.data.sources.map(({ collection }) => collection)
+        ) ||
+      audit.effectivePolicy !== lineage.data.effectivePolicy
+    ) {
+      return err(
+        "INVALID_INPUT",
+        "Egress audit decision does not match its policy lineage"
+      );
+    }
+    const retention = input.retention ?? DEFAULT_RETENTION;
+    if (!this.store.appendEgressAuditReceiptWithRetention) {
+      return err(
+        "CONSTRAINT_VIOLATION",
+        "Store cannot atomically persist bounded egress audits"
+      );
+    }
+    const nowMs = this.clock();
+    return this.store.appendEgressAuditReceiptWithRetention(
+      {
+        auditId: this.idFactory(),
+        decision: input.decision.allowed ? "allow" : "deny",
+        action: audit.action,
+        destinationZone: audit.destinationZone,
+        contentClass: input.contentClass,
+        effectivePolicy: lineage.data.effectivePolicy,
+        reasonCode: input.decision.reason,
+        lineageDigest: lineage.data.digest,
+        createdAtMs: nowMs,
+        expiresAtMs: nowMs + retention.maxAgeDays * 86_400_000,
+      },
+      retention,
       nowMs
     );
-    return retained.ok ? appended : retained;
   }
 
   async list(

@@ -29,6 +29,9 @@ export const migration: Migration = {
       ALTER TABLE retrieval_traces
       ADD COLUMN egress_lineage_bytes INTEGER NOT NULL DEFAULT ${lineageBytes}
         CHECK (egress_lineage_bytes > 0 AND egress_lineage_bytes <= 32768);
+      ALTER TABLE retrieval_traces
+      ADD COLUMN creation_digest_version INTEGER NOT NULL DEFAULT 0
+        CHECK (creation_digest_version IN (0, 1));
 
       ALTER TABLE retrieval_trace_exports
       ADD COLUMN effective_egress_policy TEXT NOT NULL DEFAULT 'local_only'
@@ -112,6 +115,7 @@ export const migration: Migration = {
       ALTER TABLE retrieval_traces DROP COLUMN egress_lineage_json;
       ALTER TABLE retrieval_traces DROP COLUMN egress_lineage_digest;
       ALTER TABLE retrieval_traces DROP COLUMN effective_egress_policy;
+      ALTER TABLE retrieval_traces DROP COLUMN creation_digest_version;
     `);
   },
 };

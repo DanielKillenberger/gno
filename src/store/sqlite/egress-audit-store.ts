@@ -146,6 +146,70 @@ export const appendEgressAuditReceipt = (
   }
 };
 
+export const appendEgressAuditReceiptWithRetention = (
+  db: Database,
+  receipt: EgressAuditReceiptInput,
+  policy: EgressAuditRetentionPolicy,
+  nowMs: number
+): StoreResult<RetrievalTraceAppendResult> => {
+  const prior = readSecureDelete(db);
+  try {
+    validateReceipt(receipt);
+    validateRetention(policy, nowMs);
+    db.exec("PRAGMA secure_delete = ON");
+    const transaction = db.transaction((): RetrievalTraceAppendResult => {
+      const appended = appendEgressAuditReceipt(db, receipt);
+      if (!appended.ok) {
+        throw new Error(appended.error.message, {
+          cause: appended.error.cause,
+        });
+      }
+      const rows = db
+        .query<
+          { audit_id: string; created_at_ms: number; byte_size: number },
+          []
+        >(
+          `SELECT audit_id, created_at_ms, byte_size
+           FROM egress_audit_receipts
+           ORDER BY created_at_ms ASC, audit_id ASC`
+        )
+        .all();
+      let remainingReceipts = rows.length;
+      let remainingBytes = rows.reduce(
+        (total, row) => total + row.byte_size,
+        0
+      );
+      const ageBoundary = nowMs - policy.maxAgeDays * DAY_MS;
+      for (const row of rows) {
+        if (
+          row.created_at_ms > ageBoundary &&
+          remainingReceipts <= policy.maxReceipts &&
+          remainingBytes <= policy.maxBytes
+        ) {
+          break;
+        }
+        db.run("DELETE FROM egress_audit_receipts WHERE audit_id = ?", [
+          row.audit_id,
+        ]);
+        remainingReceipts -= 1;
+        remainingBytes -= row.byte_size;
+      }
+      return appended.value;
+    });
+    return ok(transaction());
+  } catch (cause) {
+    return err(
+      "QUERY_FAILED",
+      cause instanceof Error
+        ? cause.message
+        : "Failed to atomically append egress audit",
+      cause
+    );
+  } finally {
+    restoreSecureDelete(db, prior);
+  }
+};
+
 export const listEgressAuditReceipts = (
   db: Database,
   limit: number,

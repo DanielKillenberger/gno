@@ -46,6 +46,7 @@ export interface DbRetrievalTraceRow {
   expires_at_ms: number;
   byte_size: number;
   creation_digest: string;
+  creation_digest_version: 0 | 1;
 }
 
 export interface DbRetrievalTraceRunRow {

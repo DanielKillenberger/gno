@@ -1424,6 +1424,12 @@ export interface StorePort {
     trace: RetrievalTraceInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>>;
 
+  /** Widen one trace to the canonical union of observed policy ownership. */
+  mergeRetrievalTraceEgressLineage?(
+    traceId: string,
+    lineage: EgressLineage
+  ): Promise<StoreResult<RetrievalTraceAppendResult>>;
+
   /** Return a trace and all of its locally stored subordinate records. */
   getRetrievalTrace(
     traceId: string
@@ -1503,6 +1509,13 @@ export interface StorePort {
   /** Append one content-free egress decision receipt. */
   appendEgressAuditReceipt(
     receipt: EgressAuditReceiptInput
+  ): Promise<StoreResult<RetrievalTraceAppendResult>>;
+
+  /** Append one receipt and enforce bounds in one atomic store transaction. */
+  appendEgressAuditReceiptWithRetention?(
+    receipt: EgressAuditReceiptInput,
+    policy: EgressAuditRetentionPolicy,
+    nowMs: number
   ): Promise<StoreResult<RetrievalTraceAppendResult>>;
 
   /** Inspect bounded receipts newest-first through an opaque cursor. */

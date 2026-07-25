@@ -8,6 +8,7 @@ import type { DocumentInput } from "../../src/store/types";
 import { encodeDocumentChangeCursor } from "../../src/core/change-journal";
 import { SyncService } from "../../src/ingestion";
 import { err, SqliteAdapter } from "../../src/store";
+import { appendDocumentChange } from "../../src/store/sqlite/change-journal-store";
 import { safeRm } from "../helpers/cleanup";
 
 const DAY_MS = 86_400_000;
@@ -123,6 +124,27 @@ describe("document change journal", () => {
       oldActive: false,
       newActive: true,
     });
+  });
+
+  test("fails closed instead of inventing policy for an unknown owner", () => {
+    expect(() =>
+      appendDocumentChange(adapter.getRawDb(), {
+        documentId: 999,
+        collection: "unknown",
+        kind: "create",
+        oldSnapshot: null,
+        newSnapshot: null,
+        observedAtMs: 1,
+      })
+    ).toThrow("unknown collection");
+    expect(
+      adapter
+        .getRawDb()
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM document_changes"
+        )
+        .get()?.count
+    ).toBe(0);
   });
 
   test("renames only through the explicit API and preserves stable identity", async () => {

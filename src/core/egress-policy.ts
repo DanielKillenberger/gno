@@ -361,6 +361,7 @@ function evaluateSnapshot(snapshot: EgressEvaluationSnapshot): EgressDecision {
   }
 
   const collections: CollectionEgressState[] = [];
+  const collectionNames = new Set<string>();
   for (const collection of snapshot.collections) {
     if (
       typeof collection.collection !== "string" ||
@@ -380,6 +381,10 @@ function evaluateSnapshot(snapshot: EgressEvaluationSnapshot): EgressDecision {
     ) {
       return decision(false, "INVALID_POLICY_SOURCE_PAIR", audit);
     }
+    if (collectionNames.has(collection.collection)) {
+      return decision(false, "INVALID_COLLECTION", audit);
+    }
+    collectionNames.add(collection.collection);
     collections.push({
       collection: collection.collection,
       policy: collection.policy,

@@ -75,13 +75,16 @@ const canonicalSources = (
   }
   const byCollection = new Map<string, EgressLineageSource>();
   for (const input of inputs) {
-    const collection = input.collection.trim().toLowerCase();
+    const collectionInput = input.collection;
+    const collection = collectionInput.trim().toLowerCase();
     const policy = EgressPolicySchema.safeParse(input.policy);
     const source = EgressPolicySourceSchema.safeParse(input.source);
     if (
+      collectionInput !== collection ||
       !COLLECTION_PATTERN.test(collection) ||
       !policy.success ||
-      !source.success
+      !source.success ||
+      (source.data !== "explicit" && policy.data !== "local_only")
     ) {
       throw new EgressProvenanceError(
         "INVALID_EGRESS_LINEAGE",
@@ -94,13 +97,12 @@ const canonicalSources = (
       policy: policy.data,
       source: source.data,
     };
-    if (
-      previous &&
-      (previous.policy !== current.policy || previous.source !== current.source)
-    ) {
+    if (previous) {
       throw new EgressProvenanceError(
         "INVALID_EGRESS_LINEAGE",
-        `Conflicting policy lineage for collection ${collection}`
+        previous.policy === current.policy && previous.source === current.source
+          ? `Duplicate policy lineage for collection ${collection}`
+          : `Conflicting policy lineage for collection ${collection}`
       );
     }
     byCollection.set(collection, current);
@@ -140,17 +142,50 @@ export const createEgressLineage = (
   return Object.freeze({ effectivePolicy, digest, sources }) as EgressLineage;
 };
 
+/**
+ * Canonically merge already-bounded lineage projections. Exact duplicates are
+ * collapsed here, before the strict provenance construction boundary.
+ */
+export const mergeEgressLineages = (
+  lineages: readonly Pick<EgressLineage, "sources">[]
+): EgressLineage => {
+  const byCollection = new Map<string, EgressLineageInput>();
+  for (const lineage of lineages) {
+    for (const input of lineage.sources) {
+      const collection = input.collection;
+      const previous = byCollection.get(collection);
+      if (
+        previous &&
+        (previous.policy !== input.policy || previous.source !== input.source)
+      ) {
+        throw new EgressProvenanceError(
+          "INVALID_EGRESS_LINEAGE",
+          `Conflicting policy lineage for collection ${collection}`
+        );
+      }
+      if (!previous) byCollection.set(collection, input);
+    }
+  }
+  return createEgressLineage([...byCollection.values()]);
+};
+
 /** Resolve an exact requested scope; empty and unknown names fail closed. */
 export const resolveEgressLineage = (
   inputs: readonly EgressLineageInput[],
   requestedNames?: readonly string[]
 ): EgressLineage => {
   if (requestedNames === undefined) return createEgressLineage(inputs);
-  const requested = [
-    ...new Set(
-      requestedNames.map((name) => name.trim().toLowerCase()).filter(Boolean)
-    ),
-  ].sort();
+  if (
+    requestedNames.some(
+      (name) => name.length === 0 || name !== name.trim().toLowerCase()
+    )
+  ) {
+    throw new EgressProvenanceError(
+      "INVALID_EGRESS_LINEAGE",
+      "Requested policy scope contains an invalid collection"
+    );
+  }
+  const requested = [...new Set(requestedNames)].sort();
   if (requested.length === 0) {
     throw new EgressProvenanceError(
       "EMPTY_EGRESS_LINEAGE",
