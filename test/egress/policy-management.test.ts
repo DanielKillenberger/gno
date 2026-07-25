@@ -289,6 +289,46 @@ describe("collection egress policy management", () => {
         destinationZone: "remote",
       })
     ).toMatchObject({ ok: false, code: "VALIDATION" });
+    const sparseScope: string[] = [];
+    sparseScope.length = 2;
+    sparseScope[0] = "notes";
+    const getterScope = ["notes"];
+    Object.defineProperty(getterScope, "0", {
+      get() {
+        throw new Error("/private/collection");
+      },
+    });
+    const revokedScope = Proxy.revocable(["notes"], {});
+    revokedScope.revoke();
+    const validCheck = {
+      action: "export",
+      caller: { authenticated: true, operationAuthorized: true },
+      contentClass: "retrieval_trace",
+      destinationZone: "remote",
+    } as const;
+    for (const collections of [
+      null,
+      "notes",
+      [],
+      ["notes", "notes"],
+      ["Notes"],
+      ["missing"],
+      sparseScope,
+      getterScope,
+      revokedScope.proxy,
+    ]) {
+      const result = service.check({ ...validCheck, collections } as never);
+      expect(result).toMatchObject({
+        ok: false,
+        code: "VALIDATION",
+      });
+      expect(JSON.stringify(result)).not.toContain("/private/");
+    }
+    expect(service.check({ ...validCheck, collections: ["missing"] })).toEqual({
+      ok: false,
+      code: "VALIDATION",
+      error: "Invalid collection egress scope",
+    });
     expect(mutations).toBe(0);
     expect(invalidations).toBe(0);
   });

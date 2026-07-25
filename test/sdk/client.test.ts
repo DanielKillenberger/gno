@@ -178,6 +178,25 @@ describe("SDK client", () => {
       code: "VALIDATION",
       message: "Unreadable input object",
     });
+    const base = {
+      action: "export",
+      destinationZone: "remote",
+      caller: { authenticated: true, operationAuthorized: true },
+      contentClass: "retrieval_trace",
+    } as const;
+    for (const collections of [[], ["fixtures", "fixtures"], ["missing"]]) {
+      expect(
+        client.checkEgress({ ...base, collections } as never)
+      ).rejects.toMatchObject({
+        code: "VALIDATION",
+      });
+    }
+    expect(
+      client.checkEgress({ ...base, collections: ["missing"] })
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "Invalid collection egress scope",
+    });
   });
 
   test("lists indexed documents", async () => {

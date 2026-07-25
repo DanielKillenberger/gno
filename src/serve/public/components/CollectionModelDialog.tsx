@@ -73,6 +73,7 @@ interface UpdateCollectionResponse {
 }
 
 interface CollectionModelDialogProps {
+  availableCollections?: readonly string[];
   collection: CollectionModelDetails | null;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
@@ -134,6 +135,7 @@ function collectionLooksCodeHeavy(collection: CollectionModelDetails): boolean {
 }
 
 export function CollectionModelDialog({
+  availableCollections = [],
   collection,
   onOpenChange,
   onSaved,
@@ -313,6 +315,7 @@ export function CollectionModelDialog({
             />
             {collection ? (
               <CollectionEgressCheckPanel
+                availableCollections={availableCollections}
                 collection={collection.name}
                 effectivePolicy={originalPolicy}
                 source={collection.egressPolicy?.source ?? "config_default"}

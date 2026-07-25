@@ -762,12 +762,42 @@ export async function startServer(
           },
         },
         "/api/events": {
-          GET: () =>
-            withSecurityHeaders(
-              runtime.eventBus?.createResponse() ??
-                new Response("event stream unavailable", { status: 503 }),
-              isDev
-            ),
+          GET: (req: Request) => {
+            const residentRuntime = runtime as ResidentRuntime;
+            const admitted = residentRuntime.admitRequest(req.signal);
+            if (!admitted || !residentRuntime.eventBus) {
+              admitted?.finish();
+              return withSecurityHeaders(
+                Response.json(
+                  {
+                    error: {
+                      code: "UNAVAILABLE",
+                      message: "Document event stream unavailable",
+                    },
+                  },
+                  { status: 503 }
+                ),
+                isDev
+              );
+            }
+            try {
+              return withSecurityHeaders(
+                residentRuntime.eventBus.createResponse({
+                  authorizationEpoch:
+                    admitted.authorizationEpoch ??
+                    residentRuntime.authorizationEpoch,
+                  isAuthorizationEpochCurrent: () =>
+                    admitted.isAuthorizationEpochCurrent?.() ?? true,
+                  onClose: () => admitted.finish(),
+                  signal: admitted.signal,
+                }),
+                isDev
+              );
+            } catch (error) {
+              admitted.finish();
+              throw error;
+            }
+          },
         },
         "/api/tags": {
           GET: async (req: Request) => {

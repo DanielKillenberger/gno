@@ -724,6 +724,7 @@ export default function Collections({ navigate }: PageProps) {
       />
 
       <CollectionModelDialog
+        availableCollections={collections.map(({ name }) => name)}
         collection={modelDialogCollection}
         onOpenChange={(open) => {
           if (!open) {

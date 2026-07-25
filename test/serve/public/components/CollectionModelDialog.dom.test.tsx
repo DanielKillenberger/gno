@@ -205,7 +205,30 @@ describe("CollectionModelDialog DOM interactions", () => {
       const endpoint = typeof args[0] === "string" ? args[0] : "";
       const init = args[1] as RequestInit | undefined;
       if (endpoint === "/api/egress/check") {
+        const rawBody = init?.body;
+        const request = JSON.parse(
+          typeof rawBody === "string" ? rawBody : "{}"
+        ) as {
+          partialResults?: string;
+        };
+        if (request.partialResults === "explicit") {
+          return apiOk({
+            allowedCollections: ["public"],
+            mode: "partial",
+            decision: { allowed: false, reason: "POLICY_LOCAL_ONLY" },
+            disclosure: {
+              code: "EGRESS_PARTIAL_RESULT",
+              omittedCount: 1,
+              omittedCollections: ["private-notes"],
+            },
+            omittedCollections: [
+              { collection: "private-notes", reason: "POLICY_LOCAL_ONLY" },
+            ],
+            remediation: { message: "Keep the action local." },
+          });
+        }
         return apiOk({
+          allowedCollections: [],
           mode: "denied",
           decision: { allowed: false, reason: "POLICY_LOCAL_ONLY" },
           disclosure: null,
@@ -273,6 +296,7 @@ describe("CollectionModelDialog DOM interactions", () => {
       await import("../../../../src/serve/public/components/CollectionModelDialog");
     const { user } = renderWithUser(
       <CollectionModelDialog
+        availableCollections={["private-notes", "public"]}
         collection={{
           chunkCount: 0,
           documentCount: 0,
@@ -293,9 +317,47 @@ describe("CollectionModelDialog DOM interactions", () => {
         open={true}
       />
     );
+    const partialMode = screen.getByRole("combobox", {
+      name: /partial mode/i,
+    }) as HTMLSelectElement;
+    expect(partialMode.disabled).toBeTrue();
+    await user.type(
+      screen.getByRole("searchbox", { name: /search collections/i }),
+      "pub"
+    );
+    expect(
+      screen.queryByRole("checkbox", { name: /private-notes/i })
+    ).toBeNull();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "public",
+      })
+    );
+    expect(partialMode.disabled).toBeFalse();
+
     await user.click(screen.getByRole("button", { name: "Explain" }));
-    expect((await screen.findAllByText(/POLICY_LOCAL_ONLY/)).length).toBe(2);
+    expect(
+      (await screen.findAllByText(/POLICY_LOCAL_ONLY/)).length
+    ).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Keep the action local.")).toBeTruthy();
+    expect(screen.getByText(/^denied · POLICY_LOCAL_ONLY$/)).toBeTruthy();
+
+    await user.selectOptions(partialMode, "explicit");
+    await user.click(screen.getByRole("button", { name: "Explain" }));
+    expect(await screen.findByText(/EGRESS_PARTIAL_RESULT/)).toBeTruthy();
+    expect(screen.getAllByText(/public/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/private-notes · POLICY_LOCAL_ONLY/)).toBeTruthy();
+    const checkCalls = apiFetch.mock.calls.filter(
+      ([endpoint]) => endpoint === "/api/egress/check"
+    );
+    const explicitRequest = checkCalls.at(-1)?.[1] as RequestInit;
+    const explicitBody = explicitRequest.body;
+    expect(
+      JSON.parse(typeof explicitBody === "string" ? explicitBody : "{}")
+    ).toMatchObject({
+      collections: ["private-notes", "public"],
+      partialResults: "explicit",
+    });
     expect(await screen.findByText(/export \/ remote/)).toBeTruthy();
 
     await user.click(

@@ -2375,6 +2375,8 @@ Read tools:
 - `gno_egress_check` accepts exact collection scope, action, destination zone,
   caller authentication/authorization, content class, and partial mode. It
   performs no action and returns the canonical decision/explanation contract.
+  An explicit scope is a non-empty, duplicate-free list of at most 64 canonical
+  collection names; omitted scope means all configured collections.
 - `gno_egress_audit_list`, `gno_egress_audit_show`, and
   `gno_egress_audit_status` expose only content-free local receipts.
 
@@ -2393,11 +2395,17 @@ export resolves exact trace lineage and checks policy before creating or
 reusing an export receipt; missing traces return `NOT_FOUND` before policy
 evaluation.
 
+All collection-policy and audit tool inputs are closed objects. Unknown
+top-level fields are rejected by MCP input validation before any handler,
+mutation, invalidation, or audit operation runs.
+
 Active resident requests retain their admission authorization epoch. A policy
 mutation may advance its own request to the new epoch, but older REST and MCP
 responses are replaced by a content-free `EGRESS_POLICY_CHANGED` retry
 response/event before protected bytes are emitted, including streaming
-responses.
+responses. `/api/events` binds each SSE subscriber to its admission epoch and
+rechecks it before every document event and heartbeat; a stale subscriber
+receives only the retry event and is then unsubscribed.
 
 Schemas: `collection-egress-policy.schema.json`,
 `collection-egress-policy-set.schema.json`,

@@ -392,7 +392,12 @@ You can:
   by the dialog, so stale tabs and replayed confirmations cannot relax a newer
   policy
 - explain a proposed action, destination, caller state, content class, and
-  partial-result mode without performing the action
+  collection scope without performing the action
+- search the bounded existing-collection list and select up to 64 unique
+  collections; the open collection starts selected
+- enable explicit partial results only for a multi-collection scope, then see
+  every allowed and omitted collection identifier, stable omission reason,
+  disclosure code, and remediation
 - inspect newest-first content-free local audit receipts, open exact receipt
   details, and delete one or purge all only after visible confirmation
 

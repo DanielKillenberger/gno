@@ -19,7 +19,10 @@ import {
 } from "./collection-egress-policy-validation";
 import { EgressDeniedError, planCollectionEgress } from "./egress-enforcement";
 import { evaluateEgressPolicy } from "./egress-policy";
-import { resolveEgressLineage } from "./egress-provenance";
+import {
+  EgressProvenanceError,
+  resolveEgressLineage,
+} from "./egress-provenance";
 
 const POLICY_ORDER: Readonly<Record<EgressPolicy, number>> = {
   local_only: 0,
@@ -352,30 +355,34 @@ export class CollectionEgressPolicyService {
       config.collections
         .map(({ name }) => name)
         .sort((a, b) => a.localeCompare(b));
-    const sources = names.map((name) => {
-      const state = policyState(config, name);
-      if (!state) {
-        return {
-          collection: name,
-          policy: "local_only" as const,
-          source: "legacy_default" as const,
-        };
-      }
-      return {
-        collection: state.collection,
-        policy: state.effectivePolicy,
-        source: state.source,
-      };
-    });
-    const lineage = resolveEgressLineage(sources, names);
-    const decision = evaluateEgressPolicy({
-      collections: lineage.sources,
-      action: parsed.value.action,
-      destination: { zone: parsed.value.destinationZone },
-      caller: parsed.value.caller,
-      contentClass: parsed.value.contentClass,
-    });
+    let deniedLineage: ReturnType<typeof resolveEgressLineage> | null = null;
+    let deniedDecision: EgressDecision | null = null;
     try {
+      const sources = names.map((name) => {
+        const state = policyState(config, name);
+        if (!state) {
+          return {
+            collection: name,
+            policy: "local_only" as const,
+            source: "legacy_default" as const,
+          };
+        }
+        return {
+          collection: state.collection,
+          policy: state.effectivePolicy,
+          source: state.source,
+        };
+      });
+      const lineage = resolveEgressLineage(sources, names);
+      const decision = evaluateEgressPolicy({
+        collections: lineage.sources,
+        action: parsed.value.action,
+        destination: { zone: parsed.value.destinationZone },
+        caller: parsed.value.caller,
+        contentClass: parsed.value.contentClass,
+      });
+      deniedLineage = lineage;
+      deniedDecision = decision;
       const plan = planCollectionEgress({
         collections: config.collections,
         collectionNames: names,
@@ -399,19 +406,28 @@ export class CollectionEgressPolicyService {
         },
       };
     } catch (error) {
+      if (error instanceof EgressProvenanceError) {
+        return {
+          ok: false,
+          code: "VALIDATION",
+          error: "Invalid collection egress scope",
+        };
+      }
       if (!(error instanceof EgressDeniedError)) throw error;
+      if (!deniedLineage || !deniedDecision) throw error;
+      const decision = deniedDecision;
       return {
         ok: true,
         value: {
           schemaVersion: "1.0",
           mode: "denied",
           allowedCollections: [],
-          omittedCollections: lineage.sources.map(({ collection }) => ({
+          omittedCollections: deniedLineage.sources.map(({ collection }) => ({
             collection,
             reason: decision.reason,
           })),
           disclosure: null,
-          lineage,
+          lineage: deniedLineage,
           decision,
           remediation: remediationFor(decision),
         },

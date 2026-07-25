@@ -376,6 +376,10 @@ describe("collection egress policy API", () => {
       "[]",
       '{"action":"export"}',
       '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"contentClass":"retrieval_trace","extra":true}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":[],"contentClass":"retrieval_trace"}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":["docs","docs"],"contentClass":"retrieval_trace"}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":["missing"],"contentClass":"retrieval_trace"}',
+      `{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":[${Array.from({ length: 65 }, () => '"docs"').join(",")}],"contentClass":"retrieval_trace"}`,
     ]) {
       const response = await handleCollectionEgressCheck(
         ctxHolder,

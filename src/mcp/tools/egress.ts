@@ -12,67 +12,81 @@ import { runTool, type ToolResult } from "./index";
 
 const policy = z.enum(["local_only", "lan", "remote"]);
 
-export const egressPolicyGetInputSchema = z.object({
-  collection: z.string().min(1).max(64),
-});
+export const egressPolicyGetInputSchema = z
+  .object({
+    collection: z.string().min(1).max(64),
+  })
+  .strict();
 
-export const egressPolicySetInputSchema = z.object({
-  collection: z.string().min(1).max(64),
-  policy,
-  confirmation: z
-    .object({
-      collection: z.string().min(1).max(64),
-      currentPolicy: policy,
-      currentRevision: z.number().int().nonnegative(),
-      targetPolicy: policy,
-      acknowledged: z.literal(true),
-    })
-    .strict()
-    .optional(),
-});
+export const egressPolicySetInputSchema = z
+  .object({
+    collection: z.string().min(1).max(64),
+    policy,
+    confirmation: z
+      .object({
+        collection: z.string().min(1).max(64),
+        currentPolicy: policy,
+        currentRevision: z.number().int().nonnegative(),
+        targetPolicy: policy,
+        acknowledged: z.literal(true),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
-export const egressCheckInputSchema = z.object({
-  collections: z.array(z.string().min(1).max(64)).max(64).optional(),
-  action: z.enum([
-    "retrieve",
-    "serve",
-    "publish",
-    "remote_inference",
-    "export",
-    "clip_write",
-  ]),
-  destinationZone: z.enum(["local_process", "loopback", "lan", "remote"]),
-  caller: z
-    .object({
-      authenticated: z.boolean(),
-      operationAuthorized: z.boolean(),
-    })
-    .strict(),
-  contentClass: z.enum([
-    "source",
-    "snippet",
-    "metadata",
-    "attachment",
-    "embedding",
-    "capsule",
-    "audit_log",
-    "retrieval_trace",
-  ]),
-  partialResults: z.enum(["deny", "explicit"]).default("deny"),
-});
+export const egressCheckInputSchema = z
+  .object({
+    collections: z.array(z.string().min(1).max(64)).min(1).max(64).optional(),
+    action: z.enum([
+      "retrieve",
+      "serve",
+      "publish",
+      "remote_inference",
+      "export",
+      "clip_write",
+    ]),
+    destinationZone: z.enum(["local_process", "loopback", "lan", "remote"]),
+    caller: z
+      .object({
+        authenticated: z.boolean(),
+        operationAuthorized: z.boolean(),
+      })
+      .strict(),
+    contentClass: z.enum([
+      "source",
+      "snippet",
+      "metadata",
+      "attachment",
+      "embedding",
+      "capsule",
+      "audit_log",
+      "retrieval_trace",
+    ]),
+    partialResults: z.enum(["deny", "explicit"]).default("deny"),
+  })
+  .strict();
 
-export const egressAuditListInputSchema = z.object({
-  limit: z.number().int().min(1).max(1000).default(100),
-  cursor: z.string().min(1).max(512).optional(),
-});
+export const egressAuditListInputSchema = z
+  .object({
+    limit: z.number().int().min(1).max(1000).default(100),
+    cursor: z.string().min(1).max(512).optional(),
+  })
+  .strict();
 
-export const egressAuditIdInputSchema = z.object({
-  auditId: z.string().min(1).max(128),
-});
+export const egressAuditIdInputSchema = z
+  .object({
+    auditId: z.string().min(1).max(128),
+  })
+  .strict();
 
-export const egressAuditPurgeInputSchema = z.object({
-  confirm: z.literal(true),
-});
+export const egressAuditStatusInputSchema = z.object({}).strict();
+
+export const egressAuditPurgeInputSchema = z
+  .object({
+    confirm: z.literal(true),
+  })
+  .strict();
 
 const json = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -192,7 +206,7 @@ export const handleEgressAuditShow = (
   );
 
 export const handleEgressAuditStatus = (
-  _args: Record<string, never>,
+  _args: z.infer<typeof egressAuditStatusInputSchema>,
   ctx: ToolContext
 ): Promise<ToolResult> =>
   runTool(

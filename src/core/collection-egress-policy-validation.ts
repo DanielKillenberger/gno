@@ -164,10 +164,15 @@ const parseCollections = (
 ): PolicyValidationResult<string[] | undefined> => {
   if (value === undefined) return { ok: true, value: undefined };
   try {
-    if (!Array.isArray(value) || value.length > MAX_COLLECTIONS) {
+    if (
+      !Array.isArray(value) ||
+      value.length === 0 ||
+      value.length > MAX_COLLECTIONS
+    ) {
       return invalid("Invalid collection scope");
     }
     const names: string[] = [];
+    const seenNames = new Set<string>();
     for (let index = 0; index < value.length; index += 1) {
       if (!(index in value)) return invalid("Invalid collection scope");
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
@@ -176,6 +181,10 @@ const parseCollections = (
       }
       const name = parseCollectionName(descriptor.value);
       if (!name.ok) return invalid("Invalid collection scope");
+      if (seenNames.has(name.value)) {
+        return invalid("Invalid collection scope");
+      }
+      seenNames.add(name.value);
       names.push(name.value);
     }
     return { ok: true, value: names };

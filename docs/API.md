@@ -757,7 +757,10 @@ queued work. Older active responses fail with a content-free
 `POST /api/egress/check` accepts exact `collections`, `action`,
 `destinationZone`, `caller`, and `contentClass`; optional
 `partialResults: "explicit"` returns allowed and omitted collections with
-disclosure. It performs no protected action.
+disclosure. An explicit collection scope must contain 1–64 unique canonical
+collection names. Unknown collections return stable `VALIDATION` without
+revealing configured paths. Omit `collections` to check every configured
+collection. The endpoint performs no protected action.
 
 Content-free local audit controls:
 
@@ -1378,6 +1381,12 @@ operation failure has committed. It never includes a question, file path, URI,
 hash, passage, Capsule body, receipt body, credential, or source content.
 Event data uses the closed `capsule-reverified-event.schema.json` contract.
 Saved-Capsule registration management remains CLI-only.
+
+Each event stream is bound to the collection-policy authorization epoch
+admitted when it connects. GNO rechecks that epoch before every document event
+and heartbeat. After policy rotation, the stream suppresses document URI,
+collection, and relative-path metadata, sends a content-free
+`EGRESS_POLICY_CHANGED` retry event, closes, and unsubscribes.
 
 ---
 
