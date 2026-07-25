@@ -175,10 +175,10 @@ to the fail-closed local default.
 Migration does not recall data already disclosed. Tightening a collection
 blocks future GNO-controlled transfers, but an artifact previously uploaded to
 a remote service may require deletion or takedown at that service. For gno.sh,
-remove the published space remotely, then create and upload a new artifact only
-after reviewing the current policy and preview. Encrypted artifacts remain
-client-encrypted; gno.sh never receives the passphrase and cannot decrypt or
-recover them.
+revoke or expire supported private links in Studio; public-space deletion is
+not yet self-service, so request takedown before creating and uploading a new
+artifact. Encrypted artifacts remain client-encrypted; gno.sh never receives
+the passphrase and cannot decrypt or recover them.
 
 Policy decisions create bounded, content-free local audit receipts. Use
 `gno egress-audit list|show|status|delete|purge`; receipts contain stable reason

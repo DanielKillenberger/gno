@@ -298,8 +298,9 @@ independent gates. `EGRESS_DENIED` is not permission to retry through another
 surface. Audit output is local and content-free via
 `gno egress-audit list|show|status`; deletion/purge must be explicit. A local
 policy change cannot retract data already uploaded—tell the user to remove it
-at the remote service. Encrypted gno.sh shares are client-encrypted and never
-server-decrypted.
+at the remote service. For gno.sh, supported private links can be revoked or
+expired in Studio; public-space deletion is not yet self-service, so request
+takedown. Encrypted gno.sh shares are client-encrypted and never server-decrypted.
 
 ## MCP Retrieval Strategy
 

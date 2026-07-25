@@ -51,10 +51,10 @@ gno collection policy set work-docs remote --confirm-relaxation <revision>
 ```
 
 Tightening policy does not retract an artifact already uploaded or copied.
-Delete the remote gno.sh space (or request remote takedown), then regenerate
-and review any replacement artifact. Never assume republishing, deleting a
-local export, or changing local policy removed independently retained remote
-copies.
+Revoke or expire supported private links in Studio; public-space deletion is
+not yet self-service, so request remote takedown before regenerating and
+reviewing any replacement artifact. Never assume republishing, deleting a local
+export, or changing local policy removed independently retained remote copies.
 
 ## Visibility and agent access
 
