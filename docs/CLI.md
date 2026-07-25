@@ -936,7 +936,7 @@ Compile a goal into a deterministic, citation-complete evidence Capsule:
 ```bash
 gno context build "launch decision" --budget 12000 --json
 gno context build "compare the proposals" --budget 16000 --collection work --md
-gno context build "release evidence" --budget 12000 --fast --output capsule.json
+gno context build "release evidence" --budget 12000 --fast --json --output capsule.json
 ```
 
 The budget applies to the complete canonical payload, not separately to each
