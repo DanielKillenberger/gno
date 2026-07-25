@@ -29,6 +29,33 @@ source URIs, credential-bearing URLs, and unsafe metadata from reader
 artifacts. Review the preview and the exported file before upload. Publication
 is a disclosure decision, not a backup.
 
+## Collection policy and migration
+
+Every exported snapshot records its exact collection membership and the most
+restrictive effective `local_only`, `lan`, or `remote` policy. Building and
+previewing the JSON file is a local-process operation; it never uploads by
+itself. The current Studio upload is a second, explicit user action. Future
+integrated upload or private agent access remains disabled until both its own
+authentication gate and a current `publish` policy decision pass.
+
+Collections created before egress policies are migrated to an effective
+`local_only` boundary without deleting or rebuilding local documents. That
+default blocks future GNO-controlled network transfer while local indexing,
+search, retrieval, trace inspection, and local-file export remain usable.
+Choose a less restrictive policy only after reviewing the destination and the
+exact current revision:
+
+```bash
+gno collection policy get work-docs
+gno collection policy set work-docs remote --confirm-relaxation <revision>
+```
+
+Tightening policy does not retract an artifact already uploaded or copied.
+Revoke or expire supported private links in Studio; public-space deletion is
+not yet self-service, so request remote takedown before regenerating and
+reviewing any replacement artifact. Never assume republishing, deleting a local
+export, or changing local policy removed independently retained remote copies.
+
 ## Visibility and agent access
 
 Human-reader access modes:
@@ -42,11 +69,16 @@ Human-reader access modes:
 Public artifacts also carry the shipped read-only agent projection: a closed
 manifest, deterministic Markdown, `llms.txt`, content hashes, and exact line
 locators. The projection contains only the explicitly exported public
-snapshot.
+snapshot. Every current artifact records deterministic `egressLineage`: sorted
+source-collection membership plus the most restrictive effective policy.
+Public manifests repeat that lineage, and `projectionRevision` binds it so a
+policy change cannot reuse an older revision.
 
 Secret-link, invite-only, and encrypted spaces do not expose an agent
-projection. gno.sh does not currently provide token-authenticated private agent
-access. Do not treat a secret link as an agent API credential.
+projection. Their wrappers retain the same redacted egress lineage for local
+verification without exposing an agent manifest or decrypting content. gno.sh
+does not currently provide token-authenticated private agent access. Do not
+treat a secret link as an agent API credential.
 
 ## Encrypted export
 
@@ -60,6 +92,10 @@ GNO encrypts the payload locally. The exported wrapper contains ciphertext
 metadata and an opaque share token, not plaintext notes or evidence. Losing the
 passphrase means losing access; gno.sh cannot recover it.
 
+The passphrase and plaintext never become server inputs. Readers decrypt in
+their browser; gno.sh stores and serves ciphertext only. No plan, support path,
+agent route, or administrator action enables server-side recovery.
+
 Avoid passing a real passphrase directly in shared shell history. Use a private
 interactive environment and follow your organization’s secret-handling rules.
 
@@ -68,6 +104,12 @@ interactive environment and follow your organization’s secret-handling rules.
 Local indexing, retrieval, and local models remain on the machine. Configured
 HTTP model endpoints are a separate explicit boundary. gno.sh receives the
 exported artifact only when you upload it.
+
+Building a publish artifact is a policy-checked local-process export. The local
+REST response does not upload it and is classified as loopback serving, not
+remote publication. Remote upload, private/invite agent access, and
+server-side decryption are not implemented; an upload or future agent route
+must add its own authentication gate and a separate `publish` policy decision.
 
 The design-partner validation pilot is separately opt-in and concierge-run. Its
 closed receipts contain only a generated high-entropy cohort key, pseudonymous

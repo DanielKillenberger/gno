@@ -1,9 +1,14 @@
 /** Read-only comparison of persisted retrieval baselines with one candidate. */
 
 import type { SearchResult } from "../pipeline/types";
-import type { DocumentRow, StoreResult } from "../store/types";
+import type {
+  DocumentRow,
+  RetrievalTraceExportManifestRow,
+  StoreResult,
+} from "../store/types";
 import type {
   RetrievalQrelsCase,
+  RetrievalTraceQrelsArtifact,
   RetrievalQrel,
   RetrievalQrelsEvidence,
 } from "./retrieval-qrels";
@@ -23,6 +28,7 @@ import { computeRetrievalMetrics } from "../bench/metrics";
 import { diagnoseQueryTarget } from "../pipeline/diagnose";
 import { hashTraceCanonical } from "../store/retrieval-trace-codec";
 import { ok } from "../store/types";
+import { isMigratedLegacyEgressLineage } from "./egress-provenance";
 import { buildRetrievalQrelsArtifact } from "./retrieval-qrels";
 import {
   buildRetrievalReplaySearchOptions,
@@ -73,6 +79,16 @@ const reconstructionReason = (message: string): RetrievalReplayReason | null =>
       message.startsWith(`${reason}:`) ||
       message.includes(`${reason}:`)
   ) ?? null;
+
+const artifactMatchesManifest = (
+  artifact: RetrievalTraceQrelsArtifact,
+  manifest: RetrievalTraceExportManifestRow
+): boolean => {
+  if (hashTraceCanonical(artifact) === manifest.artifactHash) return true;
+  if (!isMigratedLegacyEgressLineage(manifest.egressLineage)) return false;
+  const { egressLineage: _legacyProjection, ...legacyArtifact } = artifact;
+  return hashTraceCanonical(legacyArtifact) === manifest.artifactHash;
+};
 
 const targetMatchesResult = (
   qrel: RetrievalQrel,
@@ -376,9 +392,7 @@ export const replayRetrievalTraces = async (
       )
     );
   }
-  if (
-    hashTraceCanonical(artifact.value) !== stored.value.manifest.artifactHash
-  ) {
+  if (!artifactMatchesManifest(artifact.value, stored.value.manifest)) {
     return ok(unreplayable(validatedInput, "manifest_hash_mismatch"));
   }
   let currentFingerprints;

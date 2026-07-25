@@ -15,7 +15,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // node:path basename: no Bun path utilities.
 import { basename } from "node:path";
 
-import type { Collection, Context, FtsTokenizer } from "../../config/types";
+import type { EgressLineage } from "../../core/egress-provenance";
 import type {
   ActivationIndexDocument,
   ActivationIndexIdentity,
@@ -44,6 +44,15 @@ import type {
   DocumentInput,
   DocumentRow,
   EmbeddingCleanupStats,
+  EgressAuditCursor,
+  EgressAuditDeleteResult,
+  EgressAuditPage,
+  EgressAuditPurgeResult,
+  EgressAuditReceiptInput,
+  EgressAuditReceiptRow,
+  EgressAuditRetentionPolicy,
+  EgressAuditRetentionResult,
+  EgressAuditStatusResult,
   FtsResult,
   FtsSearchOptions,
   GetGraphOptions,
@@ -93,6 +102,14 @@ import type {
 import type { SqliteDbProvider } from "./types";
 
 import { buildUri, deriveDocid, stripUriIndex } from "../../app/constants";
+import {
+  type Collection,
+  type Context,
+  type EgressPolicy,
+  type EgressPolicySource,
+  type FtsTokenizer,
+  resolveConfiguredEgressPolicy,
+} from "../../config/types";
 import { analyzeGraphCommunities } from "../../core/graph-analysis";
 import {
   buildWikiBestMatchSubquery,
@@ -127,6 +144,16 @@ import {
   purgeDocumentChanges as purgeStoredDocumentChanges,
   snapshotDocumentChange,
 } from "./change-journal-store";
+import {
+  appendEgressAuditReceipt as appendStoredEgressAuditReceipt,
+  appendEgressAuditReceiptWithRetention as appendStoredEgressAuditReceiptWithRetention,
+  deleteEgressAuditReceipt as deleteStoredEgressAuditReceipt,
+  enforceEgressAuditRetention as enforceStoredEgressAuditRetention,
+  getEgressAuditReceipt as getStoredEgressAuditReceipt,
+  getEgressAuditStatus as getStoredEgressAuditStatus,
+  listEgressAuditReceipts as listStoredEgressAuditReceipts,
+  purgeEgressAuditReceipts as purgeStoredEgressAuditReceipts,
+} from "./egress-audit-store";
 import { loadFts5Snowball } from "./fts5-snowball";
 import {
   appendExportManifest as appendStoredTraceExportManifest,
@@ -149,6 +176,7 @@ import {
   finalizeTrace as finalizeStoredTrace,
   getTrace as getStoredTrace,
   listTraces as listStoredTraces,
+  mergeTraceEgressLineage as mergeStoredTraceEgressLineage,
 } from "./retrieval-trace-store";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -589,8 +617,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
 
         // Upsert collections
         const stmt = db.prepare(`
-          INSERT INTO collections (name, path, pattern, include, exclude, update_cmd, language_hint, synced_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          INSERT INTO collections (
+            name, path, pattern, include, exclude, update_cmd, language_hint,
+            egress_policy, egress_policy_source, egress_policy_revision,
+            synced_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
           ON CONFLICT(name) DO UPDATE SET
             path = excluded.path,
             pattern = excluded.pattern,
@@ -598,10 +630,29 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             exclude = excluded.exclude,
             update_cmd = excluded.update_cmd,
             language_hint = excluded.language_hint,
+            egress_policy = CASE
+              WHEN excluded.egress_policy_source = 'config_default'
+                AND collections.egress_policy_source = 'legacy_default'
+              THEN collections.egress_policy
+              ELSE excluded.egress_policy
+            END,
+            egress_policy_source = CASE
+              WHEN excluded.egress_policy_source = 'config_default'
+                AND collections.egress_policy_source = 'legacy_default'
+              THEN collections.egress_policy_source
+              ELSE excluded.egress_policy_source
+            END,
+            egress_policy_revision = CASE
+              WHEN excluded.egress_policy_source = 'config_default'
+                AND collections.egress_policy_source = 'legacy_default'
+              THEN collections.egress_policy_revision
+              ELSE excluded.egress_policy_revision
+            END,
             synced_at = datetime('now')
         `);
 
         for (const c of collections) {
+          const egress = resolveConfiguredEgressPolicy(c);
           stmt.run(
             c.name,
             c.path,
@@ -609,7 +660,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             c.include.length > 0 ? JSON.stringify(c.include) : null,
             c.exclude.length > 0 ? JSON.stringify(c.exclude) : null,
             c.updateCmd ?? null,
-            c.languageHint ?? null
+            c.languageHint ?? null,
+            egress.policy,
+            egress.source,
+            c.egressPolicyRevision ?? 0
           );
         }
       });
@@ -631,8 +685,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     try {
       const db = this.ensureOpen();
       const stmt = db.prepare(`
-        INSERT INTO collections (name, path, pattern, include, exclude, update_cmd, language_hint, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO collections (
+          name, path, pattern, include, exclude, update_cmd, language_hint,
+          egress_policy, egress_policy_source, egress_policy_revision,
+          synced_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(name) DO UPDATE SET
           path = excluded.path,
           pattern = excluded.pattern,
@@ -640,6 +698,24 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           exclude = excluded.exclude,
           update_cmd = excluded.update_cmd,
           language_hint = excluded.language_hint,
+          egress_policy = CASE
+            WHEN excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            THEN collections.egress_policy
+            ELSE excluded.egress_policy
+          END,
+          egress_policy_source = CASE
+            WHEN excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            THEN collections.egress_policy_source
+            ELSE excluded.egress_policy_source
+          END,
+          egress_policy_revision = CASE
+            WHEN excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            THEN collections.egress_policy_revision
+            ELSE excluded.egress_policy_revision
+          END,
           synced_at = datetime('now')
         WHERE collections.path IS NOT excluded.path
           OR collections.pattern IS NOT excluded.pattern
@@ -647,9 +723,21 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           OR collections.exclude IS NOT excluded.exclude
           OR collections.update_cmd IS NOT excluded.update_cmd
           OR collections.language_hint IS NOT excluded.language_hint
+          OR (
+            NOT (
+              excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            )
+            AND (
+              collections.egress_policy IS NOT excluded.egress_policy
+              OR collections.egress_policy_source IS NOT excluded.egress_policy_source
+              OR collections.egress_policy_revision IS NOT excluded.egress_policy_revision
+            )
+          )
       `);
       const transaction = db.transaction(() => {
         for (const collection of collections) {
+          const egress = resolveConfiguredEgressPolicy(collection);
           stmt.run(
             collection.name,
             collection.path,
@@ -661,7 +749,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
               ? JSON.stringify(collection.exclude)
               : null,
             collection.updateCmd ?? null,
-            collection.languageHint ?? null
+            collection.languageHint ?? null,
+            egress.policy,
+            egress.source,
+            collection.egressPolicyRevision ?? 0
           );
         }
       });
@@ -943,6 +1034,13 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     return createStoredTrace(this.ensureOpen(), input);
   }
 
+  async mergeRetrievalTraceEgressLineage(
+    traceId: string,
+    lineage: EgressLineage
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    return mergeStoredTraceEgressLineage(this.ensureOpen(), traceId, lineage);
+  }
+
   async getRetrievalTrace(
     traceId: string
   ): Promise<StoreResult<RetrievalTraceBundle | null>> {
@@ -1036,6 +1134,61 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceRetentionResult>> {
     return enforceStoredTraceRetention(this.ensureOpen(), policy, nowMs);
+  }
+
+  async appendEgressAuditReceipt(
+    receipt: EgressAuditReceiptInput
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    return appendStoredEgressAuditReceipt(this.ensureOpen(), receipt);
+  }
+
+  async appendEgressAuditReceiptWithRetention(
+    receipt: EgressAuditReceiptInput,
+    policy: EgressAuditRetentionPolicy,
+    nowMs: number
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    return appendStoredEgressAuditReceiptWithRetention(
+      this.ensureOpen(),
+      receipt,
+      policy,
+      nowMs
+    );
+  }
+
+  async listEgressAuditReceipts(
+    limit: number,
+    cursor?: EgressAuditCursor
+  ): Promise<StoreResult<EgressAuditPage>> {
+    return listStoredEgressAuditReceipts(this.ensureOpen(), limit, cursor);
+  }
+
+  async getEgressAuditReceipt(
+    auditId: string
+  ): Promise<StoreResult<EgressAuditReceiptRow | null>> {
+    return getStoredEgressAuditReceipt(this.ensureOpen(), auditId);
+  }
+
+  async deleteEgressAuditReceipt(
+    auditId: string
+  ): Promise<StoreResult<EgressAuditDeleteResult>> {
+    return deleteStoredEgressAuditReceipt(this.ensureOpen(), auditId);
+  }
+
+  async getEgressAuditStatus(): Promise<StoreResult<EgressAuditStatusResult>> {
+    return getStoredEgressAuditStatus(this.ensureOpen());
+  }
+
+  async enforceEgressAuditRetention(
+    policy: EgressAuditRetentionPolicy,
+    nowMs: number
+  ): Promise<StoreResult<EgressAuditRetentionResult>> {
+    return enforceStoredEgressAuditRetention(this.ensureOpen(), policy, nowMs);
+  }
+
+  async purgeEgressAuditReceipts(): Promise<
+    StoreResult<EgressAuditPurgeResult>
+  > {
+    return purgeStoredEgressAuditReceipts(this.ensureOpen());
   }
 
   getContextGeneration(): number {
@@ -4709,6 +4862,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       interface CollectionStat {
         name: string;
         path: string;
+        egress_policy: EgressPolicy;
+        egress_policy_source: EgressPolicySource;
         total: number;
         active: number;
         errored: number;
@@ -4760,6 +4915,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           SELECT
             c.name,
             c.path,
+            c.egress_policy,
+            c.egress_policy_source,
             COALESCE(ds.total, 0) AS total,
             COALESCE(ds.active, 0) AS active,
             COALESCE(ds.errored, 0) AS errored,
@@ -4856,6 +5013,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         collections: collectionStats.map((s) => ({
           name: s.name,
           path: s.path,
+          egressPolicy: s.egress_policy,
+          egressPolicySource: s.egress_policy_source,
           totalDocuments: s.total,
           activeDocuments: s.active,
           errorDocuments: s.errored,
@@ -5132,6 +5291,8 @@ interface DbCollectionRow {
   exclude: string | null;
   update_cmd: string | null;
   language_hint: string | null;
+  egress_policy: EgressPolicy;
+  egress_policy_source: EgressPolicySource;
   synced_at: string;
 }
 
@@ -5230,6 +5391,8 @@ function mapCollectionRow(row: DbCollectionRow): CollectionRow {
     exclude: row.exclude ? JSON.parse(row.exclude) : null,
     updateCmd: row.update_cmd,
     languageHint: row.language_hint,
+    egressPolicy: row.egress_policy,
+    egressPolicySource: row.egress_policy_source,
     syncedAt: row.synced_at,
   };
 }

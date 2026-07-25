@@ -131,6 +131,40 @@ Relevant/irrelevant targets must match recorded evidence; missing-expected
 accepts a content-free document identity. Export rejects open/missing traces
 and preserves all terminal outcomes without implicit negative feedback.
 
+Collection boundary tools use the same policy contract on every transport:
+
+- `gno_egress_policy_get` shows effective policy, provenance, durable revision,
+  and diagnostic version.
+- `gno_egress_check` explains an exact action/destination/caller/content-class
+  decision without performing the action.
+- `gno_egress_policy_set` is write-enabled; relaxation requires the exact
+  collection, current policy, durable revision, target policy, and explicit
+  acknowledgement. Stale and replayed confirmations fail closed.
+- `gno_egress_audit_list|show|status` inspect content-free local receipts;
+  `gno_egress_audit_delete|purge` are write-enabled local cleanup controls.
+
+Collection policy never replaces bearer authentication or the MCP write flag.
+Trace export resolves exact trace lineage and checks policy before creating or
+reusing an export receipt.
+
+Trace management intentionally keeps three independent decisions:
+
+| Operation                      | Bearer/transport auth | MCP write opt-in | Collection destination policy   |
+| ------------------------------ | --------------------- | ---------------- | ------------------------------- |
+| Local list/show                | Transport-dependent   | No               | No network export               |
+| Local label/delete/purge       | Transport-dependent   | Yes on MCP       | No network export               |
+| Loopback aggregate export      | Loopback admission    | Yes on MCP       | Local-file/process allowed      |
+| LAN or remote aggregate export | Required              | Yes              | `lan` or `remote` as applicable |
+
+An authenticated caller with writes disabled receives `WRITE_DISABLED` before
+trace lookup or policy evaluation. A write-enabled caller whose destination is
+outside the current trace lineage policy receives content-free
+`EGRESS_DENIED`; no export manifest is created or reused. Loopback REST
+inspection, explicit label/delete, and full purge remain local controls and do
+not grant permission for a later LAN or remote export. Missing IDs and denials
+never echo trace IDs, queries, goals, evidence references, local paths, target
+URLs, or receipt content.
+
 For ambiguous terms, pass `intent` instead of stuffing extra words into `query`:
 
 ```json
@@ -239,6 +273,14 @@ Authentication does not authorize writes. Set `gateway.enableWrite: true` or
 pass `--mcp-enable-write` separately. Without that opt-in, HTTP calls to write
 tools return a redacted HTTP 403 before SDK dispatch.
 
+Collection policy is checked separately on every tool and resource request,
+using the current socket peer even when a client reuses an existing session.
+`local_only` content can leave only through loopback; `lan` content additionally
+permits an authenticated private-network peer; `remote` is required for an
+authenticated public peer. A bearer token never overrides policy, and
+`--mcp-enable-write` never overrides either control. Policy failures return a
+redacted `EGRESS_DENIED` response before a tool/resource reads indexed content.
+
 Requests and sessions are bounded. Boundary responses are stable and contain no
 peer, allowlist, path, token, Authorization header, query, or document content:
 401 unauthenticated, 403 forbidden, 413 oversized body, 429 pressure, and 503
@@ -249,6 +291,8 @@ shutdown/credential/runtime unavailability. See
 the Web/Desktop Health Center, `gno_status`, and detached process status:
 mode, uptime, listener port, admission/shutdown state, session/request/queue
 counts, model lease/load counters, job counts, and content/index generations.
+On a non-loopback daemon listener it passes through the same Host, Origin,
+bearer, socket-peer, and collection-policy checks as `/mcp`.
 
 ### Resident client example
 
@@ -1565,3 +1609,14 @@ GNO_VERBOSE=1 gno mcp
 - Index only what you need (use `--pattern` filters)
 - Use specific collections for faster searches
 - Pre-download models: `gno models pull --all`
+  Collection boundary tools:
+
+- `gno_egress_policy_get` shows effective policy, provenance, durable revision,
+  and diagnostic version.
+- `gno_egress_check` explains an exact action/destination/caller/content-class
+  decision without performing the action.
+- `gno_egress_policy_set` is write-enabled; relaxation requires the exact
+  collection, current policy, durable revision, target policy, and explicit
+  acknowledgement. Stale and replayed confirmations fail closed.
+- `gno_egress_audit_list|show|status` inspect content-free local receipts;
+  `gno_egress_audit_delete|purge` are write-enabled local cleanup controls.

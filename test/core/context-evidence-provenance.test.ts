@@ -56,7 +56,21 @@ test("strict materialization rejects URI and hidden planner identity drift", asy
   };
   const store: EvidenceStore = {
     getContexts: async () => ok([]),
-    getCollections: async () => ok([]),
+    getCollections: async () =>
+      ok([
+        {
+          name: "notes",
+          path: "/notes",
+          pattern: "**/*",
+          include: null,
+          exclude: null,
+          updateCmd: null,
+          languageHint: null,
+          egressPolicy: "local_only",
+          egressPolicySource: "legacy_default",
+          syncedAt: "2026-07-22T10:00:00.000Z",
+        },
+      ]),
     getActivationIndexSnapshot: async () =>
       ok({
         identity: {

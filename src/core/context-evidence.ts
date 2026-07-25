@@ -1,5 +1,6 @@
 /** Strict indexed-evidence loading for Context Capsule compilation. */
 
+import type { EgressPolicy } from "../config/types";
 import type { SearchResults } from "../pipeline/types";
 import type {
   ActivationIndexSnapshot,
@@ -12,7 +13,7 @@ import type {
   ContextCanonicalProjection,
   MaterializedContextCandidate,
 } from "./context-budget";
-import type { ContextCapsulePayloadV1 } from "./context-capsule-schema";
+import type { ContextCapsulePayloadV1_1 } from "./context-capsule-schema";
 import type {
   ContextCanonicalPlanDraft,
   ContextCompilerInput,
@@ -21,6 +22,7 @@ import type {
   ContextRetrievalCandidate,
   ContextRetrievalRequest,
 } from "./context-compiler";
+import type { EgressLineage } from "./egress-provenance";
 import type { RecordEvidenceMetadata } from "./record-metadata";
 
 import { decorateUriForIndex, deriveDocid, parseUri } from "../app/constants";
@@ -36,6 +38,7 @@ import {
 } from "./context-capsule-validation";
 import { planContextEvidence } from "./context-compiler";
 import { projectContextEvidenceMetadata } from "./context-evidence-metadata";
+import { createEgressLineage, resolveEgressLineage } from "./egress-provenance";
 import { projectRecordEvidenceMetadata } from "./record-metadata";
 import {
   extractInclusiveLines,
@@ -82,6 +85,7 @@ export class ContextEvidenceError extends Error {
 
 export interface ContextEvidenceSnapshot {
   collections: string[];
+  egressLineage: EgressLineage;
   contexts: ContextRow[];
   documents: ContextEvidenceSnapshotDocument[];
   contextFingerprint: string;
@@ -105,7 +109,8 @@ export interface ContextEvidenceValue {
   observedAt: null;
   contextIds: string[];
   trust: "untrusted";
-  egress: "unavailable";
+  egress: EgressPolicy | "unavailable";
+  egressLineage?: EgressLineage;
   record?: RecordEvidenceMetadata;
 }
 
@@ -117,6 +122,7 @@ export type ContextEvidenceCompilerInput = Omit<
 export interface ContextEvidenceProjectionContext {
   contextFingerprint: string;
   indexFingerprint: string;
+  egressLineage: EgressLineage;
 }
 
 export interface ContextEvidenceCompilerDeps<P> {
@@ -208,18 +214,34 @@ export const captureContextEvidenceSnapshot = async (
     "context_load_failed",
     "Failed to load configured contexts"
   ).map((row) => ({ ...row }));
+  const collectionRows = unwrapStore(
+    await store.getCollections(),
+    "collection_load_failed",
+    "Failed to load indexed collections"
+  );
   const collections =
     requestedCollections.length > 0
       ? [...new Set(requestedCollections)].sort(compareCodeUnits)
-      : [
-          ...new Set(
-            unwrapStore(
-              await store.getCollections(),
-              "collection_load_failed",
-              "Failed to load indexed collections"
-            ).map((row) => row.name)
-          ),
-        ].sort(compareCodeUnits);
+      : [...new Set(collectionRows.map((row) => row.name))].sort(
+          compareCodeUnits
+        );
+  let egressLineage: EgressLineage;
+  try {
+    egressLineage = resolveEgressLineage(
+      collectionRows.map((row) => ({
+        collection: row.name,
+        policy: row.egressPolicy,
+        source: row.egressPolicySource,
+      })),
+      collections
+    );
+  } catch (error) {
+    throw new ContextEvidenceError(
+      "collection_load_failed",
+      "Failed to resolve complete collection policy lineage",
+      error
+    );
+  }
   const indexName = canonicalizeIndexName(indexNameInput);
   const indexSnapshots: ReturnType<typeof canonicalIndexSnapshot>[] = [];
   const documents: ContextEvidenceSnapshotDocument[] = [];
@@ -248,6 +270,7 @@ export const captureContextEvidenceSnapshot = async (
   }
   return {
     collections,
+    egressLineage,
     contexts,
     documents: documents.sort(
       (left, right) =>
@@ -256,7 +279,10 @@ export const captureContextEvidenceSnapshot = async (
         compareCodeUnits(left.mirrorHash ?? "", right.mirrorHash ?? "")
     ),
     contextFingerprint: fingerprintContextRows(contexts),
-    indexFingerprint: hashJson(indexSnapshots),
+    indexFingerprint: hashJson({
+      snapshots: indexSnapshots,
+      egressLineage,
+    }),
   };
 };
 
@@ -313,6 +339,21 @@ export const materializeContextEvidenceCandidates = async (
     "document_load_failed",
     "Failed to batch-load Context evidence documents"
   );
+  const collectionRows = unwrapStore(
+    await store.getCollections(),
+    "collection_load_failed",
+    "Failed to load Context evidence policies"
+  );
+  const policyByCollection = new Map(
+    collectionRows.map((row) => [
+      row.name,
+      {
+        collection: row.name,
+        policy: row.egressPolicy,
+        source: row.egressPolicySource,
+      },
+    ])
+  );
   const alignedDocuments = candidates.map((candidate) =>
     referenceDocument(documents, candidate, indexName)
   );
@@ -343,6 +384,24 @@ export const materializeContextEvidenceCandidates = async (
   return candidates.map((candidate, index) => {
     const result = candidate.result;
     const document = alignedDocuments[index];
+    if (!document) {
+      throw new ContextEvidenceError(
+        "document_load_failed",
+        `Document identity is unavailable for ${result.uri}`
+      );
+    }
+    const fallbackPolicy = policyByCollection.get(document.collection);
+    if (!result.egressLineage && !fallbackPolicy) {
+      throw new ContextEvidenceError(
+        "collection_load_failed",
+        `Policy lineage is unavailable for ${result.uri}`
+      );
+    }
+    const egressLineage =
+      result.egressLineage ??
+      createEgressLineage([
+        fallbackPolicy as NonNullable<typeof fallbackPolicy>,
+      ]);
     const metadata = result[SEARCH_RESULT_PLANNER_METADATA];
     const snippetRange = result.snippetRange;
     if (!document?.mirrorHash || !metadata || !snippetRange) {
@@ -418,7 +477,8 @@ export const materializeContextEvidenceCandidates = async (
           observedAt: null,
           contextIds: [...candidate.contextIds],
           trust: "untrusted",
-          egress: "unavailable",
+          egress: egressLineage.effectivePolicy,
+          egressLineage,
           ...(projectRecordEvidenceMetadata(document)
             ? { record: projectRecordEvidenceMetadata(document) }
             : {}),
@@ -441,6 +501,7 @@ export const compileContextEvidence = async <P>(
   const fingerprints = {
     contextFingerprint: before.contextFingerprint,
     indexFingerprint: before.indexFingerprint,
+    egressLineage: before.egressLineage,
   };
   const plan = await planContextEvidence(
     { ...input, contextSnapshot: before.contexts, observedAt: null },
@@ -479,7 +540,16 @@ export const compileContextEvidence = async <P>(
 export const toContextCapsuleEvidence = (
   candidate: MaterializedContextCandidate<ContextEvidenceValue>,
   selectionRank: number
-): ContextCapsulePayloadV1["evidence"][number] => {
+): ContextCapsulePayloadV1_1["evidence"][number] => {
+  if (
+    candidate.value.egress === "unavailable" ||
+    candidate.value.egressLineage === undefined
+  ) {
+    throw new ContextEvidenceError(
+      "collection_load_failed",
+      `Policy lineage is unavailable for ${candidate.uri}`
+    );
+  }
   const identity = {
     uri: candidate.uri,
     docid: candidate.docid,
@@ -493,6 +563,8 @@ export const toContextCapsuleEvidence = (
     evidenceId: contextCapsuleEvidenceIdentity(identity),
     ...identity,
     ...candidate.value,
+    egress: candidate.value.egress,
+    egressLineage: candidate.value.egressLineage,
     text: candidate.text,
     retrievalRank: candidate.retrievalRank,
     selectionRank,

@@ -165,6 +165,9 @@ export async function ask(
     }
     traceSession = traceStart.value ?? undefined;
     const llm = new LlmAdapter(config);
+    const egressCollections = options.collection
+      ? [options.collection]
+      : ("all" as const);
 
     // Resolve download policy from env/flags
     const policy = resolveDownloadPolicy(process.env, {
@@ -179,6 +182,7 @@ export async function ask(
 
     // Create embedding port
     const embedResult = await llm.createEmbeddingPort(embedUri, {
+      egressCollections,
       policy,
       onProgress: downloadProgress
         ? (progress) => downloadProgress("embed", progress)
@@ -191,6 +195,7 @@ export async function ask(
     // Create expansion port when expansion is enabled.
     if (expandUri) {
       const genResult = await llm.createExpansionPort(expandUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("expand", progress)
@@ -204,6 +209,7 @@ export async function ask(
     // Create answer generation port when answers are requested.
     if (answerUri) {
       const genResult = await llm.createGenerationPort(answerUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("gen", progress)
@@ -217,6 +223,7 @@ export async function ask(
     // Create rerank port (unless --fast or --no-rerank)
     if (rerankUri) {
       const rerankResult = await llm.createRerankPort(rerankUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("rerank", progress)

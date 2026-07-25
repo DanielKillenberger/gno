@@ -18,6 +18,69 @@ function saturatedResponse(): Response {
   );
 }
 
+function policyChangedResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "EGRESS_POLICY_CHANGED",
+        message: "Collection policy changed; retry",
+      },
+    },
+    { status: 409 }
+  );
+}
+
+function wrapResidentStream(
+  response: Response,
+  isCurrent: () => boolean,
+  finish: () => void
+): Response {
+  if (!response.body) {
+    finish();
+    return response;
+  }
+  const reader = response.body.getReader();
+  let finished = false;
+  const finishOnce = (): void => {
+    if (finished) return;
+    finished = true;
+    finish();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (!isCurrent()) {
+          await reader.cancel("EGRESS_POLICY_CHANGED");
+          controller.close();
+          finishOnce();
+          return;
+        }
+        const result = await reader.read();
+        if (!isCurrent()) {
+          await reader.cancel("EGRESS_POLICY_CHANGED");
+          controller.close();
+          finishOnce();
+          return;
+        }
+        if (result.done) {
+          controller.close();
+          finishOnce();
+          return;
+        }
+        controller.enqueue(result.value);
+      } catch (error) {
+        controller.error(error);
+        finishOnce();
+      }
+    },
+    async cancel(reason) {
+      finishOnce();
+      await reader.cancel(reason);
+    },
+  });
+  return new Response(body, response);
+}
+
 export async function handleResidentRead(
   runtime: ResidentRuntime,
   request: Request | undefined,
@@ -27,13 +90,28 @@ export async function handleResidentRead(
   if (!admitted) return unavailableResponse();
 
   let releaseReader: (() => void) | undefined;
+  let deferredFinish = false;
+  const isAuthorizationEpochCurrent = (): boolean =>
+    admitted.isAuthorizationEpochCurrent?.() ?? true;
+  const finish = (): void => {
+    releaseReader?.();
+    admitted.finish();
+  };
   try {
     releaseReader = await runtime.readerGate.acquire(admitted.signal);
     if (admitted.signal.aborted) return unavailableResponse();
     const response = await runtime.withModelLease(() =>
       Promise.resolve(operation(admitted.signal))
     );
-    return admitted.signal.aborted ? unavailableResponse() : response;
+    if (admitted.signal.aborted) return unavailableResponse();
+    if (!isAuthorizationEpochCurrent()) {
+      return policyChangedResponse();
+    }
+    if (response.headers.get("content-type")?.includes("text/event-stream")) {
+      deferredFinish = true;
+      return wrapResidentStream(response, isAuthorizationEpochCurrent, finish);
+    }
+    return response;
   } catch (error) {
     if (
       admitted.signal.aborted ||
@@ -49,7 +127,6 @@ export async function handleResidentRead(
     }
     throw error;
   } finally {
-    releaseReader?.();
-    admitted.finish();
+    if (!deferredFinish) finish();
   }
 }

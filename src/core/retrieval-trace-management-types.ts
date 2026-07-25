@@ -10,6 +10,7 @@ import type {
   RetrievalTracePurgeResult as StoredRetrievalTracePurgeResult,
   RetrievalTraceRow,
 } from "../store/types";
+import type { EgressLineage } from "./egress-provenance";
 import type { RetrievalTraceQrelsArtifact } from "./retrieval-qrels";
 
 export interface RetrievalTraceSummary {
@@ -21,6 +22,7 @@ export interface RetrievalTraceSummary {
   queryShape: RetrievalTraceRow["queryShape"];
   goalShape: RetrievalTraceRow["goalShape"];
   fingerprints: RetrievalTraceRow["fingerprints"];
+  egressLineage: EgressLineage;
   createdAtMs: number;
   updatedAtMs: number;
   expiresAtMs: number;
@@ -87,6 +89,7 @@ export interface LabelRetrievalTraceResult {
 export interface RetrievalTraceAgenticArtifact {
   schemaVersion: "1.0";
   format: "agentic-receipt";
+  egressLineage: EgressLineage;
   traces: Array<Omit<RetrievalTraceBundle, "exports">>;
 }
 

@@ -36,9 +36,15 @@ Deliver define egress policy schema evaluator and fail-closed migration as one i
 
 
 ## Done summary
-TBD
+Implemented the foundational collection egress-policy contract, persistence, and fail-closed evaluator.
 
+- Added the closed `local_only | lan | remote` policy enum with explicit/default provenance.
+- Added migration v23, legacy backfill, rollback, and a database invariant that permits non-local policies only when explicitly configured.
+- Propagated policy state through config resolution, collection persistence, status projection, schemas, and typed fixtures.
+- Added one pure centralized evaluator with a closed action/destination matrix, most-restrictive multi-collection resolution, authentication checks, stable denial codes, and redacted bounded audit metadata.
+- Hardened the untrusted-input boundary against throwing getters, revoked proxies, sparse/oversized arrays, invalid policy/source pairs, and unbounded audit work.
+- Added exhaustive action-by-destination, policy/source, migration-constraint, bounded-input, and hostile-input regression coverage.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 9ccfd301, 24a7542e
+- Tests: bun test test/egress/policy.test.ts test/store/migrations.test.ts test/store/adapter.test.ts test/store/clipper-store.test.ts (70 pass, 0 fail), bun test test/egress test/config test/core test/pipeline test/store (830 pass, 0 fail), bun run lint:check (0 warnings, 0 errors; formatting current), .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json (valid, 0 errors, 0 warnings), git diff --check (clean)
 - PRs:

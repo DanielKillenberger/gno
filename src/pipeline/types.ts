@@ -10,6 +10,7 @@ import type {
   ContextCapsuleV1,
   ContextCapsuleVerification,
 } from "../core/context-capsule";
+import type { EgressLineage } from "../core/egress-provenance";
 import type { RecordEvidenceMetadata } from "../core/record-metadata";
 import type { RetrievalTraceSession } from "../core/retrieval-trace-session";
 import type { StoreResult } from "../store/types";
@@ -89,6 +90,8 @@ export interface SearchResult {
   conversion?: SearchResultConversion;
   /** Bounded logical-record provenance for file/export adapters. */
   record?: RecordEvidenceMetadata;
+  /** Complete, most-restrictive collection ownership for this derived result. */
+  egressLineage?: EgressLineage;
   [SEARCH_RESULT_PLANNER_METADATA]?: SearchResultPlannerMetadata;
 }
 

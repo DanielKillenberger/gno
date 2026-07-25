@@ -179,30 +179,42 @@ export async function applyConfigChange<T = void>(
         };
       }
     } else {
-      const syncCollResult = await ctx.store.syncCollections(
-        newConfig.collections
-      );
-      if (!syncCollResult.ok) {
+      const syncProjection = async (): Promise<void> => {
+        const syncCollResult = await ctx.store.syncCollections(
+          newConfig.collections
+        );
+        if (!syncCollResult.ok) {
+          throw new Error(
+            `Collection sync failed: ${syncCollResult.error.message}`
+          );
+        }
+        const syncCtxResult = await ctx.store.syncContexts(
+          newConfig.contexts ?? []
+        );
+        if (!syncCtxResult.ok) {
+          throw new Error(
+            `Context sync failed: ${syncCtxResult.error.message}`
+          );
+        }
+      };
+      const transaction = ctx.store.withTransaction
+        ? await ctx.store.withTransaction(syncProjection)
+        : await syncProjection()
+            .then(() => ({ ok: true as const, value: undefined }))
+            .catch((cause: unknown) => ({
+              ok: false as const,
+              error: {
+                message:
+                  cause instanceof Error ? cause.message : "DB sync failed",
+              },
+            }));
+      if (!transaction.ok) {
         console.warn(
-          `Config saved but DB sync failed: ${syncCollResult.error.message}`
+          `Config saved but DB sync failed: ${transaction.error.message}`
         );
         return {
           ok: false,
-          error: `DB sync failed: ${syncCollResult.error.message}`,
-          code: "SYNC_ERROR",
-        };
-      }
-
-      const syncCtxResult = await ctx.store.syncContexts(
-        newConfig.contexts ?? []
-      );
-      if (!syncCtxResult.ok) {
-        console.warn(
-          `Config saved but context sync failed: ${syncCtxResult.error.message}`
-        );
-        return {
-          ok: false,
-          error: `Context sync failed: ${syncCtxResult.error.message}`,
+          error: `DB sync failed: ${transaction.error.message}`,
           code: "SYNC_ERROR",
         };
       }

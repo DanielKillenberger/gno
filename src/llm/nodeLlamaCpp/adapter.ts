@@ -43,10 +43,21 @@ export interface CreatePortOptions {
   policy?: DownloadPolicy;
   /** Progress callback for downloads */
   onProgress?: ProgressCallback;
+  /**
+   * Participating collection scope for outbound HTTP inference.
+   * `"all"` is an explicit corpus-wide decision, never an omission fallback.
+   */
+  egressCollections: readonly string[] | "all";
 }
 
 /** Default policy: no auto-download (backwards compatible) */
 const DEFAULT_POLICY: DownloadPolicy = { offline: false, allowDownload: false };
+
+const resolveEgressCollectionNames = (
+  config: Config,
+  scope: CreatePortOptions["egressCollections"]
+): readonly string[] =>
+  scope === "all" ? config.collections.map(({ name }) => name) : scope;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Adapter
@@ -70,16 +81,22 @@ export class LlmAdapter {
    * With options.policy.allowDownload=true, auto-downloads if not cached.
    */
   async createEmbeddingPort(
-    modelUri?: string,
-    options?: CreatePortOptions
+    modelUri: string | undefined,
+    options: CreatePortOptions
   ): Promise<LlmResult<EmbeddingPort>> {
     const preset = getActivePreset(this.config);
     const uri = modelUri ?? preset.embed;
-    const policy = options?.policy ?? DEFAULT_POLICY;
+    const policy = options.policy ?? DEFAULT_POLICY;
 
     // Use HTTP embedding for remote endpoints
     if (isHttpModelUri(uri)) {
-      const httpEmbed = new HttpEmbedding(uri);
+      const httpEmbed = new HttpEmbedding(uri, {
+        collections: this.config.collections,
+        collectionNames: resolveEgressCollectionNames(
+          this.config,
+          options.egressCollections
+        ),
+      });
       // Initialize to verify connection and get dimensions
       const initResult = await httpEmbed.init();
       if (!initResult.ok) {
@@ -93,7 +110,7 @@ export class LlmAdapter {
       uri,
       "embed",
       policy,
-      options?.onProgress
+      options.onProgress
     );
     if (!resolved.ok) {
       return resolved;
@@ -111,15 +128,21 @@ export class LlmAdapter {
    * With options.policy.allowDownload=true, auto-downloads if not cached.
    */
   async createGenerationPort(
-    modelUri?: string,
-    options?: CreatePortOptions
+    modelUri: string | undefined,
+    options: CreatePortOptions
   ): Promise<LlmResult<GenerationPort>> {
     const uri = getAnswerModelUri(this.config, modelUri);
-    const policy = options?.policy ?? DEFAULT_POLICY;
+    const policy = options.policy ?? DEFAULT_POLICY;
 
     // Use HTTP generation for remote endpoints
     if (isHttpGenUri(uri)) {
-      const httpGen = new HttpGeneration(uri);
+      const httpGen = new HttpGeneration(uri, {
+        collections: this.config.collections,
+        collectionNames: resolveEgressCollectionNames(
+          this.config,
+          options.egressCollections
+        ),
+      });
       return { ok: true, value: httpGen };
     }
 
@@ -128,7 +151,7 @@ export class LlmAdapter {
       uri,
       "gen",
       policy,
-      options?.onProgress
+      options.onProgress
     );
     if (!resolved.ok) {
       return resolved;
@@ -145,14 +168,20 @@ export class LlmAdapter {
    * Uses preset.expand when configured, else falls back to preset.gen.
    */
   async createExpansionPort(
-    modelUri?: string,
-    options?: CreatePortOptions
+    modelUri: string | undefined,
+    options: CreatePortOptions
   ): Promise<LlmResult<GenerationPort>> {
     const uri = getExpandModelUri(this.config, modelUri);
-    const policy = options?.policy ?? DEFAULT_POLICY;
+    const policy = options.policy ?? DEFAULT_POLICY;
 
     if (isHttpGenUri(uri)) {
-      const httpGen = new HttpGeneration(uri);
+      const httpGen = new HttpGeneration(uri, {
+        collections: this.config.collections,
+        collectionNames: resolveEgressCollectionNames(
+          this.config,
+          options.egressCollections
+        ),
+      });
       return { ok: true, value: httpGen };
     }
 
@@ -160,7 +189,7 @@ export class LlmAdapter {
       uri,
       "expand",
       policy,
-      options?.onProgress
+      options.onProgress
     );
     if (!resolved.ok) {
       return resolved;
@@ -178,16 +207,22 @@ export class LlmAdapter {
    * With options.policy.allowDownload=true, auto-downloads if not cached.
    */
   async createRerankPort(
-    modelUri?: string,
-    options?: CreatePortOptions
+    modelUri: string | undefined,
+    options: CreatePortOptions
   ): Promise<LlmResult<RerankPort>> {
     const preset = getActivePreset(this.config);
     const uri = modelUri ?? preset.rerank;
-    const policy = options?.policy ?? DEFAULT_POLICY;
+    const policy = options.policy ?? DEFAULT_POLICY;
 
     // Use HTTP rerank for remote endpoints
     if (isHttpRerankUri(uri)) {
-      const httpRerank = new HttpRerank(uri);
+      const httpRerank = new HttpRerank(uri, {
+        collections: this.config.collections,
+        collectionNames: resolveEgressCollectionNames(
+          this.config,
+          options.egressCollections
+        ),
+      });
       return { ok: true, value: httpRerank };
     }
 
@@ -196,7 +231,7 @@ export class LlmAdapter {
       uri,
       "rerank",
       policy,
-      options?.onProgress
+      options.onProgress
     );
     if (!resolved.ok) {
       return resolved;

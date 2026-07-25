@@ -11,6 +11,11 @@ import type {
   StoreResult,
 } from "../types";
 
+import {
+  egressLineageSchema,
+  mergeEgressLineages,
+} from "../../core/egress-provenance";
+import { canonicalTraceJson, traceUtf8Bytes } from "../retrieval-trace-codec";
 import { ok } from "../types";
 import {
   type DbRetrievalTraceEventRow,
@@ -140,7 +145,11 @@ const normalizeManifest = (
   }
   const traceIds = [...new Set(input.traceIds)].sort();
   for (const traceId of traceIds) validateTraceId(traceId, "traceId");
-  return { ...input, traceIds };
+  return {
+    ...input,
+    traceIds,
+    egressLineage: egressLineageSchema.parse(input.egressLineage),
+  };
 };
 
 const readManifest = (
@@ -154,10 +163,12 @@ const readManifest = (
         format: RetrievalTraceExportManifestRow["format"];
         artifact_hash: string;
         created_at_ms: number;
+        egress_lineage_json: string;
       },
       [string]
     >(
-      `SELECT export_id, format, artifact_hash, created_at_ms
+      `SELECT export_id, format, artifact_hash, created_at_ms,
+              egress_lineage_json
        FROM retrieval_trace_exports WHERE export_id = ?`
     )
     .get(exportId);
@@ -174,6 +185,9 @@ const readManifest = (
     traceIds,
     format: row.format,
     artifactHash: row.artifact_hash,
+    egressLineage: egressLineageSchema.parse(
+      JSON.parse(row.egress_lineage_json)
+    ),
     createdAtMs: row.created_at_ms,
   };
 };
@@ -228,10 +242,12 @@ export const appendExportManifest = (
           "Export artifact already belongs to a different manifest"
         );
       }
+      const sourceLineages = [];
       for (const traceId of manifest.traceIds) {
         const trace = db
-          .query<{ status: string }, [string]>(
-            "SELECT status FROM retrieval_traces WHERE trace_id = ?"
+          .query<{ status: string; egress_lineage_json: string }, [string]>(
+            `SELECT status, egress_lineage_json
+             FROM retrieval_traces WHERE trace_id = ?`
           )
           .get(traceId);
         if (!trace) {
@@ -244,22 +260,47 @@ export const appendExportManifest = (
             "Open retrieval traces cannot be exported"
           );
         }
+        sourceLineages.push(
+          egressLineageSchema.parse(JSON.parse(trace.egress_lineage_json))
+        );
       }
+      const aggregateLineage = mergeEgressLineages(sourceLineages);
+      const historicalMembership = aggregateLineage.sources
+        .map(({ collection }) => collection)
+        .join("\0");
+      const manifestMembership = manifest.egressLineage.sources
+        .map(({ collection }) => collection)
+        .join("\0");
+      if (historicalMembership !== manifestMembership) {
+        throw new RetrievalTraceConflictError(
+          "Export manifest collection lineage does not match trace membership"
+        );
+      }
+      const egressLineageJson = canonicalTraceJson(manifest.egressLineage);
+      const egressLineageBytes = traceUtf8Bytes(egressLineageJson);
       const inserted = db.run(
         `INSERT OR IGNORE INTO retrieval_trace_exports
-         (export_id, format, artifact_hash, created_at_ms) VALUES (?, ?, ?, ?)`,
+         (export_id, format, artifact_hash, created_at_ms,
+          effective_egress_policy, egress_lineage_digest,
+          egress_lineage_json, egress_lineage_bytes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           manifest.exportId,
           manifest.format,
           manifest.artifactHash,
           manifest.createdAtMs,
+          manifest.egressLineage.effectivePolicy,
+          manifest.egressLineage.digest,
+          egressLineageJson,
+          egressLineageBytes,
         ]
       );
       const existing = readManifest(db, manifest.exportId);
       if (
         !existing ||
         existing.format !== manifest.format ||
-        existing.artifactHash !== manifest.artifactHash
+        existing.artifactHash !== manifest.artifactHash ||
+        existing.egressLineage.digest !== manifest.egressLineage.digest
       ) {
         throw new RetrievalTraceConflictError(
           "Export ID already exists with different content"

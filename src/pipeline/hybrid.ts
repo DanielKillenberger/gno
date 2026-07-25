@@ -32,6 +32,7 @@ import {
   sortByFinalScoreStable,
 } from "./content-type-boost";
 import { formatQueryForEmbedding } from "./contextual";
+import { attachSearchResultEgressLineage } from "./egress-lineage";
 import { expandQuery } from "./expansion";
 import {
   buildExplainResults,
@@ -1169,6 +1170,19 @@ export async function searchHybrid(
       }
     : undefined;
   await attachSearchResultContexts(store, finalResults);
+  const lineageResult = await attachSearchResultEgressLineage(
+    store,
+    finalResults,
+    {
+      ownershipHashes: [...neededHashes],
+      ownershipDocuments:
+        options.collection === undefined ? documents : undefined,
+      collections: collectionsResult.ok ? collectionsResult.value : undefined,
+    }
+  );
+  if (!lineageResult.ok) {
+    return err("QUERY_FAILED", lineageResult.error.message);
+  }
 
   const output: SearchResults = {
     results: finalResults,

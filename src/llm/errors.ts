@@ -18,6 +18,7 @@ export type LlmErrorCode =
   | "INVALID_MODEL_FILE"
   | "MODEL_DOWNLOAD_INTERCEPTED"
   | "INFERENCE_FAILED"
+  | "EGRESS_DENIED"
   | "TIMEOUT"
   | "OUT_OF_MEMORY"
   | "INVALID_URI"
@@ -199,6 +200,15 @@ export function inferenceFailedError(uri: string, cause?: unknown): LlmError {
     modelUri: uri,
     retryable: true,
     cause,
+  });
+}
+
+export function egressDeniedInferenceError(cause?: unknown): LlmError {
+  return llmError("EGRESS_DENIED", {
+    message: "Operation blocked by collection egress policy",
+    retryable: false,
+    cause,
+    suggestion: "Review the collection egress policy and model destination.",
   });
 }
 

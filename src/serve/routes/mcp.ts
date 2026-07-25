@@ -44,6 +44,9 @@ export async function createMcpHttpGateway(
   (runtime as Partial<ResidentRuntime>).setTransportStatusProvider?.(() =>
     transport.getStatus()
   );
+  (runtime as Partial<ResidentRuntime>).setPolicySessionInvalidator?.(() =>
+    transport.invalidateAuthenticatedSessions()
+  );
 
   const route: McpHttpRoute = async (request, server) => {
     const authorization = await security.authorize(request, server);
@@ -52,8 +55,10 @@ export async function createMcpHttpGateway(
     // POST responses and GET streams may both be long-lived SSE responses.
     server.timeout(request, 0);
     return transport.handleRequest(authorization.value.request, {
+      authenticated: authorization.value.authenticated,
       identity: authorization.value.identity,
       parsedBody: authorization.value.parsedBody,
+      peerClassification: authorization.value.peerClassification,
     });
   };
 
@@ -64,6 +69,7 @@ export async function createMcpHttpGateway(
     close: async () => {
       await transport.close();
       (runtime as Partial<ResidentRuntime>).setTransportStatusProvider?.(null);
+      (runtime as Partial<ResidentRuntime>).setPolicySessionInvalidator?.(null);
     },
   };
 }

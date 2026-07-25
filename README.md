@@ -112,7 +112,7 @@ gno daemon --detach  # headless continuous indexing (background; --status / --st
 
 <!-- public-truth:current-version -->
 
-> Current release: **v1.27.1** — see [CHANGELOG.md](./CHANGELOG.md)
+> Current release: **v1.28.0** — see [CHANGELOG.md](./CHANGELOG.md)
 
 <!-- /public-truth -->
 
@@ -898,25 +898,25 @@ graph TD
 
 ## Features
 
-| Feature              | Description                                                                    |
-| :------------------- | :----------------------------------------------------------------------------- |
-| **Hybrid Search**    | BM25 + vector + RRF fusion + cross-encoder reranking                           |
-| **Document Editor**  | Create, edit, delete docs with live markdown preview                           |
-| **Web UI**           | Visual dashboard for search, browse, edit, and AI Q&A                          |
-| **REST API**         | HTTP API for custom tools and integrations                                     |
-| **Multi-Format**     | Markdown, PDF, Office, JSONL, EML/MBOX, ICS, transcript, and browser exports   |
-| **Local LLM**        | AI answers via llama.cpp, no API keys                                          |
-| **Remote Inference** | Optional HTTP endpoints for embedding, reranking, expansion, and generation    |
-| **Privacy First**    | Local by default; no telemetry; network use is explicit or model provisioning  |
-| **MCP Server**       | 10 automatic client targets; 25 read-only tools, 40 with writes enabled        |
-| **Knowledge Delta**  | Bounded metadata history, structural diffs, and dependency impact paths        |
-| **Context Capsules** | Deterministic evidence bundles plus saved-file freshness reverification        |
-| **Collections**      | Organize sources with patterns, excludes, contexts                             |
-| **Tag Filtering**    | Frontmatter tags with hierarchical paths, filter via `--tags-any`/`--tags-all` |
-| **Note Linking**     | Wiki links, backlinks, related notes, cross-collection navigation              |
-| **Multilingual**     | Query classification, 7-language document detection, multilingual embeddings   |
-| **Incremental**      | SHA-256 tracking, only changed files re-indexed                                |
-| **Keyboard First**   | ⌘N capture, ⌘K search, ⌘/ shortcuts, ⌘S save                                   |
+| Feature              | Description                                                                                 |
+| :------------------- | :------------------------------------------------------------------------------------------ |
+| **Hybrid Search**    | BM25 + vector + RRF fusion + cross-encoder reranking                                        |
+| **Document Editor**  | Create, edit, delete docs with live markdown preview                                        |
+| **Web UI**           | Visual dashboard for search, browse, edit, and AI Q&A                                       |
+| **REST API**         | HTTP API for custom tools and integrations                                                  |
+| **Multi-Format**     | Markdown, PDF, Office, JSONL, EML/MBOX, ICS, transcript, and browser exports                |
+| **Local LLM**        | AI answers via llama.cpp, no API keys                                                       |
+| **Remote Inference** | Optional HTTP endpoints for embedding, reranking, expansion, and generation                 |
+| **Privacy First**    | Fail-closed per-collection egress policy; no telemetry; explicit network use                |
+| **MCP Server**       | 10 automatic client targets; 25 read-only tools, 40 with writes enabled                     |
+| **Knowledge Delta**  | Bounded metadata history, structural diffs, and dependency impact paths                     |
+| **Context Capsules** | Deterministic evidence bundles plus saved-file freshness reverification                     |
+| **Collections**      | Organize sources with patterns, contexts, and <code>local_only / lan / remote</code> policy |
+| **Tag Filtering**    | Frontmatter tags with hierarchical paths, filter via `--tags-any`/`--tags-all`              |
+| **Note Linking**     | Wiki links, backlinks, related notes, cross-collection navigation                           |
+| **Multilingual**     | Query classification, 7-language document detection, multilingual embeddings                |
+| **Incremental**      | SHA-256 tracking, only changed files re-indexed                                             |
+| **Keyboard First**   | ⌘N capture, ⌘K search, ⌘/ shortcuts, ⌘S save                                                |
 
 ---
 

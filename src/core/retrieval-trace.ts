@@ -16,6 +16,7 @@ import type {
   StorePort,
   StoreResult,
 } from "../store/types";
+import type { EgressLineage } from "./egress-provenance";
 
 import {
   parseRetrievalTraceEventInput,
@@ -23,6 +24,10 @@ import {
   parseRetrievalTraceRunInput,
 } from "../store/retrieval-trace-codec";
 import { err, ok } from "../store/types";
+import {
+  egressLineageSchema,
+  legacyLocalOnlyEgressLineage,
+} from "./egress-provenance";
 import { canonicalizeRetrievalTraceFilters } from "./retrieval-trace-filter-normalization";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -80,6 +85,7 @@ const startTraceSchema = z
         index: sha256Schema,
       })
       .strict(),
+    egressLineage: egressLineageSchema.default(legacyLocalOnlyEgressLineage()),
   })
   .strict();
 
@@ -186,6 +192,7 @@ export interface StartRetrievalTraceInput {
   goal?: string;
   filters?: z.input<typeof traceFiltersSchema>;
   fingerprints: RetrievalTraceFingerprints;
+  egressLineage?: EgressLineage;
 }
 
 export type RetrievalTraceWriteResult =
@@ -318,6 +325,7 @@ export class RetrievalTraceRecorder {
       goalDigest: replay && goal !== undefined ? sha256(goal) : null,
       goalShape: textShape(goal),
       filters: replay ? filters : projectMetadataObject(filters),
+      egressLineage: parsed.data.egressLineage,
       fingerprints: parsed.data.fingerprints,
       status: "open",
       createdAtMs: nowMs,
@@ -369,6 +377,20 @@ export class RetrievalTraceRecorder {
     } catch (cause) {
       return invalidTraceInput(cause, "Invalid retrieval trace run");
     }
+  }
+
+  async mergeEgressLineage(
+    traceId: string,
+    lineage: EgressLineage
+  ): Promise<StoreResult<RetrievalTraceAppendResult>> {
+    if (!this.config?.enabled) return ok("duplicate");
+    if (!this.store.mergeRetrievalTraceEgressLineage) {
+      return err(
+        "CONSTRAINT_VIOLATION",
+        "Store cannot widen retrieval trace policy lineage"
+      );
+    }
+    return this.store.mergeRetrievalTraceEgressLineage(traceId, lineage);
   }
 
   async appendEvent(

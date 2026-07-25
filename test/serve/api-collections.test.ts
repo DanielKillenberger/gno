@@ -23,11 +23,14 @@ import type { ContextHolder } from "../../src/serve/routes/api";
 
 import {
   handleClearCollectionEmbeddings,
+  handleCollectionEgressCheck,
+  handleCollectionEgressPolicy,
   handleCollections,
   handleCreateCollection,
   handleDeleteCollection,
   handleImportPreview,
   handleUpdateCollection,
+  handleUpdateCollectionEgressPolicy,
 } from "../../src/serve/routes/api";
 import { safeRm } from "../helpers/cleanup";
 
@@ -101,6 +104,16 @@ function createMockStore() {
     syncCollections(cols: Array<{ name: string; path: string }>) {
       collections.length = 0;
       collections.push(...cols);
+      return Promise.resolve({ ok: true as const, value: undefined });
+    },
+    upsertCollections(cols: Array<{ name: string; path: string }>) {
+      for (const collection of cols) {
+        const index = collections.findIndex(
+          ({ name }) => name === collection.name
+        );
+        if (index >= 0) collections[index] = collection;
+        else collections.push(collection);
+      }
       return Promise.resolve({ ok: true as const, value: undefined });
     },
     syncContexts() {
@@ -191,6 +204,195 @@ describe("GET /api/collections", () => {
     expect(body[0]?.effectiveModels.embed).toBe("hf:test/embed.gguf");
     expect(body[0]?.modelSources.embed).toBe("override");
     expect(body[0]?.activePresetId).toBe("slim-tuned");
+  });
+});
+
+describe("collection egress policy API", () => {
+  test("returns the effective policy and explain-only denial contract", async () => {
+    const ctxHolder = createMockContextHolder({
+      collections: [
+        {
+          name: "docs",
+          path: "/tmp/docs",
+          pattern: "**/*.md",
+          include: [],
+          exclude: [],
+        },
+      ],
+    });
+    const stateResponse = handleCollectionEgressPolicy(ctxHolder, "docs");
+    expect(await stateResponse.json()).toMatchObject({
+      effectivePolicy: "local_only",
+      source: "config_default",
+    });
+    const checked = await handleCollectionEgressCheck(
+      ctxHolder,
+      new Request("http://localhost/api/egress/check", {
+        method: "POST",
+        body: JSON.stringify({
+          collections: ["docs"],
+          action: "export",
+          destinationZone: "remote",
+          caller: { authenticated: true, operationAuthorized: true },
+          contentClass: "retrieval_trace",
+        }),
+      })
+    );
+    expect(await checked.json()).toMatchObject({
+      mode: "denied",
+      decision: { reason: "POLICY_LOCAL_ONLY" },
+    });
+  });
+
+  test("requires bound confirmation for relaxation and invalidates resident state", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "gno-policy-api-"));
+    try {
+      const collection = {
+        name: "docs",
+        path: tmpDir,
+        pattern: "**/*.md",
+        include: [],
+        exclude: [],
+      };
+      await writeConfig({ collections: [collection] });
+      const ctxHolder = createMockContextHolder({
+        collections: [collection],
+      });
+      let invalidated = 0;
+      ctxHolder.invalidateEgressPolicy = () => {
+        invalidated += 1;
+        return Promise.resolve({
+          policyEpoch: `egress-epoch-v1:${"a".repeat(64)}`,
+          queuedJobsInvalidated: 1,
+          sessionsInvalidated: 1,
+          staleWorkMustRetry: true,
+        });
+      };
+      const current = (await handleCollectionEgressPolicy(
+        ctxHolder,
+        "docs"
+      ).json()) as {
+        collection: "docs";
+        effectivePolicy: "local_only";
+        revision: number;
+      };
+      const unconfirmed = await handleUpdateCollectionEgressPolicy(
+        ctxHolder,
+        createMockStore() as never,
+        "docs",
+        new Request("http://localhost/api/collections/docs/egress-policy", {
+          method: "PUT",
+          body: JSON.stringify({ policy: "remote" }),
+        })
+      );
+      expect(unconfirmed.status).toBe(409);
+      const changed = await handleUpdateCollectionEgressPolicy(
+        ctxHolder,
+        createMockStore() as never,
+        "docs",
+        new Request("http://localhost/api/collections/docs/egress-policy", {
+          method: "PUT",
+          body: JSON.stringify({
+            policy: "remote",
+            confirmation: {
+              collection: current.collection,
+              currentPolicy: current.effectivePolicy,
+              currentRevision: current.revision,
+              targetPolicy: "remote",
+              acknowledged: true,
+            },
+          }),
+        })
+      );
+      expect(changed.status).toBe(200);
+      expect(await changed.json()).toMatchObject({
+        change: "relaxed",
+        invalidation: { staleWorkMustRetry: true },
+      });
+      expect(invalidated).toBe(1);
+    } finally {
+      await safeRm(tmpDir);
+    }
+  });
+
+  test("returns stable validation for malformed and non-object policy bodies without side effects", async () => {
+    const collection = {
+      name: "docs",
+      path: "/tmp/docs",
+      pattern: "**/*.md",
+      include: [],
+      exclude: [],
+    };
+    await writeConfig({ collections: [collection] });
+    const ctxHolder = createMockContextHolder({ collections: [collection] });
+    let invalidated = 0;
+    ctxHolder.invalidateEgressPolicy = () => {
+      invalidated += 1;
+      throw new Error("must not invalidate");
+    };
+    for (const body of [
+      "{",
+      "null",
+      "[]",
+      '"remote"',
+      '{"policy":1}',
+      '{"policy":"remote","extra":true}',
+      '{"policy":"remote","confirmation":[]}',
+      JSON.stringify({ policy: "remote", padding: "x".repeat(17 * 1024) }),
+    ]) {
+      const response = await handleUpdateCollectionEgressPolicy(
+        ctxHolder,
+        createMockStore() as never,
+        "docs",
+        new Request("http://localhost/api/collections/docs/egress-policy", {
+          method: "PUT",
+          body,
+        })
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "VALIDATION" },
+      });
+    }
+    expect(invalidated).toBe(0);
+    expect(ctxHolder.config.collections[0]?.egressPolicy).toBeUndefined();
+  });
+
+  test("returns stable validation for malformed check bodies without audit or content echo", async () => {
+    const ctxHolder = createMockContextHolder({
+      collections: [
+        {
+          name: "docs",
+          path: "/private/secret",
+          pattern: "**/*.md",
+          include: [],
+          exclude: [],
+        },
+      ],
+    });
+    for (const body of [
+      "{",
+      "null",
+      "[]",
+      '{"action":"export"}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"contentClass":"retrieval_trace","extra":true}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":[],"contentClass":"retrieval_trace"}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":["docs","docs"],"contentClass":"retrieval_trace"}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":["missing"],"contentClass":"retrieval_trace"}',
+      `{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"collections":[${Array.from({ length: 65 }, () => '"docs"').join(",")}],"contentClass":"retrieval_trace"}`,
+    ]) {
+      const response = await handleCollectionEgressCheck(
+        ctxHolder,
+        new Request("http://localhost/api/egress/check", {
+          method: "POST",
+          body,
+        })
+      );
+      expect(response.status).toBe(400);
+      const serialized = JSON.stringify(await response.json());
+      expect(serialized).toContain("VALIDATION");
+      expect(serialized).not.toContain("/private/secret");
+    }
   });
 });
 

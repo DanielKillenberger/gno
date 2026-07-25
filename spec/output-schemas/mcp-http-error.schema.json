@@ -13,18 +13,129 @@
       "additionalProperties": false,
       "required": ["code", "message"],
       "properties": {
-        "code": { "const": -32000 },
+        "code": { "enum": [-32000, -32003] },
         "message": {
           "enum": [
             "Unauthorized",
             "Forbidden",
+            "Operation blocked by collection egress policy",
             "Request body too large",
             "Too many requests",
             "Resident runtime unavailable"
           ]
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "reason", "audit"],
+          "properties": {
+            "code": { "const": "EGRESS_DENIED" },
+            "message": {
+              "const": "Operation blocked by collection egress policy"
+            },
+            "reason": {
+              "enum": [
+                "LOCAL_DESTINATION",
+                "LAN_POLICY_AUTHENTICATED",
+                "REMOTE_POLICY_AUTHENTICATED",
+                "INVALID_INPUT",
+                "NO_COLLECTION_POLICY",
+                "COLLECTION_LIMIT_EXCEEDED",
+                "INVALID_COLLECTION",
+                "UNKNOWN_ACTION",
+                "UNKNOWN_DESTINATION",
+                "ACTION_DESTINATION_MISMATCH",
+                "UNKNOWN_CONTENT_CLASS",
+                "UNKNOWN_POLICY",
+                "UNKNOWN_POLICY_SOURCE",
+                "INVALID_POLICY_SOURCE_PAIR",
+                "INVALID_CALLER",
+                "CALLER_NOT_AUTHORIZED",
+                "AUTHENTICATION_REQUIRED",
+                "POLICY_LOCAL_ONLY",
+                "POLICY_LAN_ONLY"
+              ]
+            },
+            "audit": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "destinationZone",
+                "contentClass",
+                "collectionCount",
+                "collections",
+                "effectivePolicy",
+                "effectivePolicySource",
+                "callerAuthenticated",
+                "callerOperationAuthorized"
+              ],
+              "properties": {
+                "action": {
+                  "enum": [
+                    "retrieve",
+                    "serve",
+                    "publish",
+                    "remote_inference",
+                    "export",
+                    "clip_write",
+                    "unknown"
+                  ]
+                },
+                "destinationZone": {
+                  "enum": [
+                    "local_process",
+                    "loopback",
+                    "lan",
+                    "remote",
+                    "unknown"
+                  ]
+                },
+                "contentClass": {
+                  "enum": [
+                    "source",
+                    "snippet",
+                    "metadata",
+                    "attachment",
+                    "embedding",
+                    "capsule",
+                    "audit_log",
+                    "retrieval_trace",
+                    "unknown"
+                  ]
+                },
+                "collectionCount": { "type": "integer", "minimum": 0 },
+                "collections": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "maxItems": 64
+                },
+                "effectivePolicy": {
+                  "enum": ["local_only", "lan", "remote", "unknown"]
+                },
+                "effectivePolicySource": {
+                  "enum": [
+                    "explicit",
+                    "config_default",
+                    "legacy_default",
+                    "mixed",
+                    "unknown"
+                  ]
+                },
+                "callerAuthenticated": {
+                  "anyOf": [{ "type": "boolean" }, { "type": "null" }]
+                },
+                "callerOperationAuthorized": {
+                  "anyOf": [{ "type": "boolean" }, { "type": "null" }]
+                }
+              }
+            }
+          }
         }
       }
     },
-    "id": { "type": "null" }
+    "id": {
+      "anyOf": [{ "type": "null" }, { "type": "integer" }, { "type": "string" }]
+    }
   }
 }

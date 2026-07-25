@@ -18,6 +18,7 @@
         "destination": {
           "$ref": "gno://schemas/browser-clip@1.0#/properties/destination"
         },
+        "egressLineage": { "$ref": "#/definitions/egressLineage" },
         "tags": {
           "type": "array",
           "items": { "type": "string" }
@@ -48,6 +49,35 @@
     }
   },
   "definitions": {
+    "egressLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effectivePolicy", "digest", "sources"],
+      "properties": {
+        "effectivePolicy": { "enum": ["local_only", "lan", "remote"] },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["collection", "policy", "source"],
+            "properties": {
+              "collection": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              "policy": { "enum": ["local_only", "lan", "remote"] },
+              "source": {
+                "enum": ["explicit", "config_default", "legacy_default"]
+              }
+            }
+          }
+        }
+      }
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,

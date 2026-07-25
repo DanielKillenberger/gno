@@ -13,6 +13,17 @@ describe("record-import schema", () => {
     adapterId: "adapter/test",
     adapterVersion: "1.0.0",
     adapterFingerprint: "a".repeat(64),
+    egressLineage: {
+      effectivePolicy: "local_only",
+      digest: "f".repeat(64),
+      sources: [
+        {
+          collection: "imports",
+          policy: "local_only",
+          source: "legacy_default",
+        },
+      ],
+    },
     snapshotState: "partial",
     authoritative: false,
     stoppedByCap: false,

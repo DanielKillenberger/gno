@@ -29,6 +29,7 @@ collections:
   - name: notes
     path: /Users/you/notes
     pattern: "**/*.md"
+    egressPolicy: local_only
     include: []
     exclude:
       - .git
@@ -131,6 +132,58 @@ receipts, snapshot/tombstone semantics, and no-live-account security boundary.
 When `include` is empty, configuring `recordAdapters.transcript.format: json`
 also makes `.json` files discoverable. A nonempty `include` remains an explicit
 allowlist and must list `.json`.
+
+## Collection egress policy
+
+Every collection has one effective boundary: `local_only`, `lan`, or `remote`.
+An omitted value fails closed to `local_only`. Collections created before the
+policy migration retain their indexed documents and lexical/vector data, but
+their cached provenance is `legacy_default`; newly synchronized collections
+without an explicit value report `config_default`. Neither default can imply
+`lan` or `remote`.
+
+| Policy       | Permitted destination                                                         |
+| ------------ | ----------------------------------------------------------------------------- |
+| `local_only` | Local process, local files, loopback clients, and loopback model servers only |
+| `lan`        | `local_only` plus authenticated, proven private-network peers                 |
+| `remote`     | `lan` plus authenticated public transport and pinned HTTPS model providers    |
+
+Authentication and write permission remain separate gates. A token does not
+relax collection policy; `gateway.enableWrite` does not relax it either.
+Mixed evidence and derived artifacts use the most restrictive participating
+collection. Explicit partial checks disclose every omitted collection and
+reason; normal operations never silently drop restricted evidence.
+
+Inspect and change one policy with:
+
+```bash
+gno collection policy get notes
+gno collection policy check --action remote_inference \
+  --destination remote --content-class source -c notes \
+  --authenticated --authorized --explain-egress
+gno collection policy set notes remote --confirm-relaxation 0
+gno collection policy set notes local_only
+```
+
+The relaxation revision must exactly match the current `get` result. It is
+single-use and becomes stale after any intervening policy change. Tightening
+needs no confirmation and invalidates resident sessions, active streams,
+queued jobs, and saved authorization state; callers must retry against the new
+policy. Removing an explicit policy does not restore network access—it returns
+to the fail-closed local default.
+
+Migration does not recall data already disclosed. Tightening a collection
+blocks future GNO-controlled transfers, but an artifact previously uploaded to
+a remote service may require deletion or takedown at that service. For gno.sh,
+revoke or expire supported private links in Studio; public-space deletion is
+not yet self-service, so request takedown before creating and uploading a new
+artifact. Encrypted artifacts remain client-encrypted; gno.sh never receives
+the passphrase and cannot decrypt or recover them.
+
+Policy decisions create bounded, content-free local audit receipts. Use
+`gno egress-audit list|show|status|delete|purge`; receipts contain stable reason
+codes and redacted collection identity, never query text, document content,
+credentials, target URLs, or sensitive absolute paths.
 
 ## Resident HTTP MCP Gateway
 
@@ -731,6 +784,19 @@ document chunks for embedding/reranking, generated expansion input for
 `expand`, or retrieved answer context for `gen`. Use HTTPS and server-side
 access controls outside a trusted network; remote inference is not part of the
 local privacy boundary.
+
+Every inference port requires an explicit participating-collection scope;
+corpus-wide use is represented explicitly rather than inferred from an omitted
+filter. An empty or unknown scope fails before DNS. For a valid scope, GNO first
+performs bounded DNS-only classification without sending HTTP headers, request
+bodies, credentials, or model metadata, then intersects the proven endpoint
+zone with every participating collection's policy. `local_only` permits
+loopback model servers, `lan` permits private-address literals and hostnames
+whose complete DNS answer is homogeneously private, and `remote` permits pinned
+HTTPS public providers. DNS answers are pinned and rechecked before connection.
+Mixed, public-for-LAN, special-use, or rebound answers fail before request
+transfer. Redirects must remain on the same origin and are re-evaluated at every
+hop; credentials and request bodies are never forwarded cross-origin.
 
 ```yaml
 models:

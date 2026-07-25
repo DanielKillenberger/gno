@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
 import { createDefaultConfig } from "../../src/config";
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
+import { buildRetrievalQrelsArtifact } from "../../src/core/retrieval-qrels";
+import {
+  canonicalTraceJson,
+  hashTraceCanonical,
+  traceUtf8Bytes,
+} from "../../src/store/retrieval-trace-codec";
 import {
   createReplayTestHarness,
   type ReplayTestHarness,
@@ -75,6 +82,63 @@ describe("retrieval replay SQLite invalidation", () => {
       reason: "manifest_hash_mismatch",
       applied: false,
     });
+  });
+
+  test("accepts a migrated pre-lineage manifest under its original hash", async () => {
+    const { service, exportId } = await harness.buildReceipt();
+    const lineage = legacyLocalOnlyEgressLineage();
+    const lineageJson = canonicalTraceJson(lineage);
+    const raw = harness.store.getRawDb();
+    raw.run(
+      `UPDATE retrieval_traces
+       SET effective_egress_policy = ?, egress_lineage_digest = ?,
+           egress_lineage_json = ?, egress_lineage_bytes = ?`,
+      [
+        lineage.effectivePolicy,
+        lineage.digest,
+        lineageJson,
+        traceUtf8Bytes(lineageJson),
+      ]
+    );
+    raw.run(
+      `UPDATE retrieval_trace_exports
+       SET effective_egress_policy = ?, egress_lineage_digest = ?,
+           egress_lineage_json = ?, egress_lineage_bytes = ?
+       WHERE export_id = ?`,
+      [
+        lineage.effectivePolicy,
+        lineage.digest,
+        lineageJson,
+        traceUtf8Bytes(lineageJson),
+        exportId,
+      ]
+    );
+    const migrated =
+      await harness.store.getRetrievalTraceExportBundle(exportId);
+    if (!(migrated.ok && migrated.value)) {
+      throw new Error("Migrated trace export fixture unavailable");
+    }
+    const artifact = buildRetrievalQrelsArtifact(migrated.value.traces);
+    if (!artifact.ok) throw new Error(artifact.error.message);
+    const { egressLineage: _migrationProjection, ...legacyArtifact } =
+      artifact.value;
+    raw.run(
+      "UPDATE retrieval_trace_exports SET artifact_hash = ? WHERE export_id = ?",
+      [hashTraceCanonical(legacyArtifact), exportId]
+    );
+
+    const replayed = await service.replay(
+      {
+        exportId,
+        candidate: { id: "legacy-bm25", type: "bm25" },
+      },
+      replayDeps()
+    );
+    expect(replayed.ok).toBe(true);
+    if (replayed.ok) {
+      expect(replayed.value.reason).not.toBe("manifest_hash_mismatch");
+      expect(replayed.value.verdict).not.toBe("unreplayable");
+    }
   });
 
   test("reports source_missing after the indexed document disappears", async () => {

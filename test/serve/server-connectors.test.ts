@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { ENV_CONFIG_DIR } from "../../src/app/constants";
 import { getConfigPaths } from "../../src/config";
+import { DocumentEventBus } from "../../src/serve/doc-events";
 import {
   AdmissionController,
   ReaderGate,
@@ -343,4 +344,94 @@ test("filesystem-backed planning and verification routes use resident admission"
   expect(result).toEqual({ success: true });
   expect(admitRequest).toHaveBeenCalledTimes(4);
   expect(ok).toHaveBeenCalledTimes(4);
+});
+
+test("the real events route binds admission epoch and suppresses delayed document events", async () => {
+  let capturedOptions:
+    | {
+        routes: Record<
+          string,
+          { GET: (request: Request) => Promise<Response> | Response }
+        >;
+      }
+    | undefined;
+  const eventBus = new DocumentEventBus();
+  let currentEpoch = "epoch-1";
+  let finished = 0;
+  const runtime = {
+    actualConfigPath: "/tmp/config/index.yml",
+    authorizationEpoch: currentEpoch,
+    config: { collections: [] },
+    store: {},
+    ctxHolder: { current: {}, config: { collections: [] } },
+    eventBus,
+    admitRequest: () => {
+      const admittedEpoch = currentEpoch;
+      return {
+        authorizationEpoch: admittedEpoch,
+        id: "event-request",
+        signal: new AbortController().signal,
+        isAuthorizationEpochCurrent: () => admittedEpoch === currentEpoch,
+        finish: () => {
+          finished += 1;
+        },
+      };
+    },
+    setListenerPort: () => undefined,
+    dispose: async () => eventBus.close(),
+  };
+
+  const result = await startServer(
+    { port: 3210 },
+    {
+      startBackgroundRuntime: (async () => ({
+        success: true as const,
+        runtime,
+      })) as never,
+      createMcpHttpGateway: (async () => ({
+        route: async () => new Response("ok"),
+        close: async () => undefined,
+        security: {},
+        transport: {},
+      })) as never,
+      serve: ((options: unknown) => {
+        capturedOptions = options as typeof capturedOptions;
+        return {
+          port: 3210,
+          stop: async () => undefined,
+        } as never;
+      }) as never,
+      waitForShutdown: async () => {
+        const route = capturedOptions?.routes["/api/events"];
+        expect(route).toBeDefined();
+        const response = await route?.GET(
+          new Request("http://127.0.0.1:3210/api/events")
+        );
+        expect(response?.status).toBe(200);
+        const reader = response?.body?.getReader();
+        if (!reader) throw new Error("Expected SSE response body");
+        await reader.read();
+
+        currentEpoch = "epoch-2";
+        eventBus.emit({
+          type: "document-changed",
+          uri: "gno://private/secret.md",
+          collection: "private",
+          relPath: "secret.md",
+          origin: "watcher",
+          changedAt: "2026-07-25T08:00:00.000Z",
+        });
+        const invalidated = await reader.read();
+        const frame = new TextDecoder().decode(invalidated.value);
+        expect(frame).toContain("EGRESS_POLICY_CHANGED");
+        expect(frame).not.toContain("gno://");
+        expect(frame).not.toContain("private");
+        expect(frame).not.toContain("secret.md");
+        expect((await reader.read()).done).toBeTrue();
+      },
+    }
+  );
+
+  expect(result).toEqual({ success: true });
+  expect(finished).toBe(1);
 });

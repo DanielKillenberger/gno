@@ -8,6 +8,8 @@ import type { Config } from "../../src/config/types";
 import type { ToolContext } from "../../src/mcp/context";
 import type { HttpMcpTransportRuntime } from "../../src/mcp/http-transport";
 
+import { classifyDestination } from "../../src/core/destination-classifier";
+import { createToolContext as createRuntimeToolContext } from "../../src/mcp/context";
 import { HttpMcpTransport } from "../../src/mcp/http-transport";
 import { createStandaloneResidentStatus } from "../../src/serve/resident-status";
 import { startServer } from "../../src/serve/server";
@@ -491,6 +493,59 @@ describe("stateful Web Standard MCP transport", () => {
     ).toBe(404);
   });
 
+  test("re-evaluates peer-zone policy when one session is reused", async () => {
+    const runtime = createRuntime();
+    runtime.mcpContext.config.collections.push({
+      name: "notes",
+      path: "/notes",
+      pattern: "**/*",
+      include: [],
+      exclude: [],
+      egressPolicy: "local_only",
+    });
+    runtime.mcpContext.collections.push(
+      runtime.mcpContext.config.collections[0]!
+    );
+    const transport = new HttpMcpTransport(runtime);
+    openTransports.push(transport);
+    const identity = "principal-a";
+    const sessionId = await initialize(transport, 1, identity);
+    const call = postRequest(
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "gno_get",
+          arguments: { ref: "gno://notes/private.md" },
+        },
+      },
+      sessionId
+    );
+
+    const remote = await transport.handleRequest(call.clone(), {
+      authenticated: true,
+      identity,
+      peerClassification: classifyDestination({
+        kind: "network",
+        hostname: "203.0.113.1",
+      }),
+    });
+    expect(remote.status).toBe(403);
+    expect(await remote.text()).toContain("EGRESS_DENIED");
+
+    const loopback = await transport.handleRequest(call, {
+      authenticated: false,
+      identity,
+      peerClassification: classifyDestination({
+        kind: "network",
+        hostname: "127.0.0.1",
+      }),
+    });
+    expect(loopback.status).toBe(200);
+    await loopback.text();
+  });
+
   test("rejects HTTP mutation calls unless separately authorized", async () => {
     const transport = new HttpMcpTransport(createRuntime(), {
       createServer: () => new McpServer({ name: "read-only", version: "1" }),
@@ -571,5 +626,107 @@ describe("stateful Web Standard MCP transport", () => {
         })
       ).status
     ).toBe(404);
+  });
+
+  test("lets the policy setter advance its epoch while denying an older active response", async () => {
+    let epoch = "egress-epoch-v1:one";
+    let releaseSlow: (() => void) | undefined;
+    let markSlowStarted: (() => void) | undefined;
+    const slowStarted = new Promise<void>((resolve) => {
+      markSlowStarted = resolve;
+    });
+    const slowRelease = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    const context = createRuntimeToolContext({
+      store: {} as never,
+      getConfig: () => ({
+        version: "1.0",
+        ftsTokenizer: "unicode61",
+        collections: [],
+        contexts: [],
+      }),
+      actualConfigPath: "/tmp/policy-race.yml",
+      indexName: "test",
+      toolMutex: { acquire: async () => () => undefined },
+      jobManager: {} as never,
+      serverInstanceId: "policy-race",
+      writeLockPath: "/tmp/policy-race.lock",
+      enableWrite: true,
+      isShuttingDown: () => false,
+    });
+    const runtime: HttpMcpTransportRuntime = {
+      mcpContext: context,
+      get authorizationEpoch() {
+        return epoch;
+      },
+      isShuttingDown: false,
+      admitRequest: () => {
+        const requestEpoch = epoch;
+        return {
+          authorizationEpoch: requestEpoch,
+          id: crypto.randomUUID(),
+          signal: new AbortController().signal,
+          isAuthorizationEpochCurrent: () => requestEpoch === epoch,
+          finish: () => undefined,
+        };
+      },
+      openSession: () => () => undefined,
+    };
+    const transport = new HttpMcpTransport(runtime, {
+      enableWrite: true,
+      createServer: (toolContext) => {
+        const server = new McpServer({ name: "epoch-race", version: "1" });
+        server.registerTool("slow-content", { inputSchema: {} }, async () => {
+          markSlowStarted?.();
+          await slowRelease;
+          return { content: [{ type: "text", text: "stale-secret" }] };
+        });
+        server.registerTool("rotate-policy", { inputSchema: {} }, async () => {
+          epoch = "egress-epoch-v1:two";
+          toolContext.advanceRequestAuthorizationEpoch?.(epoch);
+          await transport.invalidateAuthenticatedSessions();
+          return {
+            content: [{ type: "text", text: "revision:2" }],
+            structuredContent: { revision: 2 },
+          };
+        });
+        return server;
+      },
+    });
+    openTransports.push(transport);
+    const oldSession = await initialize(transport, 1);
+    const setterSession = await initialize(transport, 2);
+    const slow = transport.handleRequest(
+      postRequest(
+        {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "slow-content", arguments: {} },
+        },
+        oldSession
+      )
+    );
+    await slowStarted;
+    const setter = await transport.handleRequest(
+      postRequest(
+        {
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: { name: "rotate-policy", arguments: {} },
+        },
+        setterSession
+      )
+    );
+    expect(setter.status).toBe(200);
+    expect(await setter.text()).toContain('"revision":2');
+    releaseSlow?.();
+    const denied = await slow;
+    expect(denied.status).toBe(200);
+    const deniedBody = await denied.text();
+    expect(deniedBody).toContain("EGRESS_POLICY_CHANGED");
+    expect(deniedBody).not.toContain("stale-secret");
   });
 });

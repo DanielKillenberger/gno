@@ -76,7 +76,9 @@ export class JobManager {
   #lockTimeoutMs: number;
   #activeJobId: string | null = null;
   #jobs = new Map<string, JobRecord>();
+  #jobAuthorizationEpochs = new Map<string, string>();
   #activeJobs = new Set<Promise<void>>();
+  #authorizationEpoch = "egress-epoch-uninitialized";
 
   constructor(options: JobManagerOptions) {
     this.#lockPath = options.lockPath;
@@ -154,6 +156,25 @@ export class JobManager {
     return this.#jobs.get(this.#activeJobId) ?? null;
   }
 
+  /**
+   * Rotate the authorization snapshot used by queued work. Jobs re-check this
+   * after acquiring the shared tool mutex, immediately before any work runs.
+   */
+  setAuthorizationEpoch(epoch: string): number {
+    if (epoch === this.#authorizationEpoch) return 0;
+    this.#authorizationEpoch = epoch;
+    let invalidated = 0;
+    for (const job of this.#jobs.values()) {
+      if (
+        job.status === "running" &&
+        this.#jobAuthorizationEpochs.get(job.id) !== epoch
+      ) {
+        invalidated += 1;
+      }
+    }
+    return invalidated;
+  }
+
   updateJobProgress(
     jobId: string,
     progress: { current: number; total: number; currentFile?: string }
@@ -164,6 +185,7 @@ export class JobManager {
 
   clear(): void {
     this.#jobs.clear();
+    this.#jobAuthorizationEpochs.clear();
     this.#activeJobId = null;
   }
 
@@ -203,6 +225,7 @@ export class JobManager {
     try {
       const release = await this.#toolMutex.acquire();
       try {
+        this.#assertAuthorizationEpoch(job);
         const result = await fn();
         job.status = "completed";
         job.result = result;
@@ -238,6 +261,7 @@ export class JobManager {
     };
 
     this.#jobs.set(jobId, job);
+    this.#jobAuthorizationEpochs.set(jobId, this.#authorizationEpoch);
     this.#activeJobId = jobId;
 
     const jobPromise = this.#runJob(job, fn, lock);
@@ -261,6 +285,7 @@ export class JobManager {
     };
 
     this.#jobs.set(jobId, job);
+    this.#jobAuthorizationEpochs.set(jobId, this.#authorizationEpoch);
     this.#activeJobId = jobId;
 
     const jobPromise = this.#runTypedJob(job, fn, lock);
@@ -277,6 +302,7 @@ export class JobManager {
     try {
       const release = await this.#toolMutex.acquire();
       try {
+        this.#assertAuthorizationEpoch(job);
         const result = await fn();
         job.status = "completed";
         job.typedResult = result;
@@ -305,6 +331,7 @@ export class JobManager {
       const completedAt = job.completedAt ?? job.startedAt;
       if (now - completedAt > JOB_EXPIRATION_MS) {
         this.#jobs.delete(id);
+        this.#jobAuthorizationEpochs.delete(id);
       }
     }
 
@@ -321,7 +348,17 @@ export class JobManager {
       const job = completed[i];
       if (job) {
         this.#jobs.delete(job.id);
+        this.#jobAuthorizationEpochs.delete(job.id);
       }
     }
+  }
+
+  #assertAuthorizationEpoch(job: JobRecord): void {
+    if (this.#jobAuthorizationEpochs.get(job.id) === this.#authorizationEpoch) {
+      return;
+    }
+    throw new Error(
+      "STALE_EGRESS_POLICY: collection policy changed; retry to re-authorize"
+    );
   }
 }

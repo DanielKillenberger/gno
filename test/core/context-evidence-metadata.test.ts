@@ -11,6 +11,7 @@ import {
   CONTEXT_EVIDENCE_METADATA_MAX_LENGTH,
   projectContextEvidenceMetadata,
 } from "../../src/core/context-evidence-metadata";
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 
 const containsLoneSurrogate = (value: string): boolean => {
   for (const scalar of value) {
@@ -40,7 +41,8 @@ test("bounds untrusted title and heading without changing passage bytes", () => 
     observedAt: null,
     contextIds: [],
     trust: "untrusted",
-    egress: "unavailable",
+    egress: "local_only",
+    egressLineage: legacyLocalOnlyEgressLineage("notes"),
   };
   const candidate: MaterializedContextCandidate<ContextEvidenceValue> = {
     candidateId: sha256Text("candidate"),
@@ -88,7 +90,8 @@ test("omits unknown planner provenance for legacy materialized evidence", () => 
       observedAt: null,
       contextIds: [],
       trust: "untrusted",
-      egress: "unavailable",
+      egress: "local_only",
+      egressLineage: legacyLocalOnlyEgressLineage("notes"),
     },
   };
 

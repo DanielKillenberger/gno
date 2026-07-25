@@ -15,6 +15,112 @@ const httpUrl = z
   .url()
   .refine((value) => /^https?:\/\//iu.test(value));
 const extensionOrigin = z.string().regex(/^chrome-extension:\/\/[a-p]{32}$/u);
+const collectionName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
+
+const egressPolicy = z.enum(["local_only", "lan", "remote"]);
+const egressPolicySource = z.enum([
+  "explicit",
+  "config_default",
+  "legacy_default",
+]);
+const MAX_EGRESS_LINEAGE_SOURCES = 128;
+const POLICY_RESTRICTIVENESS = {
+  local_only: 0,
+  lan: 1,
+  remote: 2,
+} as const;
+
+const compareCodeUnits = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
+const sha256Text = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value)
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+export const egressLineageSchema = z
+  .object({
+    effectivePolicy: egressPolicy,
+    digest: hex64,
+    sources: z
+      .array(
+        z
+          .object({
+            collection: collectionName,
+            policy: egressPolicy,
+            source: egressPolicySource,
+          })
+          .strict()
+      )
+      .min(1)
+      .max(MAX_EGRESS_LINEAGE_SOURCES),
+  })
+  .strict()
+  .superRefine(async (value, context) => {
+    const collections = value.sources.map(({ collection }) => collection);
+    if (new Set(collections).size !== collections.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Egress lineage collections must be unique",
+        path: ["sources"],
+      });
+      return;
+    }
+    if (
+      value.sources.some(
+        ({ policy, source }) => source !== "explicit" && policy !== "local_only"
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Default egress lineage sources must remain local-only",
+        path: ["sources"],
+      });
+      return;
+    }
+    const canonicalSources = [...value.sources].sort((left, right) =>
+      compareCodeUnits(left.collection, right.collection)
+    );
+    if (JSON.stringify(canonicalSources) !== JSON.stringify(value.sources)) {
+      context.addIssue({
+        code: "custom",
+        message: "Egress lineage sources must be canonically ordered",
+        path: ["sources"],
+      });
+      return;
+    }
+    const effectivePolicy = canonicalSources.reduce<
+      keyof typeof POLICY_RESTRICTIVENESS
+    >(
+      (mostRestrictive, source) =>
+        POLICY_RESTRICTIVENESS[source.policy] <
+        POLICY_RESTRICTIVENESS[mostRestrictive]
+          ? source.policy
+          : mostRestrictive,
+      "remote"
+    );
+    const digest = await sha256Text(
+      JSON.stringify({
+        effectivePolicy,
+        sources: canonicalSources.map(({ collection, policy, source }) => ({
+          collection,
+          policy,
+          source,
+        })),
+      })
+    );
+    if (value.effectivePolicy !== effectivePolicy || value.digest !== digest) {
+      context.addIssue({
+        code: "custom",
+        message: "Egress lineage must be canonical and digest-bound",
+      });
+    }
+  });
 
 const destination = z
   .object({
@@ -168,6 +274,7 @@ export const previewSchema = z
         digest: hex64,
         source,
         destination,
+        egressLineage: egressLineageSchema.optional(),
         tags: z.array(z.string()),
       })
       .strict(),
@@ -267,6 +374,18 @@ export const parseContract = <T>(
   name: string
 ): T => {
   const result = schema.safeParse(value);
+  if (!result.success) {
+    throw new Error(`Invalid or unsupported ${name} response`);
+  }
+  return result.data;
+};
+
+export const parseContractAsync = async <T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  name: string
+): Promise<T> => {
+  const result = await schema.safeParseAsync(value);
   if (!result.success) {
     throw new Error(`Invalid or unsupported ${name} response`);
   }

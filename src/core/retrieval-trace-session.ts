@@ -16,6 +16,13 @@ import {
   SEARCH_RESULTS_TRACE_METADATA,
 } from "../pipeline/types";
 import { err, ok } from "../store/types";
+import { contextCapsuleEgressLineage } from "./context-capsule";
+import {
+  createEgressLineage,
+  legacyLocalOnlyEgressLineage,
+  mergeEgressLineages,
+  resolveEgressLineage,
+} from "./egress-provenance";
 import {
   MIN_RETRIEVAL_TRACE_RECORDS,
   RetrievalTraceRecorder,
@@ -140,6 +147,26 @@ const evidenceFromCapsule = (
       : { graphExpanded: item.graphExpanded }),
   }));
 
+const requestedCollectionScope = (
+  filters: Record<string, unknown> | undefined
+): string[] | undefined => {
+  const collections = filters?.collections;
+  if (Array.isArray(collections) && collections.length > 0) {
+    if (!collections.every((value) => typeof value === "string")) {
+      throw new TypeError("Trace collection scope must contain only names");
+    }
+    return collections;
+  }
+  const collection = filters?.collection;
+  if (collection === undefined || collection === null || collection === "") {
+    return undefined;
+  }
+  if (typeof collection !== "string") {
+    throw new TypeError("Trace collection scope must be a name");
+  }
+  return [collection];
+};
+
 export class RetrievalTraceSession {
   readonly traceId: string;
 
@@ -154,6 +181,7 @@ export class RetrievalTraceSession {
     private readonly recorder: RetrievalTraceRecorder,
     traceId: string,
     private readonly clock: () => number,
+    private egressLineage: ReturnType<typeof createEgressLineage>,
     private readonly operationId = traceId,
     private readonly maxRecords = 100_000
   ) {
@@ -180,11 +208,37 @@ export class RetrievalTraceSession {
       clock,
       idFactory: input.idFactory,
     });
+    const collections = await input.store.getCollections();
+    if (!collections.ok) return collections;
+    let egressLineage;
+    try {
+      const requestedScope = requestedCollectionScope(input.filters);
+      egressLineage =
+        collections.value.length === 0
+          ? legacyLocalOnlyEgressLineage()
+          : resolveEgressLineage(
+              collections.value.map((collection) => ({
+                collection: collection.name,
+                policy: collection.egressPolicy,
+                source: collection.egressPolicySource,
+              })),
+              requestedScope
+            );
+    } catch (cause) {
+      return err(
+        "INVALID_INPUT",
+        cause instanceof Error
+          ? cause.message
+          : "Invalid retrieval trace collection scope",
+        cause
+      );
+    }
     const started = await recorder.start({
       query: input.query,
       goal: input.goal,
       filters: input.filters,
       fingerprints: await input.fingerprints(),
+      egressLineage,
     });
     if (!started.ok) return started;
     if (!started.value.recorded) return ok(null);
@@ -192,6 +246,7 @@ export class RetrievalTraceSession {
       recorder,
       started.value.traceId,
       clock,
+      egressLineage,
       started.value.traceId,
       input.config.retention.maxRecordsPerTrace
     );
@@ -233,6 +288,7 @@ export class RetrievalTraceSession {
       new RetrievalTraceRecorder(input.store, input.config, { clock }),
       input.traceId,
       clock,
+      stored.value.trace.egressLineage,
       crypto.randomUUID(),
       input.config.retention.maxRecordsPerTrace
     );
@@ -257,6 +313,13 @@ export class RetrievalTraceSession {
     latencyMs?: number
   ): Promise<StoreResult<"inserted" | "duplicate" | "disabled">> {
     if (!this.hasCapacity(2)) return ok("disabled");
+    const resultLineages = result.results.flatMap((item) =>
+      item.egressLineage ? [item.egressLineage] : []
+    );
+    if (resultLineages.length > 0) {
+      const widened = await this.ensureLineageCoverage(resultLineages);
+      if (!widened.ok) return widened;
+    }
     const ranked = result.results.flatMap((item, index) => {
       const evidence = evidenceFromResult(item, index + 1);
       return evidence ? [evidence] : [];
@@ -317,6 +380,12 @@ export class RetrievalTraceSession {
     latencyMs?: number
   ): Promise<StoreResult<"inserted" | "duplicate" | "disabled">> {
     if (!this.hasCapacity(2)) return ok("disabled");
+    if (capsule.schemaVersion === "1.0" || capsule.schemaVersion === "1.1") {
+      const widened = await this.ensureLineageCoverage([
+        contextCapsuleEgressLineage(capsule),
+      ]);
+      if (!widened.ok) return widened;
+    }
     const payload = {
       evidence: evidenceFromCapsule(capsule),
       capsuleId: capsule.capsuleId,
@@ -447,6 +516,31 @@ export class RetrievalTraceSession {
     if (!appended.ok) return this.softenWriteFailure();
     this.persistedRecords += 1;
     return appended;
+  }
+
+  private async ensureLineageCoverage(
+    lineages: ReturnType<typeof createEgressLineage>[]
+  ): Promise<StoreResult<"inserted" | "duplicate">> {
+    let merged;
+    try {
+      merged = mergeEgressLineages([this.egressLineage, ...lineages]);
+    } catch (cause) {
+      return err(
+        "INVALID_INPUT",
+        cause instanceof Error
+          ? cause.message
+          : "Conflicting retrieval trace policy lineage",
+        cause
+      );
+    }
+    if (merged.digest === this.egressLineage.digest) return ok("duplicate");
+    const persisted = await this.recorder.mergeEgressLineage(
+      this.traceId,
+      merged
+    );
+    if (!persisted.ok) return persisted;
+    this.egressLineage = merged;
+    return persisted;
   }
 
   private hasCapacity(records: number): boolean {

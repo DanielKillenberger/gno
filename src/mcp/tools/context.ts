@@ -119,7 +119,7 @@ export const disposeContextModelOwners = async (
 
 export const createMcpModelPorts = async (
   context: ToolContext,
-  collection?: string,
+  collections?: readonly string[],
   factoryOverride?: McpModelPortFactory,
   options: { generation?: boolean } = {}
 ): Promise<McpModelPorts> => {
@@ -128,6 +128,10 @@ export const createMcpModelPorts = async (
   const lease = factory.acquireModelLease?.();
   const policy = resolveDownloadPolicy(process.env, {});
   const progress = createNonTtyProgressRenderer();
+  const egressCollections = collections?.length
+    ? collections
+    : ("all" as const);
+  const collection = collections?.length === 1 ? collections[0] : undefined;
   const embedUri = resolveModelUri(
     context.config,
     "embed",
@@ -141,6 +145,7 @@ export const createMcpModelPorts = async (
   let vectorIndex: VectorIndexPort | null = null;
   try {
     const embedResult = await factory.createEmbeddingPort(embedUri, {
+      egressCollections,
       policy,
       onProgress: (value) => progress("embed", value),
     });
@@ -160,6 +165,7 @@ export const createMcpModelPorts = async (
     const rerankResult = await factory.createRerankPort(
       resolveModelUri(context.config, "rerank", undefined, collection),
       {
+        egressCollections,
         policy,
         onProgress: (value) => progress("rerank", value),
       }
@@ -169,6 +175,7 @@ export const createMcpModelPorts = async (
       const genResult = await factory.createGenerationPort(
         resolveModelUri(context.config, "gen", undefined, collection),
         {
+          egressCollections,
           policy,
           onProgress: (value) => progress("gen", value),
         }
@@ -269,7 +276,7 @@ export const handleContext = (
       if (!traceStart.ok) throw new Error(traceStart.error.message);
       traceSession = traceStart.value ?? undefined;
       modelPorts = useModels
-        ? await createMcpModelPorts(context, collection)
+        ? await createMcpModelPorts(context, parsed.input.collections)
         : null;
       const capsule = await buildContextCapsule(parsed.input, {
         store: context.store,

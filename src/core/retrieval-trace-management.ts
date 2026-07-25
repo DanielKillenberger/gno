@@ -6,6 +6,7 @@ import type {
   StorePort,
   StoreResult,
 } from "../store/types";
+import type { EgressLineage } from "./egress-provenance";
 import type {
   ReplayRetrievalTraceInput,
   ReplayRetrievalTraceResult,
@@ -56,16 +57,21 @@ const DOCID_PATTERN = /^#[a-f0-9]{6,}$/;
 
 interface ManagementDeps {
   clock?: () => number;
+  authorizeExport?: (
+    lineage: EgressLineage
+  ) => Promise<StoreResult<EgressLineage>>;
 }
 
 export class RetrievalTraceManagementService {
   private readonly clock: () => number;
+  private readonly authorizeExport?: ManagementDeps["authorizeExport"];
 
   constructor(
     private readonly store: StorePort,
     deps: ManagementDeps = {}
   ) {
     this.clock = deps.clock ?? Date.now;
+    this.authorizeExport = deps.authorizeExport;
   }
 
   async list(
@@ -219,7 +225,9 @@ export class RetrievalTraceManagementService {
   async export<Format extends RetrievalTraceExportFormat = "agentic-receipt">(
     input: ExportRetrievalTracesInput<Format>
   ): Promise<StoreResult<ExportRetrievalTracesResult<Format>>> {
-    return exportRetrievalTraces(this.store, this.clock, input);
+    return exportRetrievalTraces(this.store, this.clock, input, {
+      authorize: this.authorizeExport,
+    });
   }
 
   async replay(

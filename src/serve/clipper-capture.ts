@@ -3,6 +3,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { PreparedBrowserClip } from "../core/browser-clip";
+import type { EgressLineage } from "../core/egress-provenance";
 import type { SqliteAdapter } from "../store/sqlite/adapter";
 import type { ClipperIdempotencyReplay } from "../store/sqlite/clipper-store-types";
 import type { ResidentCaptureContext } from "./capture-service";
@@ -35,6 +36,7 @@ interface ExecuteClipperCaptureInput {
   context: ResidentCaptureContext;
   store: SqliteAdapter;
   pairing: ClipperPairingService;
+  egressLineage?: EgressLineage;
 }
 
 const inFlightRequests = new Set<string>();
@@ -153,7 +155,9 @@ export const executeClipperCapture = async (
     );
   }
 
-  const prepared = prepareBrowserClip(parsed.data.payload);
+  const prepared = prepareBrowserClip(parsed.data.payload, {
+    egressLineage: input.egressLineage,
+  });
   if (prepared.preview.digest !== parsed.data.previewDigest) {
     return clipperErrorResponse(
       "CLIPPER_PREVIEW_MISMATCH",

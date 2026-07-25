@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added collection-owned `local_only`, `lan`, and `remote` egress policies
+  across CLI, REST, MCP, SDK, Web/Desktop, status/explain, derived artifacts,
+  and bounded local audit management. Existing collections migrate
+  fail-closed without losing local retrieval or index data.
+
+### Security
+
+- Added centralized destination classification and pre-transfer enforcement for
+  resident serving, remote inference, publishing lineage, network exports, and
+  traces. Authentication, MCP write permission, and collection policy remain
+  independent gates; DNS rebinding, redirects, mixed evidence, active streams,
+  queued jobs, and stale relaxation confirmations fail closed with content-free
+  errors.
+
 ## [1.28.0] - 2026-07-25
 
 ### Added

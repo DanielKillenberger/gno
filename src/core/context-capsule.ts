@@ -3,8 +3,10 @@ import { z } from "zod";
 import { canonicalizeIndexName } from "../app/index-name";
 import {
   contextCapsulePayloadV1Schema,
-  type ContextCapsulePayloadV1,
+  contextCapsulePayloadV1_1Schema,
+  type ContextCapsulePayload,
 } from "./context-capsule-schema";
+import { createEgressLineage, type EgressLineage } from "./egress-provenance";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -51,136 +53,155 @@ const normalizeSet = (values: readonly string[]): string[] =>
   [...new Set(values.map(normalizeText))].sort(compareCodeUnits);
 
 const normalizePayload = (
-  value: ContextCapsulePayloadV1
-): ContextCapsulePayloadV1 => ({
-  ...value,
-  goal: normalizeText(value.goal),
-  query: normalizeText(value.query),
-  scope: {
-    ...value.scope,
-    indexName: canonicalizeIndexName(value.scope.indexName),
-    collections: normalizeSet(value.scope.collections),
-    uriPrefix:
-      value.scope.uriPrefix === null
-        ? null
-        : normalizeText(value.scope.uriPrefix),
-    tagsAll: normalizeSet(value.scope.tagsAll),
-    tagsAny: normalizeSet(value.scope.tagsAny),
-    categories: normalizeSet(value.scope.categories),
-    since: normalizeDate(value.scope.since),
-    until: normalizeDate(value.scope.until),
-  },
-  retrieval: {
-    ...value.retrieval,
-    facets: normalizeSet(value.retrieval.facets),
-    queryVariants: value.retrieval.queryVariants.map(normalizeText),
-    request: {
-      ...value.retrieval.request,
-      author:
-        value.retrieval.request.author === null
+  value: ContextCapsulePayload
+): ContextCapsulePayload =>
+  ({
+    ...value,
+    goal: normalizeText(value.goal),
+    query: normalizeText(value.query),
+    scope: {
+      ...value.scope,
+      indexName: canonicalizeIndexName(value.scope.indexName),
+      collections: normalizeSet(value.scope.collections),
+      uriPrefix:
+        value.scope.uriPrefix === null
           ? null
-          : normalizeText(value.retrieval.request.author),
-      lang:
-        value.retrieval.request.lang === null
-          ? null
-          : normalizeText(value.retrieval.request.lang),
-      ...(value.retrieval.request.intent === undefined
-        ? {}
-        : {
-            intent:
-              value.retrieval.request.intent === null
-                ? null
-                : normalizeText(value.retrieval.request.intent),
-          }),
-      ...(value.retrieval.request.exclude === undefined
-        ? {}
-        : { exclude: normalizeSet(value.retrieval.request.exclude) }),
-      queryModes: value.retrieval.request.queryModes.map((mode) => ({
-        ...mode,
-        text: normalizeText(mode.text),
-      })),
+          : normalizeText(value.scope.uriPrefix),
+      tagsAll: normalizeSet(value.scope.tagsAll),
+      tagsAny: normalizeSet(value.scope.tagsAny),
+      categories: normalizeSet(value.scope.categories),
+      since: normalizeDate(value.scope.since),
+      until: normalizeDate(value.scope.until),
     },
-    capabilityStates: Object.fromEntries(
-      Object.entries(value.retrieval.capabilityStates).map(([key, state]) => [
-        key,
-        { ...state, fallbackReasons: normalizeSet(state.fallbackReasons) },
-      ])
-    ) as typeof value.retrieval.capabilityStates,
-  },
-  fallbacks: [...value.fallbacks].sort((left, right) =>
-    compareCodeUnits(
-      `${left.code}\0${left.capability}`,
-      `${right.code}\0${right.capability}`
-    )
-  ),
-  evidence: value.evidence.map((item) => ({
-    ...item,
-    title: item.title === null ? null : normalizeText(item.title),
-    heading: item.heading === null ? null : normalizeText(item.heading),
-    modifiedAt: normalizeDate(item.modifiedAt),
-    documentDate: normalizeDocumentDate(item.documentDate),
-    observedAt: normalizeDate(item.observedAt),
-    contextIds: normalizeSet(item.contextIds),
-    ...(item.retrievalSources === undefined
-      ? {}
-      : {
-          retrievalSources: [...new Set(item.retrievalSources)].sort(
-            compareCodeUnits
-          ),
-        }),
-    facets: normalizeSet(item.facets),
-    ...(item.record === undefined
-      ? {}
-      : {
-          record: {
-            ...item.record,
-            anchors: item.record.anchors.map((anchor) => ({
-              ...anchor,
-              value: normalizeText(anchor.value),
-              ...(anchor.endValue === undefined
-                ? {}
-                : { endValue: normalizeText(anchor.endValue) }),
-            })),
-            ...(item.record.participants === undefined
-              ? {}
-              : { participants: normalizeSet(item.record.participants) }),
-            ...(item.record.categories === undefined
-              ? {}
-              : { categories: normalizeSet(item.record.categories) }),
-          },
-        }),
-  })),
-  guidance: {
-    ...value.guidance,
-    configuredContexts: [...value.guidance.configuredContexts]
-      .map((item) => ({
-        ...item,
-        scopeKey: normalizeText(item.scopeKey),
-        text: normalizeText(item.text),
-      }))
-      .sort((left, right) => compareCodeUnits(left.contextId, right.contextId)),
-  },
-  coverage: {
-    ...value.coverage,
-    requestedFacets: normalizeSet(value.coverage.requestedFacets),
-    coveredFacets: [...value.coverage.coveredFacets]
-      .map((item) => ({
-        facet: normalizeText(item.facet),
-        evidenceIds: normalizeSet(item.evidenceIds),
-      }))
-      .sort((left, right) => compareCodeUnits(left.facet, right.facet)),
-    unresolvedFacets: normalizeSet(value.coverage.unresolvedFacets),
-    gaps: [...value.coverage.gaps].sort((left, right) =>
+    retrieval: {
+      ...value.retrieval,
+      facets: normalizeSet(value.retrieval.facets),
+      queryVariants: value.retrieval.queryVariants.map(normalizeText),
+      request: {
+        ...value.retrieval.request,
+        author:
+          value.retrieval.request.author === null
+            ? null
+            : normalizeText(value.retrieval.request.author),
+        lang:
+          value.retrieval.request.lang === null
+            ? null
+            : normalizeText(value.retrieval.request.lang),
+        ...(value.retrieval.request.intent === undefined
+          ? {}
+          : {
+              intent:
+                value.retrieval.request.intent === null
+                  ? null
+                  : normalizeText(value.retrieval.request.intent),
+            }),
+        ...(value.retrieval.request.exclude === undefined
+          ? {}
+          : { exclude: normalizeSet(value.retrieval.request.exclude) }),
+        queryModes: value.retrieval.request.queryModes.map((mode) => ({
+          ...mode,
+          text: normalizeText(mode.text),
+        })),
+      },
+      capabilityStates: Object.fromEntries(
+        Object.entries(value.retrieval.capabilityStates).map(([key, state]) => [
+          key,
+          { ...state, fallbackReasons: normalizeSet(state.fallbackReasons) },
+        ])
+      ) as typeof value.retrieval.capabilityStates,
+    },
+    fallbacks: [...value.fallbacks].sort((left, right) =>
       compareCodeUnits(
-        `${left.facet}\0${left.code}`,
-        `${right.facet}\0${right.code}`
+        `${left.code}\0${left.capability}`,
+        `${right.code}\0${right.capability}`
       )
     ),
-  },
-  warnings: [...value.warnings].sort((left, right) =>
-    compareCodeUnits(left.code, right.code)
-  ),
-});
+    ...(value.schemaVersion === "1.1"
+      ? {
+          egressLineage: {
+            ...value.egressLineage,
+            sources: [...value.egressLineage.sources],
+          },
+        }
+      : {}),
+    evidence: value.evidence.map((item) => ({
+      ...item,
+      title: item.title === null ? null : normalizeText(item.title),
+      heading: item.heading === null ? null : normalizeText(item.heading),
+      modifiedAt: normalizeDate(item.modifiedAt),
+      documentDate: normalizeDocumentDate(item.documentDate),
+      observedAt: normalizeDate(item.observedAt),
+      contextIds: normalizeSet(item.contextIds),
+      ...(item.egressLineage === undefined
+        ? {}
+        : {
+            egressLineage: {
+              ...item.egressLineage,
+              sources: [...item.egressLineage.sources],
+            },
+          }),
+      ...(item.retrievalSources === undefined
+        ? {}
+        : {
+            retrievalSources: [...new Set(item.retrievalSources)].sort(
+              compareCodeUnits
+            ),
+          }),
+      facets: normalizeSet(item.facets),
+      ...(item.record === undefined
+        ? {}
+        : {
+            record: {
+              ...item.record,
+              anchors: item.record.anchors.map((anchor) => ({
+                ...anchor,
+                value: normalizeText(anchor.value),
+                ...(anchor.endValue === undefined
+                  ? {}
+                  : { endValue: normalizeText(anchor.endValue) }),
+              })),
+              ...(item.record.participants === undefined
+                ? {}
+                : { participants: normalizeSet(item.record.participants) }),
+              ...(item.record.categories === undefined
+                ? {}
+                : { categories: normalizeSet(item.record.categories) }),
+            },
+          }),
+    })),
+    guidance: {
+      ...value.guidance,
+      configuredContexts: [...value.guidance.configuredContexts]
+        .map((item) => ({
+          ...item,
+          scopeKey: normalizeText(item.scopeKey),
+          text: normalizeText(item.text),
+        }))
+        .sort((left, right) =>
+          compareCodeUnits(left.contextId, right.contextId)
+        ),
+    },
+    coverage: {
+      ...value.coverage,
+      requestedFacets: normalizeSet(value.coverage.requestedFacets),
+      coveredFacets: [...value.coverage.coveredFacets]
+        .map((item) => ({
+          facet: normalizeText(item.facet),
+          evidenceIds: normalizeSet(item.evidenceIds),
+        }))
+        .sort((left, right) => compareCodeUnits(left.facet, right.facet)),
+      unresolvedFacets: normalizeSet(value.coverage.unresolvedFacets),
+      gaps: [...value.coverage.gaps].sort((left, right) =>
+        compareCodeUnits(
+          `${left.facet}\0${left.code}`,
+          `${right.facet}\0${right.code}`
+        )
+      ),
+    },
+    warnings: [...value.warnings].sort((left, right) =>
+      compareCodeUnits(left.code, right.code)
+    ),
+  }) as ContextCapsulePayload;
 
 export type ContextCapsuleErrorCode =
   | "identity_mismatch"
@@ -267,9 +288,14 @@ const contractError = (
   );
 };
 
-const parsePayload = (input: unknown): ContextCapsulePayloadV1 => {
+const contextCapsulePayloadSchema = z.union([
+  contextCapsulePayloadV1Schema,
+  contextCapsulePayloadV1_1Schema,
+]);
+
+const parsePayload = (input: unknown): ContextCapsulePayload => {
   try {
-    return contextCapsulePayloadV1Schema.parse(input);
+    return contextCapsulePayloadSchema.parse(input);
   } catch (error) {
     throw contractError(input, error);
   }
@@ -279,7 +305,7 @@ export interface ContextCapsuleCreateOptions {
   countTokens?: (accountingJson: string) => number;
 }
 
-const identityPayload = (payload: ContextCapsulePayloadV1) => {
+const identityPayload = (payload: ContextCapsulePayload) => {
   const {
     usedBytes: _usedBytes,
     usedTokens: _usedTokens,
@@ -288,7 +314,7 @@ const identityPayload = (payload: ContextCapsulePayloadV1) => {
   return { ...payload, budget: stableBudget };
 };
 
-const accountingPayload = <T extends ContextCapsulePayloadV1>(value: T) => {
+const accountingPayload = <T extends ContextCapsulePayload>(value: T) => {
   const {
     usedBytes: _usedBytes,
     usedTokens: _usedTokens,
@@ -312,7 +338,7 @@ const activeTokenCount = (
 };
 
 const fixedPointCapsule = (
-  payloadInput: ContextCapsulePayloadV1,
+  payloadInput: ContextCapsulePayload,
   options: ContextCapsuleCreateOptions
 ) => {
   const capsuleId = hashCanonical(identityPayload(payloadInput));
@@ -362,9 +388,10 @@ const fixedPointCapsule = (
   );
 };
 
-const contextCapsuleBaseV1Schema = contextCapsulePayloadV1Schema.extend({
-  capsuleId: sha256Schema,
-});
+const contextCapsuleBaseV1Schema = z.union([
+  contextCapsulePayloadV1Schema.extend({ capsuleId: sha256Schema }),
+  contextCapsulePayloadV1_1Schema.extend({ capsuleId: sha256Schema }),
+]);
 
 export const contextCapsuleV1Schema = contextCapsuleBaseV1Schema.superRefine(
   (value, context) => {
@@ -469,6 +496,24 @@ export const canonicalContextCapsuleJson = (input: unknown): string =>
 
 export const canonicalContextCapsuleAccountingJson = (input: unknown): string =>
   canonicalJson(accountingPayload(parseContextCapsuleV1(input)));
+
+/**
+ * Runtime-only conservative projection for legacy 1.0 Capsules. Canonical
+ * bytes and capsuleId remain governed by the original schema.
+ */
+export const contextCapsuleEgressLineage = (input: unknown): EgressLineage => {
+  const capsule = parseContextCapsuleV1(input);
+  if (capsule.schemaVersion === "1.1") return capsule.egressLineage;
+  return createEgressLineage(
+    [...new Set(capsule.evidence.map(({ collection }) => collection))].map(
+      (collection) => ({
+        collection,
+        policy: "local_only" as const,
+        source: "legacy_default" as const,
+      })
+    )
+  );
+};
 
 export {
   contextCapsuleVerificationEvidenceSchema,

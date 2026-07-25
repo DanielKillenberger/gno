@@ -492,6 +492,7 @@ export async function embed(options: EmbedOptions = {}): Promise<EmbedResult> {
       }
       await llm.getManager().dispose(modelUri);
       const recreated = await llm.createEmbeddingPort(modelUri, {
+        egressCollections: options.collection ? [options.collection] : "all",
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("embed", progress)
@@ -508,6 +509,7 @@ export async function embed(options: EmbedOptions = {}): Promise<EmbedResult> {
       return { ok: true as const, value: recreated.value };
     };
     const embedResult = await llm.createEmbeddingPort(modelUri, {
+      egressCollections: options.collection ? [options.collection] : "all",
       policy,
       onProgress: downloadProgress
         ? (progress) => downloadProgress("embed", progress)

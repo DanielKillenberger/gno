@@ -14,6 +14,7 @@ import { JobError } from "../../core/job-manager";
 import { recordContentMutation } from "../../core/mutation-generations";
 import { normalizeCollectionName } from "../../core/validation";
 import { defaultSyncService, withContentTypeRules } from "../../ingestion";
+import { enforceSyncCommandEgress } from "../sync-egress";
 import { runTool, type ToolResult } from "./index";
 
 interface SyncInput {
@@ -109,6 +110,11 @@ export function handleSync(
           },
           ctx.config
         );
+        enforceSyncCommandEgress(ctx, {
+          collectionNames: collections,
+          gitPull: options.gitPull,
+          runUpdateCmd: options.runUpdateCmd,
+        });
 
         const jobId = await ctx.jobManager.startJobWithLock(
           "sync",

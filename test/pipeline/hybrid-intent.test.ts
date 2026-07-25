@@ -101,7 +101,14 @@ function createStore() {
     }),
     getCollections: async () => ({
       ok: true as const,
-      value: [{ name: "notes", path: "/notes" }],
+      value: [
+        {
+          name: "notes",
+          path: "/notes",
+          egressPolicy: "local_only" as const,
+          egressPolicySource: "legacy_default" as const,
+        },
+      ],
     }),
     getChunksBatch: async () => ({
       ok: true as const,

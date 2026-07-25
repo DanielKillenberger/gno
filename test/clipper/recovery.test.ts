@@ -12,6 +12,7 @@ import type { ContextHolder } from "../../src/serve/routes/api";
 
 import { prepareBrowserClip } from "../../src/core/browser-clip";
 import { writeCapturePlanFile } from "../../src/core/capture-write";
+import { createEgressLineage } from "../../src/core/egress-provenance";
 import {
   browserClipIdempotencyPlan,
   planResidentCapture,
@@ -131,6 +132,13 @@ describe("browser clipper recovery", () => {
     };
     const prepared = prepareBrowserClip(payload, {
       now: new Date("2026-07-24T08:00:00.000Z"),
+      egressLineage: createEgressLineage([
+        {
+          collection: "notes",
+          policy: "local_only",
+          source: "config_default",
+        },
+      ]),
     });
     const planned = await planResidentCapture(
       context,

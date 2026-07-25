@@ -16,6 +16,8 @@ describe("Context Capsule MCP transport contract", () => {
   let store: SqliteAdapter;
   let server: ReturnType<typeof createMcpServerSurface>;
   let client: Client;
+  let context: ToolContext;
+  let invalidations: number;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "gno-context-mcp-schema-"));
@@ -25,23 +27,49 @@ describe("Context Capsule MCP transport contract", () => {
     );
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();
-    const context: ToolContext = {
+    invalidations = 0;
+    context = {
       store,
       config: {
         version: "1.0",
         ftsTokenizer: "unicode61",
-        collections: [],
+        collections: [
+          {
+            name: "docs",
+            path: join(root, "docs"),
+            pattern: "**/*.md",
+            include: [],
+            exclude: [],
+          },
+        ],
         contexts: [],
       },
-      collections: [],
+      collections: [
+        {
+          name: "docs",
+          path: join(root, "docs"),
+          pattern: "**/*.md",
+          include: [],
+          exclude: [],
+        },
+      ],
       actualConfigPath: join(root, "config.yml"),
       indexName: "test.db",
       toolMutex: { acquire: async () => () => {} } as ToolContext["toolMutex"],
       jobManager: {} as ToolContext["jobManager"],
       serverInstanceId: "schema-test",
       writeLockPath: join(root, ".lock"),
-      enableWrite: false,
+      enableWrite: true,
       isShuttingDown: () => false,
+      invalidateEgressPolicy: async () => {
+        invalidations += 1;
+        return {
+          policyEpoch: `egress-epoch-v1:${"a".repeat(64)}`,
+          queuedJobsInvalidated: 0,
+          sessionsInvalidated: 0,
+          staleWorkMustRetry: true,
+        };
+      },
     };
     server = createMcpServerSurface(context, {
       name: "context-schema-test",
@@ -104,5 +132,73 @@ describe("Context Capsule MCP transport contract", () => {
     // SDK InvalidParams validation is surfaced as an MCP tool error. Because
     // the handler never runs, this is intentionally not a GNO error taxonomy.
     expect(result.structuredContent).toBeUndefined();
+  });
+
+  test("rejects unknown fields for every egress tool before reads or mutations", async () => {
+    const invalidCalls = [
+      {
+        name: "gno_egress_policy_get",
+        arguments: { collection: "docs", extra: true },
+      },
+      {
+        name: "gno_egress_check",
+        arguments: {
+          action: "export",
+          destinationZone: "remote",
+          caller: { authenticated: true, operationAuthorized: true },
+          collections: ["docs"],
+          contentClass: "retrieval_trace",
+          extra: true,
+        },
+      },
+      {
+        name: "gno_egress_audit_list",
+        arguments: { extra: true },
+      },
+      {
+        name: "gno_egress_audit_show",
+        arguments: { auditId: "audit-opaque", extra: true },
+      },
+      {
+        name: "gno_egress_audit_status",
+        arguments: { extra: true },
+      },
+      {
+        name: "gno_egress_policy_set",
+        arguments: { collection: "docs", policy: "local_only", extra: true },
+      },
+      {
+        name: "gno_egress_audit_delete",
+        arguments: { auditId: "audit-opaque", extra: true },
+      },
+      {
+        name: "gno_egress_audit_purge",
+        arguments: { confirm: true, extra: true },
+      },
+    ] as const;
+
+    for (const request of invalidCalls) {
+      const result = await client.callTool(request);
+      expect(result.isError).toBe(true);
+      expect((result.content as Array<{ text?: string }>)[0]?.text).toContain(
+        "Input validation error"
+      );
+      expect(result.structuredContent).toBeUndefined();
+    }
+
+    expect(context.config.collections[0]?.egressPolicy).toBeUndefined();
+    expect(invalidations).toBe(0);
+    const status = await client.callTool({
+      name: "gno_egress_audit_status",
+      arguments: {},
+    });
+    expect(status.isError).not.toBe(true);
+    expect(status.structuredContent).toMatchObject({ receipts: 0 });
+
+    const unrelated = await client.callTool({
+      name: "gno_status",
+      arguments: {},
+    });
+    expect(unrelated.isError).not.toBe(true);
   });
 });

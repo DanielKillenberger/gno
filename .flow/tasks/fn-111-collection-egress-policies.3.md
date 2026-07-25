@@ -41,9 +41,15 @@ Deliver enforce policy at every current network-capable boundary as one implemen
 
 
 ## Done summary
-TBD
+Implemented and review-hardened fail-closed enforcement at every currently enumerated network-capable boundary.
 
+- Added a checked AST callsite inventory for shipped TypeScript, TSX, JavaScript, and JSX. It detects direct, qualified, bracketed, imported, namespace-qualified, and aliased network/process primitives, including browser transports tied to their enforcing server boundary.
+- Made every `LlmAdapter.create*Port` caller provide an explicit participating collection scope. Exact selected collections no longer inherit unrelated `local_only` restrictions; explicit `"all"` remains the only corpus-wide choice.
+- Replaced inference hostname heuristics with bounded DNS-only classification before policy evaluation, followed by pinned preparation and an exact pre-request DNS recheck.
+- Allowed policy-matched LAN hostnames only with homogeneous private answers. Mixed, public, special-use, proxy-unsafe, redirect-unsafe, and rebound destinations fail closed before inference bytes leave the process.
+- Preserved independent HTTP MCP authentication/write authorization gates, stable redacted `EGRESS_DENIED` responses, and structurally disabled private/remote paths.
+- Updated configuration and MCP contract documentation plus regression and evasion coverage.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 281dd274, 856c9804
+- Tests: bun test — 3397 pass, 2 expected skips, 0 fail, bun test test/egress/enforcement.test.ts — 17 pass, 0 fail, bun run lint:check — 0 warnings, 0 errors; 1823 files formatted, bun run docs:verify — 13 pass, 2 model-cache skips, 0 fail, bun run test:package — packed loopback serve, secured daemon, package sentinel passed, .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json — valid
 - PRs:

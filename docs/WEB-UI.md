@@ -343,6 +343,7 @@ View and manage your document collections:
 - **Chunk count**: Text segments created
 - **Embedded %**: Vector embedding progress
 - **Model settings**: Per-collection override editor with inherited-vs-overridden role display
+- **Data boundary**: Effective `local_only`, `lan`, or `remote` policy with provenance
 - **Embedding cleanup**: Clear stale or all embeddings for one collection
 - **Re-index**: Update collection index
 - **Remove**: Delete collection from config
@@ -378,12 +379,31 @@ The dialog shows:
 - one row per role: `embed`, `rerank`, `expand`, `gen`
 - the effective model URI for each role
 - whether the role is inherited from the active preset or overridden on the collection
+- the collection-owned data boundary and whether it is explicit or defaulted
 
 You can:
 
 - paste a model URI into one role without redefining the rest
 - clear one role override and return it to preset inheritance
 - keep the global preset unchanged for all other collections
+- tighten the data boundary immediately
+- relax it only after checking the visible confirmation; the confirmation is
+  bound to the collection, current policy, durable revision, and target loaded
+  by the dialog, so stale tabs and replayed confirmations cannot relax a newer
+  policy
+- explain a proposed action, destination, caller state, content class, and
+  collection scope without performing the action
+- search the bounded existing-collection list and select up to 64 unique
+  collections; the open collection starts selected
+- enable explicit partial results only for a multi-collection scope, then see
+  every allowed and omitted collection identifier, stable omission reason,
+  disclosure code, and remediation
+- inspect newest-first content-free local audit receipts, open exact receipt
+  details, and delete one or purge all only after visible confirmation
+
+Audit pagination cursors remain opaque. Delete and purge results show the exact
+deleted count, checkpointed frames, remaining WAL frames, and physical cleanup
+status.
 
 If you change the collection's **embed** model on an already-indexed collection, GNO warns that vector search quality will depend on running embeddings for that collection again.
 

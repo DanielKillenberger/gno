@@ -14,6 +14,7 @@ import {
   pairStartSchema,
   pairStatusSchema,
   parseContract,
+  parseContractAsync,
   previewSchema,
   revokeSchema,
 } from "./contracts";
@@ -213,7 +214,11 @@ export class ClipperGateway {
       body: JSON.stringify(payload),
     });
     if (response.status !== 200) this.throwError(response, body);
-    return parseContract(previewSchema, body, "browser clip preview");
+    return await parseContractAsync(
+      previewSchema,
+      body,
+      "browser clip preview"
+    );
   }
 
   async capture(

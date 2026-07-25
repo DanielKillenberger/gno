@@ -5,12 +5,16 @@
  * @module src/llm/httpGeneration
  */
 
+import type { HttpInferenceOptions } from "./http-inference";
 import type { GenerationPort, GenParams, LlmResult } from "./types";
 
+import { EgressDeniedError } from "../core/egress-enforcement";
 import {
+  egressDeniedInferenceError,
   inferenceFailedError,
   structuredOutputUnavailableError,
 } from "./errors";
+import { requestHttpInference } from "./http-inference";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -44,11 +48,13 @@ interface OpenAIChatResponse {
 export class HttpGeneration implements GenerationPort {
   private readonly apiUrl: string;
   private readonly modelName: string;
+  private readonly requestOptions: HttpInferenceOptions;
   readonly modelUri: string;
   readonly structuredOutput = "none" as const;
 
-  constructor(modelUri: string) {
+  constructor(modelUri: string, requestOptions: HttpInferenceOptions) {
     this.modelUri = modelUri;
+    this.requestOptions = requestOptions;
     // Parse URI: http://host:port/v1/chat/completions#modelname
     const hashIndex = modelUri.indexOf("#");
     if (hashIndex > 0) {
@@ -74,20 +80,24 @@ export class HttpGeneration implements GenerationPort {
       };
     }
     try {
-      const response = await fetch(this.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await requestHttpInference(
+        this.apiUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: this.modelName,
+            messages: [{ role: "user", content: prompt }],
+            temperature: params?.temperature ?? 0,
+            max_tokens: params?.maxTokens ?? 256,
+            stop: params?.stop,
+            seed: params?.seed,
+          }),
         },
-        body: JSON.stringify({
-          model: this.modelName,
-          messages: [{ role: "user", content: prompt }],
-          temperature: params?.temperature ?? 0,
-          max_tokens: params?.maxTokens ?? 256,
-          stop: params?.stop,
-          seed: params?.seed,
-        }),
-      });
+        this.requestOptions
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -107,10 +117,13 @@ export class HttpGeneration implements GenerationPort {
     } catch (e) {
       return {
         ok: false,
-        error: inferenceFailedError(
-          this.modelUri,
-          e instanceof Error ? e : new Error(String(e))
-        ),
+        error:
+          e instanceof EgressDeniedError
+            ? egressDeniedInferenceError(e)
+            : inferenceFailedError(
+                this.modelUri,
+                e instanceof Error ? e : new Error(String(e))
+              ),
       };
     }
   }

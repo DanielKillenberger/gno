@@ -672,6 +672,44 @@ gno collection clear-embeddings <name> [--all] [--json]
 
 ---
 
+### gno collection policy
+
+Inspect, change, or explain one collection-owned egress boundary.
+
+```bash
+gno collection policy get <name>
+gno collection policy set <name> <local_only|lan|remote> [--confirm-relaxation <current-revision>]
+gno collection policy check --action <action> --destination <zone> --content-class <class> [-c <name>...] [--authenticated] [--authorized] [--partial] [--explain-egress]
+```
+
+`get` returns the configured value, effective value, provenance source, and a
+durable monotonic revision plus a diagnostic version fingerprint. Tightening is
+immediate. Relaxation requires `--confirm-relaxation` with the exact current
+numeric revision returned by `get`; stale, replayed, cross-collection, and
+cross-target confirmation fails without changing config or the index
+projection.
+`check` and `--explain-egress` perform no action. They return the same
+content-free decision, lineage, partial disclosure, audit metadata, and
+remediation contract.
+
+### gno egress-audit
+
+Manage local content-free policy decision receipts:
+
+```bash
+gno egress-audit list [--limit <n>] [--cursor <cursor>]
+gno egress-audit show <audit-id>
+gno egress-audit status
+gno egress-audit delete <audit-id>
+gno egress-audit purge
+```
+
+Pages are newest-first. Delete/purge report truthful SQLite physical cleanup
+status. These local inspection and deletion commands never require a relaxed
+collection policy.
+
+---
+
 ### gno embed
 
 Generate embeddings for indexed chunks.
@@ -3273,7 +3311,9 @@ is blocked.
 - Starts a headless `/mcp` Streamable HTTP listener; it does not serve the Web UI
 - Exposes the same safe REST lifecycle snapshot at `/api/resident/status`;
   resident-aware app status at `/api/status` is loopback-only because it
-  includes local index and configuration details
+  includes local index and configuration details. Non-loopback resident status
+  intersects exact Host/Origin and bearer authentication with the current
+  peer zone and all participating collection policies before returning metadata
 - On `--detach`: forks a detached child with stdio redirected to `--log-file`, writes pid-file JSON including the MCP gateway `port`, prints `{pid}` on stdout, exits 0
 - On `--status`: output matches the [process-status schema](./output-schemas/process-status.schema.json), including the MCP gateway port and a best-effort copy of the live redacted resident snapshot
 - On `--stop`: SIGTERM → 10s poll → SIGKILL → 2s poll; the daemon's own signal handler unlinks the pid-file, `--stop` unlinks as fallback

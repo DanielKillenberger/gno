@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   captureReceiptSchema,
   clipperErrorSchema,
+  egressLineageSchema,
   pairStartSchema,
   pairStatusSchema,
   previewSchema,
@@ -43,14 +44,22 @@ describe("closed browser clipper response contracts", () => {
     ).toBeFalse();
   });
 
-  test("accepts server-owned preview and versioned receipts without deriving them", () => {
-    const preview = previewSchema.parse(previewResponse);
+  test("accepts server-owned preview and versioned receipts without deriving them", async () => {
+    const preview = await previewSchema.parseAsync(previewResponse);
     const receipt = captureReceiptSchema.parse(receiptResponse);
     expect(preview.preview.digest).toBe("4".repeat(64));
     expect(preview.preview.body).toContain("Exact café selection");
+    expect(preview.preview.egressLineage).toEqual(
+      previewResponse.preview.egressLineage
+    );
     expect(receipt.contentHash).toBe("2".repeat(64));
     expect(
-      previewSchema.safeParse({ ...previewResponse, localHash: "bad" }).success
+      (
+        await previewSchema.safeParseAsync({
+          ...previewResponse,
+          localHash: "bad",
+        })
+      ).success
     ).toBeFalse();
     expect(
       captureReceiptSchema.safeParse({
@@ -58,6 +67,105 @@ describe("closed browser clipper response contracts", () => {
         schemaVersion: "9.0",
       }).success
     ).toBeFalse();
+  });
+
+  test("keeps browser preview egress lineage closed and structurally valid", async () => {
+    expect(
+      (
+        await egressLineageSchema.safeParseAsync(
+          previewResponse.preview.egressLineage
+        )
+      ).success
+    ).toBeTrue();
+    expect(
+      (
+        await egressLineageSchema.safeParseAsync({
+          ...previewResponse.preview.egressLineage,
+          effectivePolicy: "internet",
+        })
+      ).success
+    ).toBeFalse();
+    expect(
+      (
+        await egressLineageSchema.safeParseAsync({
+          ...previewResponse.preview.egressLineage,
+          unexpected: "field",
+        })
+      ).success
+    ).toBeFalse();
+    expect(
+      (
+        await egressLineageSchema.safeParseAsync({
+          ...previewResponse.preview.egressLineage,
+          sources: [
+            previewResponse.preview.egressLineage.sources[0],
+            previewResponse.preview.egressLineage.sources[0],
+          ],
+        })
+      ).success
+    ).toBeFalse();
+  });
+
+  test("rejects forged, non-canonical, or unbounded preview lineage", async () => {
+    const canonicalSources = [
+      { collection: "alpha", policy: "remote", source: "explicit" },
+      {
+        collection: "notes",
+        policy: "local_only",
+        source: "legacy_default",
+      },
+    ] as const;
+    const canonical = {
+      effectivePolicy: "local_only",
+      digest:
+        "6b7497a4a251cf5caf493b75db6d7c2cacdef427d99b1bb2a3139dd227ff130d",
+      sources: canonicalSources,
+    };
+    expect((await egressLineageSchema.safeParseAsync(canonical)).success).toBe(
+      true
+    );
+
+    for (const forged of [
+      { ...canonical, digest: "0".repeat(64) },
+      {
+        ...canonical,
+        sources: [...canonical.sources].reverse(),
+      },
+      {
+        ...canonical,
+        sources: [
+          canonical.sources[0],
+          {
+            collection: "alpha",
+            policy: "local_only",
+            source: "explicit",
+          },
+        ],
+      },
+      {
+        ...canonical,
+        effectivePolicy: "remote",
+        sources: [
+          {
+            collection: "notes",
+            policy: "remote",
+            source: "legacy_default",
+          },
+        ],
+      },
+      {
+        ...canonical,
+        sources: Array.from({ length: 129 }, (_, index) => ({
+          collection: `c${index}`,
+          policy: "remote",
+          source: "explicit",
+        })),
+      },
+    ]) {
+      expect((await egressLineageSchema.safeParseAsync(forged)).success).toBe(
+        false
+      );
+    }
   });
 
   test("distinguishes revoke and every known closed error from unknown codes", () => {

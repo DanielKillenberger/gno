@@ -171,6 +171,34 @@ describe("SDK client", () => {
     expect(status.contentTypeBoost).not.toHaveProperty("prefixes");
   });
 
+  test("rejects hostile direct policy checks through the SDK", async () => {
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    expect(client.checkEgress(revoked.proxy as never)).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "Unreadable input object",
+    });
+    const base = {
+      action: "export",
+      destinationZone: "remote",
+      caller: { authenticated: true, operationAuthorized: true },
+      contentClass: "retrieval_trace",
+    } as const;
+    for (const collections of [[], ["fixtures", "fixtures"], ["missing"]]) {
+      expect(
+        client.checkEgress({ ...base, collections } as never)
+      ).rejects.toMatchObject({
+        code: "VALIDATION",
+      });
+    }
+    expect(
+      client.checkEgress({ ...base, collections: ["missing"] })
+    ).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "Invalid collection egress scope",
+    });
+  });
+
   test("lists indexed documents", async () => {
     const result = await client.list({ limit: 5 });
     expect(result.documents.length).toBeGreaterThan(0);

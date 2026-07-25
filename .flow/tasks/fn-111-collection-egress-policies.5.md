@@ -37,9 +37,12 @@ Deliver expose policy configuration checks and denials across surfaces as one im
 
 
 ## Done summary
-TBD
+Hardened collection egress policy management across CLI, REST, MCP, SDK, Web/Desktop, and persisted SQLite state. Relaxation confirmations now bind collection, current policy, durable monotonic revision, and target policy; replayed, stale, cross-collection, cross-target, and concurrent reuse fail closed. All runtime entry points share getter-safe closed validation, REST bodies are byte-bounded before buffering, empty and duplicate collection scopes are rejected consistently, and invalid input causes no config, store, audit, session, or job mutation.
 
+Trace export identity now binds the current policy lineage while preserving immutable historical trace provenance. Resident authorization epochs guard delayed and streaming REST/MCP responses, including the actual document-event bus; the mutating MCP request advances to the new epoch while older active responses emit only a content-free retry result. Policy session invalidation rejects new requests immediately and defers closing active sessions until their response finishes.
+
+Added strict live MCP schemas, Web/Desktop mixed-collection policy checks with explicit partial semantics, policy explain controls, and newest-first audit receipt inspection, exact show, confirmed delete/purge, opaque pagination, and truthful SQLite cleanup results. Updated schemas, migration 25, CLI/MCP/API/Web documentation, and regression coverage.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: bcf2ca58, f0799c9b, f8bda577
+- Tests: bun run lint:check, bun run typecheck, bun test (3447 pass, 2 expected skips, 0 fail), bun run docs:verify (13 pass, 0 fail, 2 model-cache skips), bun run verify:clipper-package, bun run test:package, autoresearch-gno-skill eval.py (47/47, 100%)
 - PRs:

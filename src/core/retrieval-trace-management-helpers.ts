@@ -44,6 +44,7 @@ export const summaryOf = (
   queryShape: trace.queryShape,
   goalShape: trace.goalShape,
   fingerprints: trace.fingerprints,
+  egressLineage: trace.egressLineage,
   createdAtMs: trace.createdAtMs,
   updatedAtMs: trace.updatedAtMs,
   expiresAtMs: trace.expiresAtMs,

@@ -7,6 +7,7 @@ import type {
   RetrievalTraceRunRow,
 } from "../../src/store/types";
 
+import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import {
   buildRetrievalQrelsArtifact,
   type RetrievalQrelsEvidence,
@@ -114,6 +115,7 @@ const bundle = (input: {
       queryLanguageHint: "de",
       uriPrefix: "gno://notes/projects",
     },
+    egressLineage: legacyLocalOnlyEgressLineage("notes"),
     fingerprints: {
       pipeline: sha256("pipeline"),
       model: sha256("model"),

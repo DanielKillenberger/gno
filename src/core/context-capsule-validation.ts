@@ -1,6 +1,6 @@
 import type { RefinementCtx } from "zod";
 
-import type { ContextCapsulePayloadV1 } from "./context-capsule-schema";
+import type { ContextCapsulePayload } from "./context-capsule-schema";
 
 import { DEFAULT_INDEX_NAME, parseUri } from "../app/constants";
 import { canonicalizeIndexName } from "../app/index-name";
@@ -86,7 +86,7 @@ const isWithinPrefix = (
     uri.path.startsWith(`${prefix.path}/`));
 
 const validateCapabilityBindings = (
-  value: ContextCapsulePayloadV1,
+  value: ContextCapsulePayload,
   fallbackKeys: Set<string>,
   context: RefinementCtx
 ): void => {
@@ -165,7 +165,7 @@ const validateCapabilityBindings = (
 };
 
 const validateCoverageBindings = (
-  value: ContextCapsulePayloadV1,
+  value: ContextCapsulePayload,
   context: RefinementCtx
 ): void => {
   const requested = new Set(value.coverage.requestedFacets);
@@ -329,7 +329,7 @@ const validateCoverageBindings = (
 };
 
 export const validateContextCapsulePayload = (
-  value: ContextCapsulePayloadV1,
+  value: ContextCapsulePayload,
   context: RefinementCtx
 ): void => {
   const fallbackKeys = new Set(value.fallbacks.map((item) => item.code));

@@ -378,7 +378,12 @@ describe("Context Capsule REST/MCP parity", () => {
       direct.guidance.configuredContexts[0]?.contextId;
     expect(configuredContextId).toBeDefined();
     expect(direct.evidence[0]?.contextIds).toEqual([configuredContextId!]);
-    expect(direct.evidence[0]?.egress).toBe("unavailable");
+    expect(direct.evidence[0]?.egress).toBe("local_only");
+    expect(direct.schemaVersion).toBe("1.1");
+    if (direct.schemaVersion !== "1.1") {
+      throw new Error("Expected the current Context Capsule schema");
+    }
+    expect(direct.evidence[0]?.egressLineage).toEqual(direct.egressLineage);
     expect(projection.g[0]).toBe("untrusted_data");
     expect(projection.g[1]).toBe("hard_delimited");
     expect(projection.g[2][0]?.[3]).toContain(

@@ -91,16 +91,26 @@ export const traceReplay = async (
     const policy = resolveDownloadPolicy(process.env, {
       offline: options.offline,
     });
+    const egressCollections = "all" as const;
     if (embedUri) {
-      const created = await llm.createEmbeddingPort(embedUri, { policy });
+      const created = await llm.createEmbeddingPort(embedUri, {
+        egressCollections,
+        policy,
+      });
       if (created.ok) embedPort = created.value;
     }
     if (expandUri) {
-      const created = await llm.createExpansionPort(expandUri, { policy });
+      const created = await llm.createExpansionPort(expandUri, {
+        egressCollections,
+        policy,
+      });
       if (created.ok) expandPort = created.value;
     }
     if (rerankUri) {
-      const created = await llm.createRerankPort(rerankUri, { policy });
+      const created = await llm.createRerankPort(rerankUri, {
+        egressCollections,
+        policy,
+      });
       if (created.ok) rerankPort = created.value;
     }
     if (embedPort && embedUri) {

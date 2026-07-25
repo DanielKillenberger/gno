@@ -2,6 +2,7 @@ import type {
   BrowserClipPayload,
   BrowserClipPreview,
   CaptureReceipt,
+  EgressLineage,
   ExtractionResult,
   StoredGrant,
 } from "../src/types";
@@ -95,6 +96,18 @@ export const source = {
   browserClip: provenance,
 };
 
+export const egressLineage: EgressLineage = {
+  effectivePolicy: "local_only",
+  digest: "5411913ed073bc9d18a0cc00c578923231d28586aca7016a062873813805d974",
+  sources: [
+    {
+      collection: "notes",
+      policy: "local_only",
+      source: "legacy_default",
+    },
+  ],
+};
+
 export const previewResponse = {
   schemaVersion: "1.0",
   preview: {
@@ -102,6 +115,7 @@ export const previewResponse = {
     digest: "4".repeat(64),
     source,
     destination: payload.destination,
+    egressLineage,
     tags: payload.tags,
   },
   provenance,

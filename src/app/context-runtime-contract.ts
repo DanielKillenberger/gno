@@ -3,7 +3,7 @@
 import type { ContextCanonicalProjection } from "../core/context-budget";
 import type { ContextCapsuleV1 } from "../core/context-capsule";
 import type { ContextCapabilityState } from "../core/context-capsule-retrieval-schema";
-import type { ContextCapsulePayloadV1 } from "../core/context-capsule-schema";
+import type { ContextCapsulePayloadV1_1 } from "../core/context-capsule-schema";
 import type { ContextCanonicalPlanDraft } from "../core/context-compiler";
 import type { ContextEvidenceValue } from "../core/context-evidence";
 import type { NormalizedContextBuildInput } from "./context-runtime-input";
@@ -19,6 +19,7 @@ import {
   toContextCapsuleEvidence,
 } from "../core/context-evidence";
 import { canonicalVerifierJson } from "../core/context-verifier-canonical";
+import { mergeEgressLineages } from "../core/egress-provenance";
 import { resolveModelUri } from "../llm/registry";
 
 const fingerprint = (value: unknown): string =>
@@ -104,13 +105,13 @@ const capsuleCapabilities = (
   graphExpansion: states.graphExpansion.outcome === "used",
   exactTokenCount: exactTokens,
   configuredContext,
-  egressPolicy: false,
+  egressPolicy: true,
 });
 
 const capsuleFallbacks = (
   capabilities: ReturnType<typeof capsuleCapabilities>,
   states: ReturnType<typeof capsuleCapabilityStates>
-): ContextCapsulePayloadV1["fallbacks"] => [
+): ContextCapsulePayloadV1_1["fallbacks"] => [
   ...(states.semanticSearch.outcome === "unavailable"
     ? [
         {
@@ -143,12 +144,15 @@ const capsuleFallbacks = (
           capability: "token_count" as const,
         },
       ]),
-  { code: "egress_policy_unavailable", capability: "egress_policy" },
 ];
 
 export const projectContextCapsule = (
   draft: ContextCanonicalPlanDraft<ContextEvidenceValue>,
-  snapshots: { indexFingerprint: string; contextFingerprint: string },
+  snapshots: {
+    indexFingerprint: string;
+    contextFingerprint: string;
+    egressLineage: ContextCapsulePayloadV1_1["egressLineage"];
+  },
   input: NormalizedContextBuildInput,
   deps: ContextCapsuleRuntimeDeps
 ): ContextCanonicalProjection<ContextCapsuleV1> | null => {
@@ -156,6 +160,10 @@ export const projectContextCapsule = (
   const evidence = draft.selection.selected.map((candidate, index) =>
     toContextCapsuleEvidence(candidate, index + 1)
   );
+  const egressLineage = mergeEgressLineages([
+    snapshots.egressLineage,
+    ...evidence.map((item) => item.egressLineage),
+  ]);
   const evidenceIdsByFacet = new Map<string, string[]>();
   for (const item of evidence) {
     for (const facet of item.facets) {
@@ -173,7 +181,7 @@ export const projectContextCapsule = (
     draft.configuredContexts.length > 0
   );
   const base = {
-    schemaVersion: "1.0" as const,
+    schemaVersion: "1.1" as const,
     coordinateSpace: "canonical_mirror" as const,
     goal: draft.goal,
     query: draft.query,
@@ -213,7 +221,7 @@ export const projectContextCapsule = (
     },
     capabilities,
   };
-  const payload: ContextCapsulePayloadV1 = {
+  const payload: ContextCapsulePayloadV1_1 = {
     ...base,
     budget: {
       authority: "canonical_json",
@@ -246,6 +254,7 @@ export const projectContextCapsule = (
       instructionBoundary: "hard_delimited",
       configuredContexts: draft.configuredContexts,
     },
+    egressLineage,
     evidence,
     coverage: {
       complete: draft.selection.coverage.unresolvedFacets.length === 0,

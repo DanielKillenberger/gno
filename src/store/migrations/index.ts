@@ -36,6 +36,9 @@ import { migration as m019 } from "./019-saved-capsule-registration-generation";
 import { migration as m020 } from "./020-browser-clipper-security";
 import { migration as m021 } from "./021-multi-context-identity";
 import { migration as m022 } from "./022-record-export-lineage";
+import { migration as m023 } from "./023-collection-egress-policy";
+import { migration as m024 } from "./024-egress-derived-lineage";
+import { migration as m025 } from "./025-collection-egress-policy-revision";
 
 /** All migrations in order */
 export const migrations = [
@@ -61,4 +64,7 @@ export const migrations = [
   m020,
   m021,
   m022,
+  m023,
+  m024,
+  m025,
 ];

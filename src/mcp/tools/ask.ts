@@ -202,7 +202,7 @@ export const handleAsk = (
         traceSession = started.value ?? undefined;
         modelPorts = await createMcpModelPorts(
           context,
-          args.collection,
+          args.collection ? [args.collection] : undefined,
           dependencies.modelPortFactory,
           { generation: true }
         );

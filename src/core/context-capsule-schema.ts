@@ -11,10 +11,12 @@ import {
   sha256Text,
   validateContextCapsulePayload,
 } from "./context-capsule-validation";
+import { egressLineageSchema } from "./egress-provenance";
 
 export { contextCapsuleIndexSnapshotSchema } from "./context-capsule-index-schema";
 
 export const CONTEXT_CAPSULE_SCHEMA_VERSION = "1.0" as const;
+export const CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION = "1.1" as const;
 export const CONTEXT_CAPSULE_COORDINATE_SPACE = "canonical_mirror" as const;
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -356,6 +358,7 @@ export const contextCapsuleEvidenceSchema = z
       "unclassified",
       "unavailable",
     ]),
+    egressLineage: egressLineageSchema.optional(),
     record: recordEvidenceMetadataSchema.optional(),
   })
   .strict()
@@ -405,6 +408,11 @@ export const contextCapsuleEvidenceSchema = z
       });
     }
   });
+
+export const contextCapsuleEvidenceV1_1Schema =
+  contextCapsuleEvidenceSchema.and(
+    z.object({ egressLineage: egressLineageSchema }).passthrough()
+  );
 
 const coveredFacetSchema = z
   .object({
@@ -570,8 +578,110 @@ export const contextCapsulePayloadV1Schema = z
     warnings: z.array(warningSchema).max(32),
   })
   .strict()
-  .superRefine(validateContextCapsulePayload);
+  .superRefine((value, context) => {
+    validateContextCapsulePayload(value, context);
+    if (
+      value.evidence.some((evidence) => evidence.egressLineage !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Context Capsule 1.0 cannot contain egress lineage",
+        path: ["evidence"],
+      });
+    }
+  });
 
 export type ContextCapsulePayloadV1 = z.infer<
   typeof contextCapsulePayloadV1Schema
 >;
+
+const validateContextCapsuleV1_1Lineage = (
+  value: {
+    scope: { collections: string[] };
+    egressLineage: z.infer<typeof egressLineageSchema>;
+    evidence: z.infer<typeof contextCapsuleEvidenceV1_1Schema>[];
+  },
+  context: z.RefinementCtx
+): void => {
+  const aggregateByCollection = new Map(
+    value.egressLineage.sources.map((source) => [source.collection, source])
+  );
+  const requiredCollections = new Set(value.scope.collections);
+  for (const [evidenceIndex, evidence] of value.evidence.entries()) {
+    const evidenceCollection = evidence.collection;
+    const evidenceOwnSource = evidence.egressLineage.sources.find(
+      (source) => source.collection === evidenceCollection
+    );
+    if (!evidenceOwnSource) {
+      context.addIssue({
+        code: "custom",
+        message: "Evidence lineage must include its source collection",
+        path: ["evidence", evidenceIndex, "egressLineage"],
+      });
+    }
+    for (const source of evidence.egressLineage.sources) {
+      requiredCollections.add(source.collection);
+      const aggregateSource = aggregateByCollection.get(source.collection);
+      if (
+        !aggregateSource ||
+        aggregateSource.policy !== source.policy ||
+        aggregateSource.source !== source.source
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Aggregate lineage must preserve every evidence policy source",
+          path: ["egressLineage"],
+        });
+      }
+    }
+  }
+  if (value.scope.collections.length > 0) {
+    const aggregateCollections = value.egressLineage.sources.map(
+      ({ collection }) => collection
+    );
+    const required = [...requiredCollections].sort(compareCodeUnits);
+    if (JSON.stringify(aggregateCollections) !== JSON.stringify(required)) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Aggregate lineage membership must equal requested scope and evidence ownership",
+        path: ["egressLineage", "sources"],
+      });
+    }
+  }
+};
+
+export const contextCapsulePayloadV1_1Schema = z
+  .object({
+    schemaVersion: z.literal(CONTEXT_CAPSULE_CURRENT_SCHEMA_VERSION),
+    coordinateSpace: z.literal(CONTEXT_CAPSULE_COORDINATE_SPACE),
+    goal: nonEmptyTextSchema,
+    query: nonEmptyTextSchema,
+    scope: scopeSchema,
+    budget: budgetSchema,
+    retrieval: contextCapsuleRetrievalSchema,
+    fingerprints: fingerprintsSchema,
+    capabilities: capabilitiesSchema,
+    fallbacks: z.array(fallbackSchema).max(16),
+    guidance: guidanceSchema,
+    egressLineage: egressLineageSchema,
+    evidence: z.array(contextCapsuleEvidenceV1_1Schema).min(1),
+    coverage: coverageSchema,
+    omissions: omissionsSchema,
+    truncated: z.boolean(),
+    warnings: z.array(warningSchema).max(32),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    validateContextCapsulePayload(value, context);
+    validateContextCapsuleV1_1Lineage(value, context);
+  });
+
+export type ContextCapsulePayloadV1_1 = z.infer<
+  typeof contextCapsulePayloadV1_1Schema
+>;
+
+export type ContextCapsulePayload =
+  | ContextCapsulePayloadV1
+  | ContextCapsulePayloadV1_1;

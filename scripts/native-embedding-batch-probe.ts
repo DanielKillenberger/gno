@@ -111,6 +111,7 @@ function formatPrefix(values: Float64Array, length = 5): string {
 const args = parseArgs(Bun.argv.slice(2));
 const adapter = new LlmAdapter(createDefaultConfig());
 const portResult = await adapter.createEmbeddingPort(args.model, {
+  egressCollections: "all",
   policy: {
     allowDownload: args.allowDownload,
     offline: !args.allowDownload,

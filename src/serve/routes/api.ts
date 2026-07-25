@@ -14,6 +14,7 @@ import type {
   Collection,
   CollectionModelOverrides,
   Config,
+  EgressPolicy,
   ModelPreset,
 } from "../../config/types";
 import type { JobManager } from "../../core/job-manager";
@@ -49,6 +50,13 @@ import {
   normalizeContentTypes,
 } from "../../config";
 import { type PublicCaptureInput } from "../../core/capture";
+import { projectCollectionEgressPolicy } from "../../core/collection-egress-policy-projection";
+import {
+  CollectionEgressPolicyService,
+  type CollectionEgressPolicyState,
+  type EgressRelaxationConfirmation,
+} from "../../core/collection-egress-policy-service";
+import { parsePolicySetBody } from "../../core/collection-egress-policy-validation";
 import {
   type ConnectorVerificationCode,
   getConnectorVerificationRemediation,
@@ -58,6 +66,7 @@ import {
   deriveEditableCopyRelPath,
   getDocumentCapabilities,
 } from "../../core/document-capabilities";
+import { EgressAuditService } from "../../core/egress-audit";
 import {
   atomicWrite,
   copyFilePath,
@@ -144,6 +153,7 @@ import {
   executeResidentCapturePlan,
   planResidentCapture,
 } from "../capture-service";
+import { parseClosedJson } from "../closed-json";
 import { applyConfigChange, applyConfigChangeTyped } from "../config-sync";
 import {
   getConnectorStatuses,
@@ -176,6 +186,12 @@ export interface ContextHolder {
   jobManager?: JobManager;
   markContentMutation?: () => void;
   markIndexMutation?: () => void;
+  invalidateEgressPolicy?: () => Promise<{
+    policyEpoch: string;
+    queuedJobsInvalidated: number;
+    sessionsInvalidated: number;
+    staleWorkMustRetry: true;
+  }>;
   startBackgroundWork?: (
     operation: (signal: AbortSignal) => Promise<void>
   ) => boolean;
@@ -361,6 +377,11 @@ export interface UpdateCollectionRequestBody {
   };
 }
 
+export interface UpdateCollectionEgressPolicyRequestBody {
+  policy: EgressPolicy;
+  confirmation?: EgressRelaxationConfirmation;
+}
+
 export interface ClearCollectionEmbeddingsRequestBody {
   mode?: "stale" | "all";
 }
@@ -387,6 +408,7 @@ export interface CollectionResponse {
     gen: "override" | "preset" | "default";
   };
   activePresetId: string;
+  egressPolicy: CollectionEgressPolicyState | null;
 }
 
 function serializeCollection(
@@ -406,6 +428,12 @@ function serializeCollection(
     effectiveModels: getCollectionEffectiveModels(config, collection.name),
     modelSources: getCollectionModelSources(config, collection.name),
     activePresetId: modelConfig.activePreset,
+    egressPolicy: (() => {
+      const result = new CollectionEgressPolicyService({
+        getConfig: () => config,
+      }).get(collection.name);
+      return result.ok ? result.value : null;
+    })(),
   };
 }
 
@@ -1001,6 +1029,150 @@ export async function handleCollections(config: Config): Promise<Response> {
   );
 }
 
+const collectionPolicyService = (
+  ctxHolder: ContextHolder,
+  store: SqliteAdapter,
+  collection: string
+): CollectionEgressPolicyService =>
+  new CollectionEgressPolicyService({
+    getConfig: () => ctxHolder.config,
+    mutateConfig: (mutate) =>
+      applyConfigChangeTyped(
+        ctxHolder,
+        store,
+        (config) => mutate(config),
+        undefined,
+        {
+          projectStore: (targetStore, config) =>
+            projectCollectionEgressPolicy(targetStore, config, collection),
+        }
+      ),
+    onPolicyChanged: async () =>
+      (await ctxHolder.invalidateEgressPolicy?.()) ?? {
+        policyEpoch: "egress-epoch-standalone",
+        queuedJobsInvalidated: 0,
+        sessionsInvalidated: 0,
+        staleWorkMustRetry: true,
+      },
+  });
+
+export function handleCollectionEgressPolicy(
+  ctxHolder: ContextHolder,
+  name: string
+): Response {
+  const state = new CollectionEgressPolicyService({
+    getConfig: () => ctxHolder.config,
+  }).get(name);
+  if (state.ok) return jsonResponse(state.value);
+  return errorResponse(
+    state.code === "NOT_FOUND" ? "NOT_FOUND" : "VALIDATION",
+    state.error,
+    state.code === "NOT_FOUND" ? 404 : 400
+  );
+}
+
+export async function handleUpdateCollectionEgressPolicy(
+  ctxHolder: ContextHolder,
+  store: SqliteAdapter,
+  name: string,
+  req: Request
+): Promise<Response> {
+  const parsed = await parseClosedJson(req);
+  if (!parsed.ok) return errorResponse("VALIDATION", parsed.error, 400);
+  const input = parsePolicySetBody(parsed.value, name);
+  if (!input.ok) return errorResponse("VALIDATION", input.error, 400);
+  const result = await collectionPolicyService(ctxHolder, store, name).set(
+    input.value
+  );
+  if (!result.ok) {
+    const status =
+      result.code === "NOT_FOUND"
+        ? 404
+        : result.code === "EGRESS_RELAXATION_CONFIRMATION_REQUIRED"
+          ? 409
+          : 400;
+    return errorResponse(result.code, result.error, status);
+  }
+  return jsonResponse(result.value);
+}
+
+export async function handleCollectionEgressCheck(
+  ctxHolder: ContextHolder,
+  req: Request
+): Promise<Response> {
+  const parsed = await parseClosedJson(req);
+  if (!parsed.ok) return errorResponse("VALIDATION", parsed.error, 400);
+  const result = new CollectionEgressPolicyService({
+    getConfig: () => ctxHolder.config,
+  }).check(parsed.value);
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse("VALIDATION", result.error, 400);
+}
+
+export async function handleEgressAuditList(
+  store: SqliteAdapter,
+  req: Request
+): Promise<Response> {
+  const url = new URL(req.url);
+  const limit = url.searchParams.has("limit")
+    ? Number(url.searchParams.get("limit"))
+    : undefined;
+  const result = await new EgressAuditService(store).list({
+    limit,
+    cursor: url.searchParams.get("cursor") ?? undefined,
+  });
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse(result.error.code, result.error.message);
+}
+
+export async function handleEgressAuditShow(
+  store: SqliteAdapter,
+  auditId: string
+): Promise<Response> {
+  const result = await new EgressAuditService(store).show(auditId);
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse(
+        result.error.code,
+        result.error.message,
+        result.error.code === "NOT_FOUND" ? 404 : 400
+      );
+}
+
+export async function handleEgressAuditStatus(
+  store: SqliteAdapter
+): Promise<Response> {
+  const result = await new EgressAuditService(store).status();
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse(result.error.code, result.error.message);
+}
+
+export async function handleEgressAuditDelete(
+  store: SqliteAdapter,
+  auditId: string
+): Promise<Response> {
+  const result = await new EgressAuditService(store).delete(auditId);
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse(
+        result.error.code,
+        result.error.message,
+        result.error.code === "NOT_FOUND" ? 404 : 400
+      );
+}
+
+export async function handleEgressAuditPurge(
+  store: SqliteAdapter
+): Promise<Response> {
+  const result = await new EgressAuditService(store).purge();
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse(result.error.code, result.error.message);
+}
+
 /**
  * POST /api/publish/export
  * Build a gno.sh-compatible publish artifact for a collection or single doc.
@@ -1166,6 +1338,7 @@ export async function handleCreateCollection(
   if (!collection) {
     return errorResponse("RUNTIME", "Collection not found after add", 500);
   }
+  await ctxHolder.invalidateEgressPolicy?.();
   const jobResult = await startJob(
     "add",
     async (): Promise<SyncResult> => {
@@ -1281,6 +1454,7 @@ export async function handleDeleteCollection(
     const status = statusMap[syncResult.code] ?? 500;
     return errorResponse(syncResult.code, syncResult.error, status);
   }
+  await ctxHolder.invalidateEgressPolicy?.();
   ctxHolder.markContentMutation?.();
   ctxHolder.markIndexMutation?.();
   return jsonResponse({

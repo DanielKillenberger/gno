@@ -46,4 +46,36 @@ describe("HTTP MCP boundary error schema", () => {
       )
     ).toBe(true);
   });
+
+  test("accepts a bounded redacted egress denial", () => {
+    expect(
+      assertValid(
+        {
+          jsonrpc: "2.0",
+          error: {
+            code: -32_003,
+            message: "Operation blocked by collection egress policy",
+            data: {
+              code: "EGRESS_DENIED",
+              message: "Operation blocked by collection egress policy",
+              reason: "POLICY_LOCAL_ONLY",
+              audit: {
+                action: "serve",
+                destinationZone: "remote",
+                contentClass: "source",
+                collectionCount: 1,
+                collections: ["notes"],
+                effectivePolicy: "local_only",
+                effectivePolicySource: "config_default",
+                callerAuthenticated: true,
+                callerOperationAuthorized: true,
+              },
+            },
+          },
+          id: 7,
+        },
+        schema
+      )
+    ).toBe(true);
+  });
 });

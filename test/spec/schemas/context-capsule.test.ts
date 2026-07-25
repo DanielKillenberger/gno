@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ContextCapsulePayloadV1 } from "../../../src/core/context-capsule-schema";
+import type {
+  ContextCapsulePayloadV1,
+  ContextCapsulePayloadV1_1,
+} from "../../../src/core/context-capsule-schema";
 
 import { deriveDocid } from "../../../src/app/constants";
 import {
@@ -22,6 +25,10 @@ import {
   sha256Text,
 } from "../../../src/core/context-capsule-validation";
 import { parseCanonicalContextCapsuleForVerification } from "../../../src/core/context-verifier";
+import {
+  createEgressLineage,
+  mergeEgressLineages,
+} from "../../../src/core/egress-provenance";
 import {
   assertInvalid,
   assertValid,
@@ -229,6 +236,74 @@ describe("Context Capsule V1 contract", () => {
     expect(parseCanonicalContextCapsuleForVerification(legacyCapsule)).toEqual(
       legacyCapsule
     );
+  });
+
+  test("binds 1.1 aggregate lineage to requested scope and all evidence owners", () => {
+    const legacy = buildPayload();
+    const legacyEvidence = legacy.evidence[0];
+    if (!legacyEvidence) throw new Error("evidence fixture missing");
+    const evidenceLineage = createEgressLineage([
+      { collection: "notes", policy: "local_only", source: "explicit" },
+      { collection: "shared-owner", policy: "remote", source: "explicit" },
+    ]);
+    const requestedLineage = createEgressLineage([
+      { collection: "public", policy: "remote", source: "explicit" },
+    ]);
+    const aggregate = mergeEgressLineages([evidenceLineage, requestedLineage]);
+    const payload: ContextCapsulePayloadV1_1 = {
+      ...legacy,
+      schemaVersion: "1.1",
+      scope: { ...legacy.scope, collections: ["notes", "public"] },
+      capabilities: { ...legacy.capabilities, egressPolicy: true },
+      fallbacks: legacy.fallbacks.filter(
+        ({ capability }) => capability !== "egress_policy"
+      ),
+      egressLineage: aggregate,
+      evidence: [
+        {
+          ...legacyEvidence,
+          egress: "local_only",
+          egressLineage: evidenceLineage,
+        },
+      ],
+    };
+    const capsule = createContextCapsuleV1(payload);
+    expect(capsule.schemaVersion).toBe("1.1");
+    if (capsule.schemaVersion !== "1.1") {
+      throw new Error("expected Context Capsule 1.1");
+    }
+    expect(capsule.egressLineage).toEqual(aggregate);
+
+    const underbound = {
+      ...payload,
+      egressLineage: requestedLineage,
+    };
+    expect(() => createContextCapsuleV1(underbound)).toThrow(
+      ContextCapsuleContractError
+    );
+    expect(() =>
+      parseCanonicalContextCapsuleForVerification({
+        ...capsule,
+        egressLineage: requestedLineage,
+      })
+    ).toThrow(ContextCapsuleContractError);
+
+    const contradictoryEvidence = createEgressLineage([
+      { collection: "notes", policy: "remote", source: "explicit" },
+      { collection: "shared-owner", policy: "remote", source: "explicit" },
+    ]);
+    expect(() =>
+      createContextCapsuleV1({
+        ...payload,
+        evidence: [
+          {
+            ...legacyEvidence,
+            egress: "remote",
+            egressLineage: contradictoryEvidence,
+          },
+        ],
+      })
+    ).toThrow(ContextCapsuleContractError);
   });
 
   test("uses stable identity and non-self-referential accounting projections", async () => {

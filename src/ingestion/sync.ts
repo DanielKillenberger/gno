@@ -53,6 +53,7 @@ import {
   normalizeRelationEdgeType,
   normalizeRelationTarget,
 } from "../core/change-diff";
+import { enforceCollectionEgress } from "../core/egress-enforcement";
 import {
   normalizeMarkdownPath,
   normalizeWikiName,
@@ -1598,10 +1599,24 @@ export class SyncService {
 
     // 1. Run preflight commands
     if (options.runUpdateCmd !== false && collection.updateCmd) {
+      enforceCollectionEgress({
+        collections: [collection],
+        action: "export",
+        destinationZone: "remote",
+        caller: { authenticated: true, operationAuthorized: true },
+        contentClass: "source",
+      });
       await runUpdateCmd(collection.path, collection.updateCmd);
     }
 
     if (options.gitPull && (await isGitRepo(collection.path))) {
+      enforceCollectionEgress({
+        collections: [collection],
+        action: "export",
+        destinationZone: "remote",
+        caller: { authenticated: true, operationAuthorized: true },
+        contentClass: "metadata",
+      });
       await gitPull(collection.path);
     }
 

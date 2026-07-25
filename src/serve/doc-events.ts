@@ -25,45 +25,86 @@ export interface DocumentEventBusState {
   retryMs: number;
 }
 
+export interface DocumentEventStreamAuthorization {
+  authorizationEpoch: string;
+  isAuthorizationEpochCurrent: () => boolean;
+  onClose?: () => void;
+  signal?: AbortSignal;
+}
+
+interface DocumentEventSubscriber {
+  authorization: DocumentEventStreamAuthorization;
+  closed: boolean;
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  keepaliveTimer: ReturnType<typeof setInterval> | null;
+  removeAbortListener: (() => void) | null;
+}
+
 const encoder = new TextEncoder();
 const EVENT_RETRY_MS = 2_000;
 const KEEPALIVE_MS = 15_000;
+const POLICY_CHANGED_FRAME = encoder.encode(
+  `retry: ${EVENT_RETRY_MS}\nevent: egress-policy-changed\ndata: {"error":{"code":"EGRESS_POLICY_CHANGED","message":"Collection policy changed; retry"}}\n\n`
+);
 
 export class DocumentEventBus {
-  readonly #controllers = new Set<
-    ReadableStreamDefaultController<Uint8Array>
-  >();
+  readonly #subscribers = new Set<DocumentEventSubscriber>();
+  readonly #keepaliveMs: number;
 
-  createResponse(): Response {
-    const controllers = this.#controllers;
-    let streamController: ReadableStreamDefaultController<Uint8Array> | null =
-      null;
-    let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  constructor(options: { keepaliveMs?: number } = {}) {
+    this.#keepaliveMs = options.keepaliveMs ?? KEEPALIVE_MS;
+  }
+
+  createResponse(
+    authorization: DocumentEventStreamAuthorization = {
+      authorizationEpoch: "unrestricted",
+      isAuthorizationEpochCurrent: () => true,
+    }
+  ): Response {
+    let subscriber: DocumentEventSubscriber | null = null;
     const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        streamController = controller;
-        controllers.add(controller);
+      start: (controller) => {
+        subscriber = {
+          authorization,
+          closed: false,
+          controller,
+          keepaliveTimer: null,
+          removeAbortListener: null,
+        };
+        this.#subscribers.add(subscriber);
+        if (!authorization.isAuthorizationEpochCurrent()) {
+          this.#invalidateSubscriber(subscriber);
+          return;
+        }
         controller.enqueue(
           encoder.encode(`retry: ${EVENT_RETRY_MS}\n: connected\n\n`)
         );
-        keepaliveTimer = setInterval(() => {
-          try {
-            controller.enqueue(encoder.encode(": keepalive\n\n"));
-          } catch {
-            if (keepaliveTimer) {
-              clearInterval(keepaliveTimer);
+        subscriber.keepaliveTimer = setInterval(
+          () => {
+            if (!authorization.isAuthorizationEpochCurrent()) {
+              this.#invalidateSubscriber(subscriber);
+              return;
             }
-            controllers.delete(controller);
-          }
-        }, KEEPALIVE_MS);
+            try {
+              controller.enqueue(encoder.encode(": keepalive\n\n"));
+            } catch {
+              this.#closeSubscriber(subscriber);
+            }
+          },
+          this.#keepaliveMs
+        );
+        if (authorization.signal) {
+          const onAbort = (): void => this.#closeSubscriber(subscriber);
+          authorization.signal.addEventListener("abort", onAbort, {
+            once: true,
+          });
+          subscriber.removeAbortListener = () =>
+            authorization.signal?.removeEventListener("abort", onAbort);
+          if (authorization.signal.aborted) onAbort();
+        }
       },
-      cancel() {
-        if (keepaliveTimer) {
-          clearInterval(keepaliveTimer);
-        }
-        if (streamController) {
-          controllers.delete(streamController);
-        }
+      cancel: () => {
+        this.#closeSubscriber(subscriber, false);
       },
     });
 
@@ -81,30 +122,60 @@ export class DocumentEventBus {
       `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
     );
 
-    for (const controller of this.#controllers) {
+    for (const subscriber of this.#subscribers) {
+      if (!subscriber.authorization.isAuthorizationEpochCurrent()) {
+        this.#invalidateSubscriber(subscriber);
+        continue;
+      }
       try {
-        controller.enqueue(payload);
+        subscriber.controller.enqueue(payload);
       } catch {
-        this.#controllers.delete(controller);
+        this.#closeSubscriber(subscriber);
       }
     }
   }
 
   close(): void {
-    for (const controller of this.#controllers) {
-      try {
-        controller.close();
-      } catch {
-        // Best-effort shutdown.
-      }
+    for (const subscriber of this.#subscribers) {
+      this.#closeSubscriber(subscriber);
     }
-    this.#controllers.clear();
   }
 
   getState(): DocumentEventBusState {
     return {
-      connectedClients: this.#controllers.size,
+      connectedClients: this.#subscribers.size,
       retryMs: EVENT_RETRY_MS,
     };
+  }
+
+  #invalidateSubscriber(subscriber: DocumentEventSubscriber | null): void {
+    if (!subscriber || subscriber.closed) return;
+    try {
+      subscriber.controller.enqueue(POLICY_CHANGED_FRAME);
+    } catch {
+      // The stream may already be cancelled.
+    }
+    this.#closeSubscriber(subscriber);
+  }
+
+  #closeSubscriber(
+    subscriber: DocumentEventSubscriber | null,
+    closeController = true
+  ): void {
+    if (!subscriber || subscriber.closed) return;
+    subscriber.closed = true;
+    if (subscriber.keepaliveTimer) {
+      clearInterval(subscriber.keepaliveTimer);
+    }
+    subscriber.removeAbortListener?.();
+    this.#subscribers.delete(subscriber);
+    if (closeController) {
+      try {
+        subscriber.controller.close();
+      } catch {
+        // Best-effort stream shutdown.
+      }
+    }
+    subscriber.authorization.onClose?.();
   }
 }

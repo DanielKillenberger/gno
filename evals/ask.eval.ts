@@ -90,6 +90,7 @@ async function createGenPort(presetId: PresetId): Promise<GenPort> {
 
   const genResult = await cachedLlm.createGenerationPort(preset.gen, {
     policy,
+    egressCollections: "all",
   });
   if (!genResult.ok) {
     throw new Error(

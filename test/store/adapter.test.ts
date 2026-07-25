@@ -68,7 +68,7 @@ describe("SqliteAdapter", () => {
       expect(result.value.applied).toContain(2);
       expect(result.value.applied).toContain(3);
       expect(result.value.applied).toContain(4);
-      expect(result.value.currentVersion).toBe(22);
+      expect(result.value.currentVersion).toBe(25);
       expect(result.value.ftsTokenizer).toBe("unicode61");
     });
 
@@ -86,7 +86,7 @@ describe("SqliteAdapter", () => {
       }
 
       expect(result.value.applied).toHaveLength(0);
-      expect(result.value.currentVersion).toBe(22);
+      expect(result.value.currentVersion).toBe(25);
     });
 
     test("rejects tokenizer mismatch", async () => {
@@ -259,6 +259,7 @@ describe("SqliteAdapter", () => {
           pattern: "**/*",
           include: [],
           exclude: [],
+          egressPolicy: "lan",
         },
       ];
 
@@ -279,6 +280,56 @@ describe("SqliteAdapter", () => {
       expect(notes?.pattern).toBe("**/*.md");
       expect(notes?.include).toEqual([".md"]);
       expect(notes?.exclude).toEqual([".git"]);
+      expect(notes?.egressPolicy).toBe("local_only");
+      expect(notes?.egressPolicySource).toBe("config_default");
+      const docs = getResult.value.find((c) => c.name === "docs");
+      expect(docs?.egressPolicy).toBe("lan");
+      expect(docs?.egressPolicySource).toBe("explicit");
+    });
+
+    test("preserves legacy provenance until explicit choice and tightens omission", async () => {
+      const db = adapter.getRawDb();
+      db.run(
+        `INSERT INTO collections (name, path, pattern)
+         VALUES ('notes', '/notes', '**/*')`
+      );
+      const base: Collection = {
+        name: "notes",
+        path: "/notes",
+        pattern: "**/*",
+        include: [],
+        exclude: [],
+      };
+
+      expect((await adapter.syncCollections([base])).ok).toBe(true);
+      let stored = await adapter.getCollections();
+      expect(stored.ok).toBe(true);
+      if (!stored.ok) return;
+      expect(stored.value[0]).toMatchObject({
+        egressPolicy: "local_only",
+        egressPolicySource: "legacy_default",
+      });
+
+      expect(
+        (await adapter.syncCollections([{ ...base, egressPolicy: "remote" }]))
+          .ok
+      ).toBe(true);
+      stored = await adapter.getCollections();
+      expect(stored.ok).toBe(true);
+      if (!stored.ok) return;
+      expect(stored.value[0]).toMatchObject({
+        egressPolicy: "remote",
+        egressPolicySource: "explicit",
+      });
+
+      expect((await adapter.syncCollections([base])).ok).toBe(true);
+      stored = await adapter.getCollections();
+      expect(stored.ok).toBe(true);
+      if (!stored.ok) return;
+      expect(stored.value[0]).toMatchObject({
+        egressPolicy: "local_only",
+        egressPolicySource: "config_default",
+      });
     });
 
     test("removes deleted collections on sync", async () => {
@@ -499,6 +550,8 @@ describe("SqliteAdapter", () => {
         exclude: desiredCollection.exclude,
         updateCmd: desiredCollection.updateCmd,
         languageHint: desiredCollection.languageHint,
+        egressPolicy: "local_only",
+        egressPolicySource: "config_default",
       });
       expect(repairedCollection?.syncedAt).not.toBe(sentinelTimestamp);
       expect(
@@ -1390,7 +1443,7 @@ describe("SqliteAdapter", () => {
         return;
       }
 
-      expect(result.value.version).toBe("22");
+      expect(result.value.version).toBe("25");
       expect(result.value.ftsTokenizer).toBe("unicode61");
       expect(result.value.dbPath).toBe(dbPath);
       expect(result.value.totalDocuments).toBe(1);
@@ -1406,6 +1459,10 @@ describe("SqliteAdapter", () => {
       expect(result.value.embeddingBacklog).toBe(1);
       expect(result.value.collections).toHaveLength(1);
       expect(result.value.collections[0]?.name).toBe("notes");
+      expect(result.value.collections[0]?.egressPolicy).toBe("local_only");
+      expect(result.value.collections[0]?.egressPolicySource).toBe(
+        "config_default"
+      );
     });
 
     test("status can scope embedded counts and backlog to one embed model", async () => {

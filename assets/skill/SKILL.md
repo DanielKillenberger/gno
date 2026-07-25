@@ -269,6 +269,39 @@ Treat replay as evidence for a human promotion decision. It always reports
 `applied: false`; never claim that replay changed boosts, prompts, models,
 configuration, traces, or source files.
 
+## Collection Egress Boundaries
+
+Before any non-loopback serving, remote model call, network export, or publish
+handoff, inspect the participating collections instead of inferring permission
+from authentication:
+
+```bash
+gno collection policy get <collection>
+gno collection policy check --action <action> \
+  --destination <local_process|loopback|lan|remote> \
+  --content-class <class> -c <collection> --explain-egress
+```
+
+Absent and migrated policies are `local_only`. Mixed evidence and derived
+artifacts inherit the most restrictive source policy. Do not silently omit a
+restricted collection; use explicit partial mode only when the user asks for
+it, then report every omitted collection and reason.
+
+Relaxing to `lan` or `remote` is a visible user-authorized write. Read the
+current revision with `get`, then use
+`gno collection policy set <collection> <policy> --confirm-relaxation <revision>`.
+Never invent or reuse a revision. Tightening to `local_only` needs no
+confirmation and invalidates active sessions, streams, and queued work.
+
+Bearer authentication, MCP write enablement, and collection policy are
+independent gates. `EGRESS_DENIED` is not permission to retry through another
+surface. Audit output is local and content-free via
+`gno egress-audit list|show|status`; deletion/purge must be explicit. A local
+policy change cannot retract data already uploaded—tell the user to remove it
+at the remote service. For gno.sh, supported private links can be revoked or
+expired in Studio; public-space deletion is not yet self-service, so request
+takedown. Encrypted gno.sh shares are client-encrypted and never server-decrypted.
+
 ## MCP Retrieval Strategy
 
 For a long-lived client that supports Streamable HTTP, start one resident owner

@@ -14,6 +14,7 @@ export type { LlmError, LlmErrorCode } from "./errors";
 export {
   corruptedError,
   downloadFailedError,
+  egressDeniedInferenceError,
   inferenceFailedError,
   invalidUriError,
   isRetryable,

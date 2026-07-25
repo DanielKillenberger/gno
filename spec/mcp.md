@@ -98,6 +98,26 @@ HTTP MCP remains read-only unless `gateway.enableWrite: true` or
 authorize mutation. Unauthorized calls to write tools fail with HTTP 403 before
 SDK dispatch.
 
+Every `tools/call`, `resources/list`, `resources/templates/list`, and
+`resources/read` request is also checked against the current socket peer zone
+and the effective policy of every referenced collection before SDK dispatch.
+The check is per request, including batch members and requests that reuse an
+existing session; a session's original peer zone is never reused as authority.
+Non-loopback access therefore requires both a valid bearer token and a
+compatible collection policy. Policy denial returns HTTP 403 with stable
+`EGRESS_DENIED` data and a redacted evaluator audit. Write authorization remains
+an independent additional requirement.
+
+The MCP tool and resource registry is paired with a callsite-level
+network-boundary inventory. A TypeScript AST scan covers shipped TS, TSX, JS,
+and JSX and recognizes direct, qualified, bracketed, imported, and aliased
+fetch, EventSource, WebSocket, Bun listener/DNS/socket, HTTP inference, and
+external-process primitives. Every detected invocation has its own stable
+inventory key, so adding a second call in an already-listed file still fails
+the contract test. Browser same-origin calls are classified as client
+transport and name the server route that performs the actual egress check; the
+client scan itself is not treated as content authorization.
+
 Boundary failures use the closed
 [`mcp-http-error`](./output-schemas/mcp-http-error.schema.json) body with stable,
 redacted statuses: 401 (authentication), 403 (peer/Host/Origin/write), 413
@@ -2345,6 +2365,52 @@ MCP Server Status
 ```
 
 ---
+
+## Collection Egress Policy and Audit Tools
+
+Read tools:
+
+- `gno_egress_policy_get { collection }` returns configured/effective policy,
+  provenance source, current monotonic revision, and diagnostic version.
+- `gno_egress_check` accepts exact collection scope, action, destination zone,
+  caller authentication/authorization, content class, and partial mode. It
+  performs no action and returns the canonical decision/explanation contract.
+  An explicit scope is a non-empty, duplicate-free list of at most 64 canonical
+  collection names; omitted scope means all configured collections.
+- `gno_egress_audit_list`, `gno_egress_audit_show`, and
+  `gno_egress_audit_status` expose only content-free local receipts.
+
+Write-enabled tools:
+
+- `gno_egress_policy_set` requires confirmation
+  `{ collection, currentPolicy, currentRevision, targetPolicy, acknowledged: true }`
+  for relaxation. The revision is durable and one-use; replayed, stale,
+  cross-collection, and cross-target confirmations fail closed.
+- `gno_egress_audit_delete` deletes exactly one receipt.
+- `gno_egress_audit_purge { confirm: true }` deletes only audit receipts.
+
+Policy does not replace transport authentication or `enableWrite`. Local audit
+inspection remains available when outbound content is denied. Retrieval-trace
+export resolves exact trace lineage and checks policy before creating or
+reusing an export receipt; missing traces return `NOT_FOUND` before policy
+evaluation.
+
+All collection-policy and audit tool inputs are closed objects. Unknown
+top-level fields are rejected by MCP input validation before any handler,
+mutation, invalidation, or audit operation runs.
+
+Active resident requests retain their admission authorization epoch. A policy
+mutation may advance its own request to the new epoch, but older REST and MCP
+responses are replaced by a content-free `EGRESS_POLICY_CHANGED` retry
+response/event before protected bytes are emitted, including streaming
+responses. `/api/events` binds each SSE subscriber to its admission epoch and
+rechecks it before every document event and heartbeat; a stale subscriber
+receives only the retry event and is then unsubscribed.
+
+Schemas: `collection-egress-policy.schema.json`,
+`collection-egress-policy-set.schema.json`,
+`collection-egress-check.schema.json`, and
+`egress-audit-management.schema.json`.
 
 ## See Also
 

@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gno.sh/schemas/collection-egress-policy.schema.json",
+  "title": "Collection egress policy state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "collection",
+    "configuredPolicy",
+    "effectivePolicy",
+    "source",
+    "revision",
+    "version"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "collection": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "configuredPolicy": {
+      "type": ["string", "null"],
+      "enum": ["local_only", "lan", "remote", null]
+    },
+    "effectivePolicy": {
+      "enum": ["local_only", "lan", "remote"]
+    },
+    "source": {
+      "enum": ["explicit", "config_default"]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^egress-policy-v1:[a-f0-9]{64}$"
+    }
+  }
+}

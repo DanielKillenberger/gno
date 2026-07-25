@@ -6,6 +6,7 @@ import type {
   StorePort,
   StoreResult,
 } from "../store/types";
+import type { EgressLineage } from "./egress-provenance";
 import type {
   ExportRetrievalTracesInput,
   ExportRetrievalTracesResult,
@@ -14,6 +15,7 @@ import type {
 
 import { hashTraceCanonical } from "../store/retrieval-trace-codec";
 import { err, ok } from "../store/types";
+import { mergeEgressLineages } from "./egress-provenance";
 import { buildRetrievalQrelsArtifact } from "./retrieval-qrels";
 
 const validateTraceIds = (traceIds: unknown): StoreResult<string[]> => {
@@ -38,6 +40,9 @@ const agenticArtifact = (
 ): RetrievalTraceArtifact => ({
   schemaVersion: "1.0",
   format: "agentic-receipt",
+  egressLineage: mergeEgressLineages(
+    bundles.map(({ trace }) => trace.egressLineage)
+  ),
   traces: bundles.map(({ exports: _exports, ...trace }) => trace),
 });
 
@@ -54,7 +59,10 @@ export const exportRetrievalTraces = async <
 >(
   store: StorePort,
   clock: () => number,
-  input: ExportRetrievalTracesInput<Format>
+  input: ExportRetrievalTracesInput<Format>,
+  deps: {
+    authorize?: (lineage: EgressLineage) => Promise<StoreResult<EgressLineage>>;
+  } = {}
 ): Promise<StoreResult<ExportRetrievalTracesResult<Format>>> => {
   const format = input.format ?? "agentic-receipt";
   if (!["agentic-receipt", "qrels"].includes(format)) {
@@ -77,13 +85,20 @@ export const exportRetrievalTraces = async <
   }
   const built = buildArtifact(format, bundles);
   if (!built.ok) return built;
-  const artifactHash = hashTraceCanonical(built.value);
+  const authorized = await deps.authorize?.(built.value.egressLineage);
+  if (authorized && !authorized.ok) return authorized;
+  const artifact = {
+    ...built.value,
+    egressLineage: authorized?.value ?? built.value.egressLineage,
+  } as RetrievalTraceArtifact;
+  const artifactHash = hashTraceCanonical(artifact);
   const exportId = `trace-export-${artifactHash.slice(0, 40)}`;
   const appended = await store.appendRetrievalTraceExportManifest({
     exportId,
     traceIds: traceIds.value,
     format,
     artifactHash,
+    egressLineage: artifact.egressLineage,
     createdAtMs: clock(),
   });
   if (!appended.ok) return appended;
@@ -94,9 +109,13 @@ export const exportRetrievalTraces = async <
   }
   const reconstructed = buildArtifact(format, complete.value.traces);
   if (!reconstructed.ok) return reconstructed;
+  const reconstructedCurrent = {
+    ...reconstructed.value,
+    egressLineage: complete.value.manifest.egressLineage,
+  } as RetrievalTraceArtifact;
   if (
     complete.value.manifest.traceIds.join("\0") !== traceIds.value.join("\0") ||
-    hashTraceCanonical(reconstructed.value) !==
+    hashTraceCanonical(reconstructedCurrent) !==
       complete.value.manifest.artifactHash
   ) {
     return err(
@@ -108,6 +127,6 @@ export const exportRetrievalTraces = async <
     schemaVersion: "1.0",
     result: appended.value,
     manifest: complete.value.manifest,
-    artifact: reconstructed.value,
+    artifact: reconstructedCurrent,
   } as ExportRetrievalTracesResult<Format>);
 };

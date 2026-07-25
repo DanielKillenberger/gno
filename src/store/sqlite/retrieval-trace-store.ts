@@ -2,6 +2,7 @@
 
 import type { Database } from "bun:sqlite";
 
+import type { EgressLineage } from "../../core/egress-provenance";
 import type {
   RetrievalTraceAppendResult,
   RetrievalTraceBundle,
@@ -17,7 +18,12 @@ import type {
 } from "../types";
 
 import {
+  egressLineageSchema,
+  mergeEgressLineages,
+} from "../../core/egress-provenance";
+import {
   canonicalTraceJson,
+  hashLegacyRetrievalTraceCreation,
   hashRetrievalTraceCreation,
   hashTraceCanonical,
   parseRetrievalTraceEventInput,
@@ -113,6 +119,7 @@ export const createTrace = (
     const queryShapeJson = canonicalTraceJson(trace.queryShape);
     const goalShapeJson = canonicalTraceJson(trace.goalShape);
     const filtersJson = canonicalTraceJson(trace.filters);
+    const egressLineageJson = canonicalTraceJson(trace.egressLineage);
     const queryBytes = enforceByteLimit(
       trace.queryText ?? "",
       8192,
@@ -138,16 +145,23 @@ export const createTrace = (
       16_384,
       "Retrieval trace filters"
     );
+    const egressLineageBytes = enforceByteLimit(
+      egressLineageJson,
+      32_768,
+      "Retrieval trace egress lineage"
+    );
     const creationDigest = hashRetrievalTraceCreation(trace);
     const insert = db.run(
       `INSERT OR IGNORE INTO retrieval_traces (
          trace_id, schema_version, redaction_mode, replay_capable,
          query_text, query_digest, query_shape_json,
          goal_text, goal_digest, goal_shape_json, filters_json,
+         effective_egress_policy, egress_lineage_digest,
+         egress_lineage_json, egress_lineage_bytes,
          pipeline_fingerprint, model_fingerprint, config_fingerprint,
          index_fingerprint, status, created_at_ms, updated_at_ms,
-         expires_at_ms, byte_size, creation_digest
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         expires_at_ms, byte_size, creation_digest, creation_digest_version
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         trace.traceId,
         trace.schemaVersion,
@@ -160,6 +174,10 @@ export const createTrace = (
         trace.goalDigest,
         goalShapeJson,
         filtersJson,
+        trace.egressLineage.effectivePolicy,
+        trace.egressLineage.digest,
+        egressLineageJson,
+        egressLineageBytes,
         trace.fingerprints.pipeline,
         trace.fingerprints.model,
         trace.fingerprints.config,
@@ -170,21 +188,102 @@ export const createTrace = (
         trace.expiresAtMs,
         queryBytes + shapeBytes + goalBytes + goalShapeBytes + filterBytes,
         creationDigest,
+        1,
       ]
     );
     if (insert.changes > 0) return ok("inserted");
     const stored = db
-      .query<{ creation_digest: string }, [string]>(
-        "SELECT creation_digest FROM retrieval_traces WHERE trace_id = ?"
+      .query<
+        {
+          creation_digest: string;
+          creation_digest_version: 0 | 1;
+          egress_lineage_digest: string;
+          egress_lineage_json: string;
+        },
+        [string]
+      >(
+        `SELECT creation_digest, creation_digest_version,
+                egress_lineage_digest, egress_lineage_json
+         FROM retrieval_traces WHERE trace_id = ?`
       )
       .get(trace.traceId);
-    if (stored?.creation_digest === creationDigest) return ok("duplicate");
+    if (stored?.creation_digest === creationDigest) {
+      if (stored.creation_digest_version === 0) {
+        db.run(
+          `UPDATE retrieval_traces SET creation_digest_version = 1
+           WHERE trace_id = ? AND creation_digest_version = 0`,
+          [trace.traceId]
+        );
+      }
+      return ok("duplicate");
+    }
+    const legacyLineage =
+      '{"digest":"87b249b76459c91c172da6be6cbe3f93b61c44869eb196f3470ec36ebb50b8b0","effectivePolicy":"local_only","sources":[{"collection":"legacy","policy":"local_only","source":"legacy_default"}]}';
+    if (
+      stored?.creation_digest_version === 0 &&
+      stored.egress_lineage_digest === trace.egressLineage.digest &&
+      stored.egress_lineage_json === legacyLineage &&
+      stored.creation_digest === hashLegacyRetrievalTraceCreation(trace)
+    ) {
+      db.run(
+        `UPDATE retrieval_traces
+         SET creation_digest = ?, creation_digest_version = 1
+         WHERE trace_id = ? AND creation_digest_version = 0`,
+        [creationDigest, trace.traceId]
+      );
+      return ok("duplicate");
+    }
     return err(
       "CONSTRAINT_VIOLATION",
       `trace_id ${trace.traceId} already exists with different content`
     );
   } catch (cause) {
     return traceWriteError(cause, "Failed to create retrieval trace");
+  }
+};
+
+export const mergeTraceEgressLineage = (
+  db: Database,
+  traceId: string,
+  input: EgressLineage
+): StoreResult<RetrievalTraceAppendResult> => {
+  try {
+    validateTraceId(traceId, "traceId");
+    const incoming = egressLineageSchema.parse(input);
+    const stored = db
+      .query<{ egress_lineage_json: string }, [string]>(
+        "SELECT egress_lineage_json FROM retrieval_traces WHERE trace_id = ?"
+      )
+      .get(traceId);
+    if (!stored)
+      return err("NOT_FOUND", `Retrieval trace ${traceId} not found`);
+    const current = egressLineageSchema.parse(
+      JSON.parse(stored.egress_lineage_json)
+    );
+    const merged = mergeEgressLineages([current, incoming]);
+    if (merged.digest === current.digest) return ok("duplicate");
+    const lineageJson = canonicalTraceJson(merged);
+    const lineageBytes = enforceByteLimit(
+      lineageJson,
+      32_768,
+      "Retrieval trace egress lineage"
+    );
+    db.run(
+      `UPDATE retrieval_traces
+       SET effective_egress_policy = ?, egress_lineage_digest = ?,
+           egress_lineage_json = ?, egress_lineage_bytes = ?
+       WHERE trace_id = ?`,
+      [
+        merged.effectivePolicy,
+        merged.digest,
+        lineageJson,
+        lineageBytes,
+        traceId,
+      ]
+    );
+    return ok("inserted");
+  } catch (cause) {
+    return traceWriteError(cause, "Failed to merge retrieval trace lineage");
   }
 };
 

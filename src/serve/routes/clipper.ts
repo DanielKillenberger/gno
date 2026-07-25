@@ -1,10 +1,16 @@
 /** Dedicated loopback browser-clipper HTTP gateway. */
 
+import type { EgressLineage } from "../../core/egress-provenance";
 import type { HttpMcpPeerServer } from "../../mcp/http-security";
 import type { SqliteAdapter } from "../../store/sqlite/adapter";
 import type { ContextHolder } from "./api";
 
 import { prepareBrowserClip } from "../../core/browser-clip";
+import {
+  enforceCollectionEgressWithAudit,
+  EGRESS_DENIED_MESSAGE,
+  EgressDeniedError,
+} from "../../core/egress-enforcement";
 import {
   planResidentCapture,
   type ResidentCapturePlanResult,
@@ -81,6 +87,40 @@ const pollStatusCode = (result: ClipperPairPollResult): number => {
     return 410;
   }
   return 200;
+};
+
+const enforceClipWrite = async (
+  ctxHolder: ContextHolder,
+  store: SqliteAdapter,
+  body: unknown
+): Promise<EgressLineage | undefined> => {
+  const record =
+    typeof body === "object" && body !== null
+      ? (body as Record<string, unknown>)
+      : null;
+  const payload =
+    typeof record?.payload === "object" && record.payload !== null
+      ? (record.payload as Record<string, unknown>)
+      : record;
+  const destination =
+    typeof payload?.destination === "object" && payload.destination !== null
+      ? (payload.destination as Record<string, unknown>)
+      : null;
+  const collection =
+    typeof destination?.collection === "string"
+      ? destination.collection
+      : undefined;
+  if (!collection) return undefined;
+  const { lineage } = await enforceCollectionEgressWithAudit({
+    collections: ctxHolder.config.collections,
+    collectionNames: [collection],
+    action: "clip_write",
+    destinationZone: "loopback",
+    caller: { authenticated: true, operationAuthorized: true },
+    contentClass: "source",
+    store,
+  });
+  return lineage;
 };
 
 export function createClipperRouteGateway(
@@ -279,7 +319,12 @@ export function createClipperRouteGateway(
     if (!authenticated.ok) return authenticated.response;
     const { admission, grant } = authenticated.value;
     try {
-      const prepared = prepareBrowserClip(admission.body);
+      const egressLineage = await enforceClipWrite(
+        ctxHolder,
+        store,
+        admission.body
+      );
+      const prepared = prepareBrowserClip(admission.body, { egressLineage });
       const planned = await planResidentCapture(
         ctxHolder,
         store,
@@ -303,6 +348,12 @@ export function createClipperRouteGateway(
         admission.origin
       );
     } catch (error) {
+      if (error instanceof EgressDeniedError) {
+        return withClipperCors(
+          clipperErrorResponse("EGRESS_DENIED", EGRESS_DENIED_MESSAGE, 403),
+          admission.origin
+        );
+      }
       return withClipperCors(
         clipperErrorResponse(
           "CLIPPER_INVALID_REQUEST",
@@ -321,6 +372,11 @@ export function createClipperRouteGateway(
     if (!authenticated.ok) return authenticated.response;
     const { admission, grant } = authenticated.value;
     try {
+      const egressLineage = await enforceClipWrite(
+        ctxHolder,
+        store,
+        admission.body
+      );
       return withClipperCors(
         await executeClipperCapture({
           request,
@@ -330,10 +386,17 @@ export function createClipperRouteGateway(
           context: ctxHolder,
           store,
           pairing,
+          egressLineage,
         }),
         admission.origin
       );
     } catch (error) {
+      if (error instanceof EgressDeniedError) {
+        return withClipperCors(
+          clipperErrorResponse("EGRESS_DENIED", EGRESS_DENIED_MESSAGE, 403),
+          admission.origin
+        );
+      }
       return withClipperCors(
         clipperErrorResponse(
           "CLIPPER_CAPTURE_FAILED",

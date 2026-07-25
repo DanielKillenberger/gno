@@ -12,6 +12,7 @@ import {
   planCapture,
 } from "../../src/core/capture";
 import { sha256Text } from "../../src/core/context-capsule-validation";
+import { createEgressLineage } from "../../src/core/egress-provenance";
 import {
   assertInvalid,
   assertValid,
@@ -159,6 +160,30 @@ describe("browser clip contract", () => {
     expect(
       prepareBrowserClip(changedAuthor, { now: FIXED_NOW }).preview.digest
     ).not.toBe(first.preview.digest);
+  });
+
+  test("binds server-owned destination lineage into the preview identity", () => {
+    const remote = createEgressLineage([
+      { collection: "clips", policy: "remote", source: "explicit" },
+    ]);
+    const local = createEgressLineage([
+      { collection: "clips", policy: "local_only", source: "explicit" },
+    ]);
+    const remoteClip = prepareBrowserClip(selectionPayload(), {
+      now: FIXED_NOW,
+      egressLineage: remote,
+    });
+    const localClip = prepareBrowserClip(selectionPayload(), {
+      now: FIXED_NOW,
+      egressLineage: local,
+    });
+
+    expect(remoteClip.egressLineage).toEqual(remote);
+    expect(remoteClip.preview.egressLineage).toEqual(remote);
+    expect(remoteClip.preview.digest).not.toBe(localClip.preview.digest);
+    expect(remoteClip.provenance.clipIdentity).toBe(
+      localClip.provenance.clipIdentity
+    );
   });
 
   test("Reader AST preserves structure and escapes visible markup", () => {

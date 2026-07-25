@@ -32,6 +32,19 @@ const makeFtsResult = (mirrorHash: string, seq: number): FtsResult => ({
   relPath: `${mirrorHash}.md`,
 });
 
+const TEST_COLLECTION = {
+  name: "test",
+  path: "/test",
+  pattern: "**/*",
+  include: null,
+  exclude: null,
+  updateCmd: null,
+  languageHint: null,
+  egressPolicy: "local_only" as const,
+  egressPolicySource: "legacy_default" as const,
+  syncedAt: "",
+};
+
 describe("searchBm25 N+1 guard", () => {
   test("uses getChunksBatch, never calls getChunks", async () => {
     // Mock store where getChunks throws to detect N+1
@@ -46,18 +59,7 @@ describe("searchBm25 N+1 guard", () => {
       }),
       getCollections: async () => ({
         ok: true as const,
-        value: [
-          {
-            name: "test",
-            path: "/test",
-            pattern: "**/*",
-            include: null,
-            exclude: null,
-            updateCmd: null,
-            languageHint: null,
-            syncedAt: "",
-          },
-        ],
+        value: [TEST_COLLECTION],
       }),
       getChunks: () => {
         throw new Error("N+1 detected: getChunks should not be called");
@@ -91,7 +93,7 @@ describe("searchBm25 N+1 guard", () => {
       }),
       getCollections: async () => ({
         ok: true as const,
-        value: [],
+        value: [TEST_COLLECTION],
       }),
       getChunks: () => {
         throw new Error("N+1 detected: getChunks should not be called");
@@ -140,7 +142,7 @@ describe("searchBm25 N+1 guard", () => {
       }),
       getCollections: async () => ({
         ok: true as const,
-        value: [],
+        value: [TEST_COLLECTION],
       }),
       getChunksBatch: async (hashes: string[]) => {
         const chunks = new Map<string, ChunkRow[]>();

@@ -192,6 +192,8 @@ describe("content-type search boost adversarial promotion gates", () => {
             exclude: null,
             updateCmd: null,
             languageHint: null,
+            egressPolicy: "local_only",
+            egressPolicySource: "legacy_default",
             syncedAt: "2026-07-22T00:00:00.000Z",
           },
         ],

@@ -2,6 +2,7 @@
 
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
+import type { DestinationClassification } from "../core/destination-classifier";
 import type { ResidentRequestHandle } from "../serve/resident-runtime";
 import type {
   HttpMcpSession,
@@ -10,6 +11,11 @@ import type {
   PendingHttpMcpSession,
 } from "./http-session";
 
+import { EgressDeniedError } from "../core/egress-enforcement";
+import {
+  enforceHttpMcpEgress,
+  httpMcpEgressDeniedResponse,
+} from "./http-egress";
 import { HttpMcpSessionStore } from "./http-session";
 import { MCP_WRITE_TOOL_NAMES } from "./tools/index";
 
@@ -17,8 +23,12 @@ const DEFAULT_MAX_CONCURRENT_REQUESTS = 64;
 const DEFAULT_MAX_QUEUED_REQUESTS = 0;
 const MCP_HTTP_METHODS = new Set(["DELETE", "GET", "POST"]);
 const MCP_SESSION_HEADER = "mcp-session-id";
+const POLICY_CHANGED_SSE = new TextEncoder().encode(
+  'event: message\ndata: {"jsonrpc":"2.0","error":{"code":-32000,"message":"EGRESS_POLICY_CHANGED: Collection policy changed; retry"},"id":null}\n\n'
+);
 
 export interface HttpMcpTransportRuntime extends HttpMcpSessionRuntime {
+  readonly authorizationEpoch?: string;
   readonly isShuttingDown: boolean;
   admitRequest(signal?: AbortSignal): ResidentRequestHandle | null;
 }
@@ -30,8 +40,10 @@ export interface HttpMcpTransportOptions extends HttpMcpSessionStoreOptions {
 }
 
 export interface HttpMcpRequestContext {
+  authenticated?: boolean;
   identity: string;
   parsedBody?: unknown;
+  peerClassification?: DestinationClassification;
 }
 
 export interface HttpMcpTransportStatus {
@@ -101,7 +113,8 @@ function validateInitializeHeaders(request: Request): Response | undefined {
 
 function wrapStreamingResponse(
   response: Response,
-  finish: () => void
+  finish: () => void,
+  isAuthorizationEpochCurrent: () => boolean
 ): Response {
   if (!response.body) {
     finish();
@@ -117,7 +130,21 @@ function wrapStreamingResponse(
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
+        if (!isAuthorizationEpochCurrent()) {
+          await reader.cancel("EGRESS_POLICY_CHANGED");
+          controller.enqueue(POLICY_CHANGED_SSE);
+          controller.close();
+          finishOnce();
+          return;
+        }
         const result = await reader.read();
+        if (!isAuthorizationEpochCurrent()) {
+          await reader.cancel("EGRESS_POLICY_CHANGED");
+          controller.enqueue(POLICY_CHANGED_SSE);
+          controller.close();
+          finishOnce();
+          return;
+        }
         if (result.done) {
           controller.close();
           finishOnce();
@@ -136,6 +163,13 @@ function wrapStreamingResponse(
   });
   return new Response(body, response);
 }
+
+const policyChangedResponse = (): Response =>
+  jsonRpcError(
+    409,
+    -32_000,
+    "EGRESS_POLICY_CHANGED: Collection policy changed; retry"
+  );
 
 /** Stateful session gateway used by the production `/mcp` route. */
 export class HttpMcpTransport {
@@ -212,6 +246,15 @@ export class HttpMcpTransport {
     let session: HttpMcpSession | undefined;
     let pending: PendingHttpMcpSession | undefined;
     let finished = false;
+    const authorizationEpoch = {
+      value:
+        admission.authorizationEpoch ??
+        this.#runtime.authorizationEpoch ??
+        "egress-epoch-unavailable",
+    };
+    const isAuthorizationEpochCurrent = (): boolean =>
+      this.#runtime.authorizationEpoch === undefined ||
+      authorizationEpoch.value === this.#runtime.authorizationEpoch;
     const finish = (): void => {
       if (finished) return;
       finished = true;
@@ -293,10 +336,53 @@ export class HttpMcpTransport {
         finish();
         return jsonRpcError(403, -32_000, "Forbidden");
       }
-      const response = await transport.handleRequest(
-        request,
-        requestBody === undefined ? undefined : { parsedBody: requestBody }
-      );
+      try {
+        enforceHttpMcpEgress(
+          requestBody,
+          this.#runtime.mcpContext.collections,
+          {
+            authenticated: context.authenticated ?? false,
+            destinationZone:
+              context.peerClassification?.zone ??
+              (context.identity === "loopback" ? "loopback" : "remote"),
+            operationAuthorized: true,
+          }
+        );
+      } catch (error) {
+        if (error instanceof EgressDeniedError) {
+          await pending?.discard();
+          finish();
+          return httpMcpEgressDeniedResponse(error, requestBody);
+        }
+        throw error;
+      }
+      const handle = () =>
+        transport.handleRequest(
+          request,
+          requestBody === undefined ? undefined : { parsedBody: requestBody }
+        );
+      const destinationZone =
+        context.peerClassification?.zone ??
+        (context.identity === "loopback" ? "loopback" : "remote");
+      const response = this.#runtime.mcpContext.runWithEgressContext
+        ? await this.#runtime.mcpContext.runWithEgressContext(
+            {
+              destinationZone,
+              caller: {
+                authenticated: context.authenticated ?? false,
+                operationAuthorized: true,
+              },
+              authorizationEpoch,
+            },
+            handle
+          )
+        : await handle();
+
+      if (!isAuthorizationEpochCurrent()) {
+        await pending?.discard();
+        finish();
+        return policyChangedResponse();
+      }
 
       if (pending) {
         session = pending.session;
@@ -305,7 +391,11 @@ export class HttpMcpTransport {
       }
 
       if (response.headers.get("content-type")?.includes("text/event-stream")) {
-        return wrapStreamingResponse(response, finish);
+        return wrapStreamingResponse(
+          response,
+          finish,
+          isAuthorizationEpochCurrent
+        );
       }
       finish();
       return response;

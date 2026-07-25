@@ -8,6 +8,7 @@ import type {
 } from "../../src/converters/types";
 
 import { ConverterRegistry } from "../../src/converters/registry";
+import { createEgressLineage } from "../../src/core/egress-provenance";
 import {
   recordKeyFor,
   runRecordAdapter,
@@ -66,6 +67,17 @@ const complete: RecordAdapterEvent = {
 };
 
 describe("streaming record adapter contract", () => {
+  test("retains source policy at the adapter boundary", async () => {
+    const egressLineage = createEgressLineage([
+      { collection: "imports", policy: "lan", source: "explicit" },
+    ]);
+    const result = await runRecordAdapter(adapter([complete]), input(), {
+      egressLineage,
+    });
+
+    expect(result.egressLineage).toEqual(egressLineage);
+  });
+
   test("keeps byte converters and record adapters in separate registry lanes", async () => {
     const legacy: Converter = {
       id: "legacy",

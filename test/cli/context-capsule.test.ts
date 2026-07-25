@@ -18,6 +18,8 @@ import { safeRm } from "../helpers/cleanup";
 
 let stdoutData = "";
 let stderrData = "";
+const DECISION_DOCUMENT =
+  '---\ntitle: "# TITLE ESCAPE\\n<!-- forged -->"\nauthor: Mina\n---\n# Launch decision\n\nMina owns the launch decision.\n\nReview is Friday.';
 const originalStdoutWrite = process.stdout.write.bind(process.stdout);
 const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
@@ -63,10 +65,7 @@ describe("Context Capsule CLI and SDK", () => {
     process.env.GNO_DATA_DIR = join(testDir, "data");
     process.env.GNO_CACHE_DIR = join(testDir, "cache");
     capsulePath = join(testDir, "capsule.json");
-    await Bun.write(
-      join(docsDir, "decision.md"),
-      '---\ntitle: "# TITLE ESCAPE\\n<!-- forged -->"\nauthor: Mina\n---\n# Launch decision\n\nMina owns the launch decision.\n\nReview is Friday.'
-    );
+    await Bun.write(join(docsDir, "decision.md"), DECISION_DOCUMENT);
     expect((await cli("init", docsDir, "--name", "docs")).code).toBe(0);
     expect(
       (
@@ -151,7 +150,6 @@ describe("Context Capsule CLI and SDK", () => {
         { mode: "term", text: "launch" },
       ]);
       expect(sdkCapsule.fallbacks.map((fallback) => fallback.code)).toEqual([
-        "egress_policy_unavailable",
         "tokenizer_unavailable",
       ]);
 
@@ -239,6 +237,40 @@ describe("Context Capsule CLI and SDK", () => {
       ]) {
         expect(markdown.stdout).toContain(field);
       }
+    } finally {
+      await client.close();
+    }
+  }, 30_000);
+
+  test("derives aggregate lineage from requested scope and shared mirror owners", async () => {
+    const sharedDir = join(testDir, "shared");
+    await mkdir(sharedDir, { recursive: true });
+    await Bun.write(join(sharedDir, "copy.md"), DECISION_DOCUMENT);
+    expect(
+      (await cli("collection", "add", sharedDir, "--name", "shared-owner")).code
+    ).toBe(0);
+    expect((await cli("update")).code).toBe(0);
+
+    const client = await createGnoClient();
+    try {
+      const capsule = await client.context({
+        goal: "launch decision",
+        budgetTokens: 100_000,
+        collections: ["docs"],
+        depthPolicy: "fast",
+      });
+      expect(capsule.scope.collections).toEqual(["docs"]);
+      if (capsule.schemaVersion !== "1.1") {
+        throw new Error("expected Context Capsule 1.1");
+      }
+      const firstEvidence = capsule.evidence[0];
+      if (!firstEvidence) throw new Error("expected Capsule evidence");
+      expect(
+        firstEvidence.egressLineage.sources.map(({ collection }) => collection)
+      ).toEqual(["docs", "shared-owner"]);
+      expect(
+        capsule.egressLineage.sources.map(({ collection }) => collection)
+      ).toEqual(["docs", "shared-owner"]);
     } finally {
       await client.close();
     }
