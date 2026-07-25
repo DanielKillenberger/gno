@@ -168,6 +168,34 @@ export function formatSyncResultLines(
       lines.push(`  ${c.filesMarkedInactive} marked inactive`);
     }
 
+    for (const file of c.files ?? []) {
+      const receipt = file.recordImport;
+      if (
+        !receipt ||
+        (receipt.failures.length === 0 && receipt.warnings.length === 0)
+      )
+        continue;
+      const warningCount = receipt.failures.length + receipt.warnings.length;
+      lines.push(
+        `  ${file.relPath}: ${warningCount} record warning${warningCount === 1 ? "" : "s"} (${receipt.snapshotState} snapshot)`
+      );
+      if (options.verbose) {
+        for (const warning of receipt.warnings) {
+          lines.push(
+            `    [${warning.code}]: ${warning.message} (retryable=${warning.retryable ? "yes" : "no"})`
+          );
+        }
+        for (const failure of receipt.failures) {
+          const locator = failure.sourceLocator
+            ? ` at ${failure.sourceLocator}`
+            : "";
+          lines.push(
+            `    [${failure.code}]${locator}: ${failure.message} (retryable=${failure.retryable ? "yes" : "no"})`
+          );
+        }
+      }
+    }
+
     if (options.verbose && c.errors.length > 0) {
       for (const err of c.errors) {
         lines.push(`    [${err.code}] ${err.relPath}: ${err.message}`);

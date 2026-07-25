@@ -28,8 +28,20 @@ export function getDocumentCapabilities(input: {
   sourceExt: string;
   sourceMime: string;
   contentAvailable: boolean;
+  recordKey?: string | null;
 }): DocumentCapabilities {
   const ext = input.sourceExt.toLowerCase();
+  if (input.recordKey) {
+    return {
+      editable: false,
+      tagsEditable: true,
+      tagsWriteback: false,
+      canCreateEditableCopy: input.contentAvailable,
+      mode: "read_only",
+      reason:
+        "This document is a logical record derived from a file/export container and cannot be written back in place.",
+    };
+  }
   const editable =
     EDITABLE_EXTENSIONS.has(ext) || isTextLikeMime(input.sourceMime);
   const tagsWriteback = ext === ".md" || ext === ".markdown" || ext === ".mdx";

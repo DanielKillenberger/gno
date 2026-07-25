@@ -3,12 +3,18 @@
  * PRD §8.6 - Converter registry
  */
 
-import type { Converter, ConvertInput, ConvertResult } from "./types";
+import type {
+  Converter,
+  ConvertInput,
+  ConvertResult,
+  RecordAdapter,
+} from "./types";
 
 import { unsupportedError } from "./errors";
 
 export class ConverterRegistry {
   private readonly converters: Converter[] = [];
+  private readonly recordAdapters: RecordAdapter[] = [];
 
   /**
    * Register a converter. Order matters - first match wins.
@@ -32,6 +38,25 @@ export class ConverterRegistry {
    */
   listConverters(): string[] {
     return this.converters.map((c) => c.id);
+  }
+
+  /** Register a streaming container adapter without changing converter routing. */
+  registerRecordAdapter(adapter: RecordAdapter): void {
+    this.recordAdapters.push(adapter);
+  }
+
+  /** Select the first streaming adapter that handles a MIME/extension pair. */
+  selectRecordAdapter(mime: string, ext: string): RecordAdapter | undefined {
+    const normalizedMime = mime.toLowerCase();
+    const normalizedExt = ext.toLowerCase();
+    return this.recordAdapters.find((adapter) =>
+      adapter.canHandle(normalizedMime, normalizedExt)
+    );
+  }
+
+  /** List streaming adapters independently of byte-oriented converters. */
+  listRecordAdapters(): string[] {
+    return this.recordAdapters.map((adapter) => adapter.id);
   }
 
   /**
@@ -63,12 +88,23 @@ export async function createDefaultRegistry(): Promise<ConverterRegistry> {
   const { markitdownAdapter } = await import("./adapters/markitdownTs/adapter");
   const { officeparserAdapter } =
     await import("./adapters/officeparser/adapter");
+  const { jsonlAdapter } = await import("./adapters/jsonl/adapter");
+  const { transcriptAdapter } = await import("./adapters/transcript/adapter");
+  const { emailRecordAdapter } = await import("./adapters/email/adapter");
+  const { icalAdapter } = await import("./adapters/ical/adapter");
+  const { browserExportAdapter } =
+    await import("./adapters/browser-export/adapter");
 
   // Register in priority order
   registry.register(markdownConverter);
   registry.register(plaintextConverter);
   registry.register(markitdownAdapter);
   registry.register(officeparserAdapter);
+  registry.registerRecordAdapter(jsonlAdapter);
+  registry.registerRecordAdapter(transcriptAdapter);
+  registry.registerRecordAdapter(emailRecordAdapter);
+  registry.registerRecordAdapter(icalAdapter);
+  registry.registerRecordAdapter(browserExportAdapter);
 
   return registry;
 }

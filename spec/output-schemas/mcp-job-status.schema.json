@@ -74,6 +74,34 @@
               }
             }
           }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fileSyncResult"
+          }
+        }
+      }
+    },
+    "fileSyncResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relPath", "status"],
+      "properties": {
+        "relPath": { "type": "string" },
+        "status": {
+          "enum": ["added", "updated", "unchanged", "error", "skipped"]
+        },
+        "docid": { "type": "string" },
+        "mirrorHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "contentType": { "type": "string" },
+        "contentTypeSource": {
+          "enum": ["frontmatter-type", "prefix", "path-ext", "fallback"]
+        },
+        "errorCode": { "type": "string" },
+        "errorMessage": { "type": "string" },
+        "recordImport": {
+          "$ref": "gno://schemas/record-import@1.0"
         }
       }
     },

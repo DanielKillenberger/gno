@@ -21,6 +21,7 @@ import type { SkippedEntry, WalkConfig, WalkEntry, WalkerPort } from "./types";
 
 import { SUPPORTED_EXTENSIONS } from "../converters/mime";
 import { matchesCollectionExclusion } from "../core/path-rules";
+import { isRecordVirtualPath } from "./record-path";
 
 /**
  * Regex to detect dangerous patterns with parent directory traversal.
@@ -124,7 +125,7 @@ function scanPatterns(pattern: string): string[] {
 async function safeRelPath(
   rootReal: string,
   absPath: string
-): Promise<string | null> {
+): Promise<{ absPath: string; relPath: string } | null> {
   try {
     const fileReal = await realpath(absPath);
     const rel = relative(rootReal, fileReal);
@@ -135,7 +136,7 @@ async function safeRelPath(
       return null;
     }
 
-    return toPosixPath(rel);
+    return { absPath: fileReal, relPath: toPosixPath(rel) };
   } catch {
     // Can't resolve path (e.g., broken symlink)
     return null;
@@ -145,18 +146,25 @@ async function safeRelPath(
 /**
  * Check if a file extension matches the include list.
  * Include list contains extensions like ".md" or "md" (normalized).
- * When include is empty, falls back to SUPPORTED_EXTENSIONS to avoid
- * walking files that can't be converted.
+ * When include is empty, falls back to SUPPORTED_EXTENSIONS plus extensions
+ * made convertible by explicit adapter configuration.
  */
-function matchesInclude(relPath: string, include: string[]): boolean {
+function matchesInclude(
+  relPath: string,
+  include: string[],
+  additionalDefaultExtensions: string[]
+): boolean {
   const ext = extname(relPath).toLowerCase();
   if (!ext) {
     return false;
   }
 
-  // Fallback to supported extensions when no explicit include list
+  if (include.length === 0 && SUPPORTED_EXTENSIONS.includes(ext)) {
+    return true;
+  }
+
   const effectiveInclude =
-    include.length === 0 ? SUPPORTED_EXTENSIONS : include;
+    include.length === 0 ? additionalDefaultExtensions : include;
 
   return effectiveInclude.some((inc) => {
     const normalizedInc = inc.startsWith(".")
@@ -211,11 +219,17 @@ export class FileWalker implements WalkerPort {
       }
     }
 
-    for (const absPath of [...matches].sort()) {
+    for (const matchedPath of [...matches].sort()) {
       // Security: Compute safe relative path (validates file is within root)
-      const relPath = await safeRelPath(rootReal, absPath);
-      if (relPath === null) {
+      const safePath = await safeRelPath(rootReal, matchedPath);
+      if (safePath === null) {
         // File outside root or unresolvable - silently skip (security)
+        continue;
+      }
+      const { absPath, relPath } = safePath;
+
+      if (isRecordVirtualPath(relPath)) {
+        skipped.push({ absPath, relPath, reason: "EXCLUDED" });
         continue;
       }
 
@@ -230,7 +244,13 @@ export class FileWalker implements WalkerPort {
       }
 
       // Check include extensions
-      if (!matchesInclude(relPath, config.include)) {
+      if (
+        !matchesInclude(
+          relPath,
+          config.include,
+          config.additionalDefaultExtensions ?? []
+        )
+      ) {
         skipped.push({
           absPath,
           relPath,

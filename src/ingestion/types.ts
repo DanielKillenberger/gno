@@ -7,6 +7,10 @@
 
 import type { NormalizedContentTypeRule } from "../config";
 import type { Collection } from "../config/types";
+import type {
+  RecordAdapterFailure,
+  RecordAttachmentInventoryItem,
+} from "../converters/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Walker Types
@@ -32,8 +36,10 @@ export interface WalkConfig {
   root: string;
   /** Glob pattern (default: **\/*) */
   pattern: string;
-  /** Extension allowlist (empty = all) */
+  /** Extension allowlist (empty = supported defaults) */
   include: string[];
+  /** Adapter-configured extensions added only to the supported defaults. */
+  additionalDefaultExtensions?: string[];
   /** Paths/patterns to exclude */
   exclude: string[];
   /** Max file size in bytes (files larger are skipped) */
@@ -147,6 +153,34 @@ export type ContentTypeSource =
   | "path-ext"
   | "fallback";
 
+/** Maximum per-record actions retained in one sync receipt. */
+export const MAX_RECORD_IMPORT_RECEIPT_ITEMS = 1_000;
+
+export type RecordImportOutcome =
+  | "added"
+  | "updated"
+  | "reactivated"
+  | "unchanged"
+  | "deactivated"
+  | "preserved";
+
+/** Bounded, privacy-safe identity and provenance for one reconciled record. */
+export interface RecordImportItemReceipt {
+  outcome: RecordImportOutcome;
+  recordKey: string;
+  sourceLocator: string;
+  sourceHash: string;
+  mirrorHash?: string;
+  adapterFingerprint: string;
+  attachments: RecordAttachmentInventoryItem[];
+}
+
+export interface RecordImportWarning {
+  code: "PARTIAL_SNAPSHOT";
+  message: string;
+  retryable: boolean;
+}
+
 /** Per-file sync status */
 export type FileSyncStatus =
   | "added"
@@ -165,6 +199,29 @@ export interface FileSyncResult {
   contentTypeSource?: ContentTypeSource;
   errorCode?: string;
   errorMessage?: string;
+  recordImport?: {
+    adapterId: string;
+    adapterVersion: string;
+    adapterFingerprint: string;
+    snapshotState: "complete" | "partial";
+    authoritative: boolean;
+    stoppedByCap: boolean;
+    sourceBytesRead: number;
+    records: {
+      accepted: number;
+      added: number;
+      updated: number;
+      reactivated: number;
+      unchanged: number;
+      deactivated: number;
+      preserved: number;
+      failed: number;
+    };
+    items: RecordImportItemReceipt[];
+    itemsTruncated: number;
+    warnings: RecordImportWarning[];
+    failures: RecordAdapterFailure[];
+  };
 }
 
 /** Collection sync summary */
@@ -221,6 +278,13 @@ export interface LanguageDetectorPort {
 // Helper to create WalkConfig from Collection
 // ─────────────────────────────────────────────────────────────────────────────
 
+const TRANSCRIPT_EXTENSION_BY_FORMAT = {
+  json: ".json",
+  srt: ".srt",
+  text: ".txt",
+  vtt: ".vtt",
+} as const;
+
 /**
  * Create WalkConfig from Collection with maxBytes override.
  */
@@ -228,10 +292,14 @@ export function collectionToWalkConfig(
   collection: Collection,
   maxBytes: number
 ): WalkConfig {
+  const transcriptFormat = collection.recordAdapters?.transcript?.format;
   return {
     root: collection.path,
     pattern: collection.pattern,
     include: collection.include,
+    additionalDefaultExtensions: transcriptFormat
+      ? [TRANSCRIPT_EXTENSION_BY_FORMAT[transcriptFormat]]
+      : [],
     exclude: collection.exclude,
     maxBytes,
   };

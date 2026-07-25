@@ -68,7 +68,7 @@ describe("SqliteAdapter", () => {
       expect(result.value.applied).toContain(2);
       expect(result.value.applied).toContain(3);
       expect(result.value.applied).toContain(4);
-      expect(result.value.currentVersion).toBe(21);
+      expect(result.value.currentVersion).toBe(22);
       expect(result.value.ftsTokenizer).toBe("unicode61");
     });
 
@@ -86,7 +86,7 @@ describe("SqliteAdapter", () => {
       }
 
       expect(result.value.applied).toHaveLength(0);
-      expect(result.value.currentVersion).toBe(21);
+      expect(result.value.currentVersion).toBe(22);
     });
 
     test("rejects tokenizer mismatch", async () => {
@@ -727,6 +727,40 @@ describe("SqliteAdapter", () => {
       expect(result.value[0]?.collection).toBe("notes");
     });
 
+    test("lists logical records by source container", async () => {
+      await adapter.upsertDocument({
+        collection: "notes",
+        relPath: ".gno/records/export.jsonl/one.md",
+        sourceHash: "record_one_hash",
+        sourceMime: "application/jsonl",
+        sourceExt: ".jsonl",
+        sourceSize: 100,
+        sourceMtime: "2024-01-01T00:00:00Z",
+        recordKey: "one",
+        recordSourcePath: "export.jsonl",
+      });
+      await adapter.upsertDocument({
+        collection: "notes",
+        relPath: ".gno/records/other.jsonl/two.md",
+        sourceHash: "record_two_hash",
+        sourceMime: "application/jsonl",
+        sourceExt: ".jsonl",
+        sourceSize: 100,
+        sourceMtime: "2024-01-01T00:00:00Z",
+        recordKey: "two",
+        recordSourcePath: "other.jsonl",
+      });
+
+      const result = await adapter.listRecordDocuments("notes", "export.jsonl");
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        return;
+      }
+      expect(result.value.map((document) => document.recordKey)).toEqual([
+        "one",
+      ]);
+    });
+
     test("gets documents by mirror hashes with active-only default", async () => {
       const makeDoc = (
         relPath: string,
@@ -1356,7 +1390,7 @@ describe("SqliteAdapter", () => {
         return;
       }
 
-      expect(result.value.version).toBe("21");
+      expect(result.value.version).toBe("22");
       expect(result.value.ftsTokenizer).toBe("unicode61");
       expect(result.value.dbPath).toBe(dbPath);
       expect(result.value.totalDocuments).toBe(1);

@@ -264,6 +264,7 @@ describe("FileWalker", () => {
         root: FIXTURES_ROOT,
         pattern: "**/*",
         include: [".ts"], // Explicit: only .ts files
+        additionalDefaultExtensions: [".md"],
         exclude: [".git", "node_modules"],
         maxBytes: 10_000_000,
       });
@@ -322,6 +323,31 @@ describe("FileWalker", () => {
         return lastDot === -1 || lastDot < lastSlash;
       });
       expect(extensionlessEntries).toEqual([]);
+    });
+
+    test("always excludes the internal virtual-record namespace", async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-walker-record-path-"));
+      try {
+        await mkdir(join(root, ".gno", "records", "deadbeef"), {
+          recursive: true,
+        });
+        await Bun.write(
+          join(root, ".gno", "records", "deadbeef", "collision.md"),
+          "physical collision"
+        );
+        await Bun.write(join(root, "visible.md"), "visible");
+        const { entries } = await walker.walk({
+          root,
+          pattern: "**/*",
+          include: [".md"],
+          exclude: [],
+          maxBytes: 10_000,
+        });
+
+        expect(entries.map(({ relPath }) => relPath)).toEqual(["visible.md"]);
+      } finally {
+        await safeRm(root);
+      }
     });
   });
 });

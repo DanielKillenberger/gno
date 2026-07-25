@@ -88,6 +88,11 @@ export function applyProjectProfileDesiredState(
       : existing?.models
         ? { models: existing.models }
         : {}),
+    ...(desired.collection.recordAdapters
+      ? { recordAdapters: desired.collection.recordAdapters }
+      : existing?.recordAdapters
+        ? { recordAdapters: existing.recordAdapters }
+        : {}),
   };
   const collections = [...config.collections];
   if (existingIndex >= 0) collections[existingIndex] = nextCollection;

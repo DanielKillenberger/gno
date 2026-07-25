@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { safeRm } from "../test/helpers/cleanup";
 import { verifyPackedClipperPackage } from "./package-smoke-clipper";
 import { configurePackedEmbeddingModel } from "./package-smoke-config";
+import { verifyPackedExportAdapters } from "./package-smoke-exports";
 import { buildPackageSmokeProcessEnv } from "./package-smoke-isolation";
 import { verifyPackedMcpInstall } from "./package-smoke-mcp";
 import { resolvePackageSmokeEmbeddingModel } from "./package-smoke-model";
@@ -178,6 +179,9 @@ async function verifyTarballContents(
     "package/src/core/project-profile.ts",
     "package/src/core/project-profile-apply.ts",
     "package/src/core/project-profile-file.ts",
+    "package/src/ingestion/record-container.ts",
+    "package/src/ingestion/record-adapter.ts",
+    "package/src/store/migrations/022-record-export-lineage.ts",
     "package/src/config/project-profile.ts",
     "package/src/cli/commands/profile.ts",
     "package/src/cli/commands/profile-apply.ts",
@@ -441,6 +445,14 @@ async function main(): Promise<void> {
       gnoBin,
       cwd: tempRoot,
       env,
+      runCommand,
+    });
+    await verifyPackedExportAdapters({
+      gnoBin,
+      cwd: tempRoot,
+      env,
+      configDir: explicitEnv.GNO_CONFIG_DIR,
+      tempRoot,
       runCommand,
     });
     const embeddingModelPath = await resolvePackageSmokeEmbeddingModel();

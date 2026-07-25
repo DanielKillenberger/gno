@@ -1509,6 +1509,7 @@ function wireOnboardingCommands(program: Command): void {
     .option("--no-embed", "skip embedding after sync")
     .option("--git-pull", "run git pull in git repositories")
     .option("--models-pull", "download models if missing")
+    .option("--json", "JSON output")
     .action(
       async (
         collection: string | undefined,
@@ -1525,6 +1526,7 @@ function wireOnboardingCommands(program: Command): void {
           modelsPull: Boolean(cmdOpts.modelsPull),
           yes: globals.yes,
           verbose: globals.verbose,
+          json: getFormat(cmdOpts) === "json",
         };
         const result = await index(opts);
 
@@ -2515,6 +2517,7 @@ function wireManagementCommands(program: Command): void {
     .command("update")
     .description("Sync files from disk into the index")
     .option("--git-pull", "run git pull in git repositories")
+    .option("--json", "JSON output")
     .action(async (cmdOpts: Record<string, unknown>) => {
       const globals = getGlobals();
       const { update, formatUpdate } = await import("./commands/update");
@@ -2523,6 +2526,7 @@ function wireManagementCommands(program: Command): void {
         indexName: globals.index,
         gitPull: Boolean(cmdOpts.gitPull),
         verbose: globals.verbose,
+        json: getFormat(cmdOpts) === "json",
       };
       const result = await update(opts);
 

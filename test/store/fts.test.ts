@@ -49,6 +49,7 @@ describe("FTS search", () => {
       contentType?: string;
       categories?: string[];
       author?: string;
+      recordSourcePath?: string;
     }
   ) {
     const sourceHash = `hash_${relPath.replace(/\W/g, "")}`;
@@ -67,6 +68,7 @@ describe("FTS search", () => {
       contentType: metadata?.contentType,
       categories: metadata?.categories,
       author: metadata?.author,
+      recordSourcePath: metadata?.recordSourcePath,
     });
 
     await adapter.upsertContent(mirrorHash, markdown);
@@ -487,5 +489,42 @@ describe("FTS search", () => {
     }
     expect(result.value).toHaveLength(1);
     expect(result.value[0]?.relPath).toBe("gordon.md");
+  });
+
+  test("filters logical records by their source path instead of virtual identity path", async () => {
+    await setupDocument(
+      ".gno/records/jsonl/decision.md",
+      "Decision export contains the retrieval contract",
+      [
+        {
+          seq: 0,
+          pos: 0,
+          text: "Decision export contains the retrieval contract",
+          startLine: 1,
+          endLine: 1,
+        },
+      ],
+      { recordSourcePath: "exports/decisions.jsonl" }
+    );
+
+    const logicalScope = await adapter.searchFts("retrieval", {
+      relPathPrefix: "exports",
+    });
+    expect(logicalScope.ok).toBe(true);
+    if (!logicalScope.ok) return;
+    expect(logicalScope.value).toHaveLength(1);
+    expect(logicalScope.value[0]?.relPath).toBe(
+      ".gno/records/jsonl/decision.md"
+    );
+    expect(logicalScope.value[0]?.recordSourcePath).toBe(
+      "exports/decisions.jsonl"
+    );
+
+    const virtualScope = await adapter.searchFts("retrieval", {
+      relPathPrefix: ".gno/records",
+    });
+    expect(virtualScope.ok).toBe(true);
+    if (!virtualScope.ok) return;
+    expect(virtualScope.value).toEqual([]);
   });
 });

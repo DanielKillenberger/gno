@@ -192,7 +192,32 @@ gno get gno://work/report.md --json
 gno multi-get gno://work/doc1.md gno://work/doc2.md
 ```
 
-**Editable vs read-only**: `gno get --json` returns a `capabilities` field showing whether a document is editable at its source. Markdown and plain text files are editable in place. Converted documents (PDF, DOCX, XLSX) are read-only -- to edit their content, create a new markdown note instead of overwriting the binary source.
+**Editable vs read-only**: `gno get --json` returns a `capabilities` field showing whether a document is editable at its source. Markdown and plain text files are editable in place. Converted documents (PDF, DOCX, XLSX) and logical records from JSONL, mail, calendar, transcript, or browser exports are read-only -- edit/regenerate the source export or create a new markdown note instead of overwriting GNO's virtual record.
+
+**Export records**: search/get JSON may include a `record` object containing an
+exact bounded source locator, people/dates, thread/event/session identity,
+attachment inventory, and cue/message/event anchors. `source.relPath` is the
+real export file; `record.adapter` identifies the exact adapter version and
+configuration fingerprint. Use the result's unique `uri` or `docid` with
+`gno get`. If update/index reports a partial export snapshot, valid siblings
+were indexed but unseen old records were intentionally preserved; regenerate
+the export and rerun the command.
+
+| Export source                | Activation                                              | Logical record                         | Important boundary                                                                                 |
+| ---------------------------- | ------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| JSONL/NDJSON                 | Automatic; optional `recordAdapters.jsonl.fieldMapping` | One object per line                    | Configure/map an ID for update-in-place identity; content-derived fallback edits become remove+add |
+| EML/MBOX                     | Automatic                                               | One message                            | MIME/body bounded; attachments inventoried, never opened or indexed                                |
+| ICS                          | Automatic                                               | One event/exception                    | Timezone normalized; recurrence anchors capped at 64                                               |
+| VTT/SRT                      | Automatic                                               | One cue/segment                        | Speaker and timestamp anchors retained                                                             |
+| Generic JSON/text transcript | Explicit `recordAdapters.transcript.format`             | One segment/record                     | Never guessed from generic JSON/text                                                               |
+| `.browser-export`            | Explicit export file                                    | One bookmark/history/reading-list item | Live profiles/databases/cookies rejected; URLs never fetched                                       |
+
+Shared defaults: 100 MiB/container, 2,000,000 canonical characters/record,
+100,000 metadata characters/record, 50,000,000 characters or 100,000
+records/snapshot, 1,000 retained failures, and a 60-second adapter deadline.
+Only complete authoritative snapshots tombstone disappeared records. No export
+adapter authenticates to a live account, fetches remote content, executes
+embedded content, or unpacks attachments/archives.
 
 ## Search Then Get (common pipeline)
 

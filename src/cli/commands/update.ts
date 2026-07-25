@@ -24,6 +24,8 @@ export interface UpdateOptions {
   gitPull?: boolean;
   /** Verbose output */
   verbose?: boolean;
+  /** Emit the complete structured sync receipt. */
+  json?: boolean;
 }
 
 /**
@@ -80,5 +82,8 @@ export function formatUpdate(
     return `Error: ${result.error}`;
   }
 
+  if (options.json) {
+    return JSON.stringify(result.result, null, 2);
+  }
   return formatSyncResultLines(result.result, options).join("\n");
 }

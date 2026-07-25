@@ -6,6 +6,7 @@
  */
 
 import type { Collection, Context, FtsTokenizer } from "../config/types";
+import type { RecordAnchor, RecordMetadata } from "../converters/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Types
@@ -113,6 +114,12 @@ export interface DocumentRow {
   author?: string | null;
   frontmatterDate?: string | null;
   dateFields?: Record<string, string> | null;
+  recordKey?: string | null;
+  recordSourcePath?: string | null;
+  recordSourceLocator?: string | null;
+  recordMetadata?: RecordMetadata | null;
+  recordAnchors?: RecordAnchor[] | null;
+  recordAdapterFingerprint?: string | null;
   indexedAt?: string | null;
 
   // Status
@@ -130,6 +137,16 @@ export interface DocumentRow {
   // Timestamps
   createdAt: string;
   updatedAt: string;
+}
+
+/** Minimal persisted record identity used by export snapshot reconciliation. */
+export interface StoredRecordState {
+  recordKey: string;
+  sourceHash: string;
+  adapterVersion: string;
+  adapterFingerprint: string;
+  active: boolean;
+  relativePath: string;
 }
 
 /** Chunk row from DB */
@@ -300,6 +317,12 @@ export interface DocumentInput {
   author?: string;
   frontmatterDate?: string;
   dateFields?: Record<string, string>;
+  recordKey?: string;
+  recordSourcePath?: string;
+  recordSourceLocator?: string;
+  recordMetadata?: RecordMetadata;
+  recordAnchors?: RecordAnchor[];
+  recordAdapterFingerprint?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
   /** Ingest schema version for backfill detection */
@@ -571,6 +594,14 @@ export interface FtsResult {
   contentType?: string;
   contentTypeSource?: string;
   categories?: string[];
+  converterId?: string;
+  converterVersion?: string;
+  recordKey?: string;
+  recordSourcePath?: string;
+  recordSourceLocator?: string;
+  recordMetadata?: RecordMetadata;
+  recordAnchors?: RecordAnchor[];
+  recordAdapterFingerprint?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1447,6 +1478,15 @@ export interface StorePort {
    * List all documents, optionally filtered by collection.
    */
   listDocuments(collection?: string): Promise<StoreResult<DocumentRow[]>>;
+
+  /**
+   * List logical record documents produced from one source container.
+   * Uses the record-source index so targeted syncs do not scan a collection.
+   */
+  listRecordDocuments(
+    collection: string,
+    sourcePath: string
+  ): Promise<StoreResult<DocumentRow[]>>;
 
   /**
    * Fetch documents by mirror hashes in batch.

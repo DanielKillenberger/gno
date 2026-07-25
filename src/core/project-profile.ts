@@ -77,6 +77,7 @@ export interface ProjectProfileDesiredState {
     exclude: string[];
     languageHint?: string;
     modelPreset?: string;
+    recordAdapters?: Config["collections"][number]["recordAdapters"];
   };
   contexts: ProjectProfileContextState[];
   contentTypes: Array<{
@@ -455,6 +456,9 @@ export async function compileProjectProfileYaml(
         : {}),
       ...(profile.collection.modelPreset
         ? { modelPreset: profile.collection.modelPreset }
+        : {}),
+      ...(profile.collection.recordAdapters
+        ? { recordAdapters: profile.collection.recordAdapters }
         : {}),
     },
     contexts: contexts.sort((left, right) =>

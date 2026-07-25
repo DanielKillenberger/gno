@@ -35,9 +35,8 @@ Deliver add the streaming multi-record ingestion adapter contract as one impleme
 
 
 ## Done summary
-TBD
-
+Added a separate streaming record-adapter lane with bounded source/record/metadata/failure caps, deterministic domain-separated identity and canonical hashes, isolated failures, authoritative snapshot semantics, and pure update/reactivate/deactivate reconciliation. Legacy one-file converter routing remains byte-compatible. Adversarial review found no remaining P1/P2 issues.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7d15348e
+- Tests: bun run lint:check, bun test test/converters test/ingestion (286 pass), task review SHIP
 - PRs:

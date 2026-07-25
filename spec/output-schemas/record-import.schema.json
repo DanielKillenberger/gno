@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "gno://schemas/record-import@1.0",
+  "title": "GNO Record Import Receipt",
+  "description": "Bounded reconciliation receipt for one multi-record export container.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "adapterId",
+    "adapterVersion",
+    "adapterFingerprint",
+    "snapshotState",
+    "authoritative",
+    "stoppedByCap",
+    "sourceBytesRead",
+    "records",
+    "items",
+    "itemsTruncated",
+    "warnings",
+    "failures"
+  ],
+  "properties": {
+    "adapterId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "adapterVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "adapterFingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "snapshotState": { "enum": ["complete", "partial"] },
+    "authoritative": { "type": "boolean" },
+    "stoppedByCap": { "type": "boolean" },
+    "sourceBytesRead": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "records": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "added",
+        "updated",
+        "reactivated",
+        "unchanged",
+        "deactivated",
+        "preserved",
+        "failed"
+      ],
+      "properties": {
+        "accepted": { "type": "integer", "minimum": 0 },
+        "added": { "type": "integer", "minimum": 0 },
+        "updated": { "type": "integer", "minimum": 0 },
+        "reactivated": { "type": "integer", "minimum": 0 },
+        "unchanged": { "type": "integer", "minimum": 0 },
+        "deactivated": { "type": "integer", "minimum": 0 },
+        "preserved": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "itemsTruncated": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/warning" }
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/failure" }
+    }
+  },
+  "$defs": {
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "mime": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "disposition": { "enum": ["inline", "attachment"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "recordKey",
+        "sourceLocator",
+        "sourceHash",
+        "adapterFingerprint",
+        "attachments"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "added",
+            "updated",
+            "reactivated",
+            "unchanged",
+            "deactivated",
+            "preserved"
+          ]
+        },
+        "recordKey": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceLocator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "sourceHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mirrorHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "adapterFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/attachment" }
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "const": "PARTIAL_SNAPSHOT" },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "MALFORMED_RECORD",
+            "MISSING_ID",
+            "DUPLICATE_ID",
+            "RECORD_TOO_LARGE",
+            "SOURCE_TOO_LARGE",
+            "TIMEOUT",
+            "RECORD_LIMIT",
+            "FAILURE_LIMIT",
+            "INVALID_LOCATOR",
+            "INVALID_SOURCE_HASH",
+            "ADAPTER_FAILURE",
+            "INVALID_SNAPSHOT"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "retryable": { "type": "boolean" },
+        "stableId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "sourceLocator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

@@ -734,16 +734,33 @@ Sync files from disk into the index (BM25/FTS only, no embeddings). Incremental 
 ```bash
 gno update
 gno update --git-pull       # Pull git repos first
+gno update --json           # Complete deterministic sync receipt
 ```
 
 Options:
 
 - `--git-pull` - Run `git pull` in git repositories
+- `--json` - Emit the complete sync result on stdout
 
 Use `gno update` when you only need keyword search, or when you want to quickly sync changes and run `gno embed` separately.
 
 Password-protected PDFs and XLSX files are recorded as per-file `PERMISSION`
 errors and skipped without aborting the rest of the run.
+
+Portable JSONL, EML/MBOX, ICS, WebVTT/SRT, and explicit browser-export files
+are streamed into independently searchable logical records. A malformed partial
+snapshot preserves unseen records; only a complete snapshot can deactivate a
+record removed from the export. Partial imports remain successful when valid
+siblings were indexed, but terminal output always reports their warning count;
+`--verbose` adds stable codes, source locators, retryability, and redacted
+messages. See [File and Export Adapters](guides/file-export-adapters.md).
+
+With `--json`, each `collections[].files[]` entry may contain a closed
+`record-import@1.0` receipt: adapter identity and fingerprint, snapshot state,
+per-action record identity/provenance/attachment inventory, partial-snapshot
+warnings, bounded failures, and `itemsTruncated` when more than 1,000 actions
+were reconciled. Receipt ordering is deterministic; progress and diagnostics
+remain on stderr.
 
 ### gno index
 
@@ -754,6 +771,7 @@ gno index                   # Index all collections
 gno index notes             # Index specific collection
 gno index --no-embed        # Skip embedding (same as gno update)
 gno index --git-pull        # Pull git repos first
+gno index --json            # Sync receipt plus embedding outcome
 ```
 
 Options:
@@ -762,6 +780,9 @@ Options:
 - `--no-embed` - Skip embedding phase
 - `--models-pull` - Download models if missing
 - `--git-pull` - Run `git pull` in git repositories
+- `--json` - Emit `{ syncResult, embedSkipped, embedResult? }` on stdout;
+  logical-record receipts live at
+  `syncResult.collections[].files[].recordImport`
 
 **Incremental**: Both `gno index` and `gno update` are incremental. Files are tracked by SHA-256 hash. Only new or modified files are processed. Unchanged files are skipped instantly.
 

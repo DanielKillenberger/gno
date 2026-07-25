@@ -248,6 +248,12 @@ describe("applyProjectProfile", () => {
       "local",
       "people",
     ]);
+    const notes = saved.collections.find(
+      (collection) => collection.name === "notes"
+    );
+    if (!notes) throw new Error("profile collection missing");
+    notes.recordAdapters = { transcript: { format: "text" } };
+    await saveConfigToPath(saved, fixture.configPath);
 
     const reduced = await applyProjectProfile({
       profileYaml:
@@ -267,6 +273,10 @@ describe("applyProjectProfile", () => {
     ]);
     expect(afterRemoval.contexts).toEqual(saved.contexts);
     expect(afterRemoval.contentTypes).toEqual(saved.contentTypes);
+    expect(
+      afterRemoval.collections.find((collection) => collection.name === "notes")
+        ?.recordAdapters
+    ).toEqual({ transcript: { format: "text" } });
     expect(afterRemoval.projectProfileBindings).toEqual([
       {
         path: fixture.profilePath,

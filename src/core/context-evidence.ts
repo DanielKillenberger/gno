@@ -21,6 +21,7 @@ import type {
   ContextRetrievalCandidate,
   ContextRetrievalRequest,
 } from "./context-compiler";
+import type { RecordEvidenceMetadata } from "./record-metadata";
 
 import { decorateUriForIndex, deriveDocid, parseUri } from "../app/constants";
 import { canonicalizeIndexName } from "../app/index-name";
@@ -35,6 +36,7 @@ import {
 } from "./context-capsule-validation";
 import { planContextEvidence } from "./context-compiler";
 import { projectContextEvidenceMetadata } from "./context-evidence-metadata";
+import { projectRecordEvidenceMetadata } from "./record-metadata";
 import {
   extractInclusiveLines,
   extractSections,
@@ -104,6 +106,7 @@ export interface ContextEvidenceValue {
   contextIds: string[];
   trust: "untrusted";
   egress: "unavailable";
+  record?: RecordEvidenceMetadata;
 }
 
 export type ContextEvidenceCompilerInput = Omit<
@@ -283,7 +286,7 @@ const referenceDocument = (
     !document.active ||
     !document.mirrorHash ||
     parsedUri?.collection !== document.collection ||
-    result.source.relPath !== document.relPath ||
+    result.source.relPath !== (document.recordSourcePath ?? document.relPath) ||
     sourceHash !== document.sourceHash ||
     mirrorHash !== document.mirrorHash ||
     deriveDocid(document.sourceHash) !== document.docid
@@ -416,6 +419,9 @@ export const materializeContextEvidenceCandidates = async (
           contextIds: [...candidate.contextIds],
           trust: "untrusted",
           egress: "unavailable",
+          ...(projectRecordEvidenceMetadata(document)
+            ? { record: projectRecordEvidenceMetadata(document) }
+            : {}),
         },
       },
     };

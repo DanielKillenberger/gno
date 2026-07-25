@@ -34,6 +34,7 @@ async function loadAllSchemas(): Promise<void> {
     "mcp-capture-result",
     "mcp-add-collection-result",
     "mcp-sync-result",
+    "record-import",
     "mcp-remove-result",
     "mcp-job-status",
     "mcp-job-list",

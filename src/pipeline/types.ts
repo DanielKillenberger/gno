@@ -10,6 +10,7 @@ import type {
   ContextCapsuleV1,
   ContextCapsuleVerification,
 } from "../core/context-capsule";
+import type { RecordEvidenceMetadata } from "../core/record-metadata";
 import type { RetrievalTraceSession } from "../core/retrieval-trace-session";
 import type { StoreResult } from "../store/types";
 import type { ClaimVerificationResult } from "./claim-verification";
@@ -86,6 +87,8 @@ export interface SearchResult {
   context?: string;
   source: SearchResultSource;
   conversion?: SearchResultConversion;
+  /** Bounded logical-record provenance for file/export adapters. */
+  record?: RecordEvidenceMetadata;
   [SEARCH_RESULT_PLANNER_METADATA]?: SearchResultPlannerMetadata;
 }
 

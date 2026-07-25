@@ -54,7 +54,7 @@ describe("store migrations", () => {
 
       const upgradeResult = runMigrations(db, migrations, "unicode61");
       expect(upgradeResult.ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
 
       const indexedRow = db
         .query<{ indexed_at: string | null }, []>(
@@ -121,7 +121,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
       db.run(
         `INSERT INTO contexts (scope_type, scope_key, text)
          VALUES ('collection', 'notes:', 'Additional guidance')`
@@ -149,7 +149,7 @@ describe("store migrations", () => {
 
     try {
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
 
       const savedTables = db
         .query<{ name: string }, []>(
@@ -298,7 +298,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
       expect(
         db
           .query<{ retained_entries: number; retained_bytes: number }, []>(
@@ -333,7 +333,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
       expect(
         db
           .query<
@@ -392,7 +392,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
       expect(
         db
           .query<
@@ -484,7 +484,7 @@ describe("store migrations", () => {
 
       const upgraded = runMigrations(db, migrations, "unicode61");
       expect(upgraded.ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(21);
+      expect(getSchemaVersion(db)).toBe(22);
       const rows = db
         .query<{ rel_path: string; fts_mirror_hash: string | null }, []>(
           "SELECT rel_path, fts_mirror_hash FROM documents ORDER BY rel_path"

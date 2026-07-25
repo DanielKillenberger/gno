@@ -71,8 +71,8 @@ describe("browser clipper security store", () => {
       expect(getSchemaVersion(upgradeDb)).toBe(19);
       const result = runMigrations(upgradeDb, migrations, "unicode61");
       expect(result.ok).toBeTrue();
-      if (result.ok) expect(result.value.applied).toEqual([20, 21]);
-      expect(getSchemaVersion(upgradeDb)).toBe(21);
+      if (result.ok) expect(result.value.applied).toEqual([20, 21, 22]);
+      expect(getSchemaVersion(upgradeDb)).toBe(22);
       expect(
         upgradeDb
           .query<{ name: string }, []>(

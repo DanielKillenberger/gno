@@ -15,7 +15,7 @@ export interface BrowseTreeNode {
 type BrowseCollectionLike = Pick<CollectionRow, "name">;
 type BrowseDocumentLike = Pick<
   DocumentRow,
-  "collection" | "relPath" | "active"
+  "collection" | "relPath" | "recordSourcePath" | "active"
 >;
 type BrowseFolderLike = {
   collection: string;
@@ -128,7 +128,9 @@ export function buildBrowseTree(
 
     root.documentCount += 1;
 
-    const normalizedRelPath = normalizeBrowsePath(doc.relPath);
+    const normalizedRelPath = normalizeBrowsePath(
+      doc.recordSourcePath ?? doc.relPath
+    );
     const parts = normalizedRelPath.split("/").filter(Boolean);
     const folderParts = parts.slice(0, -1);
 

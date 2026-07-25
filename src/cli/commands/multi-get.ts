@@ -17,6 +17,10 @@ import {
   indexNamesMatch,
   isValidIndexName,
 } from "../../app/index-name";
+import {
+  projectRecordEvidenceMetadata,
+  type RecordEvidenceMetadata,
+} from "../../core/record-metadata";
 import { isGlobPattern, parseRef, splitRefs } from "./ref-parser";
 import { initStore } from "./shared";
 
@@ -53,6 +57,7 @@ export interface MultiGetDocument {
   truncated?: boolean;
   totalLines?: number;
   source: { absPath?: string; relPath: string; mime: string; ext: string };
+  record?: RecordEvidenceMetadata;
 }
 
 export interface SkippedDoc {
@@ -230,6 +235,7 @@ async function fetchSingleDocument(
   );
   const coll = ctx.config.collections.find((c) => c.name === doc.collection);
 
+  const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
   ctx.documents.push({
     docid: doc.docid,
     uri: decorateUriForIndex(doc.uri, ctx.indexName),
@@ -238,11 +244,12 @@ async function fetchSingleDocument(
     truncated: truncated || undefined,
     totalLines: content.split("\n").length,
     source: {
-      absPath: coll ? `${coll.path}/${doc.relPath}` : undefined,
-      relPath: doc.relPath,
+      absPath: coll ? `${coll.path}/${sourceRelPath}` : undefined,
+      relPath: sourceRelPath,
       mime: doc.sourceMime,
       ext: doc.sourceExt,
     },
+    record: projectRecordEvidenceMetadata(doc),
   });
 }
 

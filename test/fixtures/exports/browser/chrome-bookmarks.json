@@ -1,0 +1,16 @@
+{
+  "roots": {
+    "bookmark_bar": {
+      "name": "Bookmarks bar",
+      "children": [
+        {
+          "type": "url",
+          "id": "42",
+          "name": "GNO docs",
+          "url": "https://gno.sh/docs#install",
+          "date_added": "13380000000000000"
+        }
+      ]
+    }
+  }
+}

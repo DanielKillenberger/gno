@@ -1,0 +1,36 @@
+From alice@example.com Tue Jul 21 14:30:00 2026
+From: Alice <alice@example.com>
+To: Bob <bob@example.com>
+Date: Tue, 21 Jul 2026 14:30:00 +0200
+Message-ID: <duplicate@example.com>
+Subject: First occurrence
+Content-Type: text/plain; charset=iso-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+Gr=FC=DFe aus Basel.
+From alice@example.com Tue Jul 21 14:31:00 2026
+From: Alice <alice@example.com>
+To: Bob <bob@example.com>
+Date: Tue, 21 Jul 2026 14:31:00 +0200
+Message-ID: <duplicate@example.com>
+Subject: Second occurrence
+Content-Type: text/plain; charset=utf-8
+
+The repeated Message-ID remains disclosed and deterministic.
+From nobody@example.com Tue Jul 21 14:32:00 2026
+From: Nobody <nobody@example.com>
+To: reader@example.com
+Date: Tue, 21 Jul 2026 14:32:00 +0200
+Subject: Missing identity
+Content-Type: text/plain; charset=utf-8
+
+This message uses a content-derived identity.
+From broken@example.com Tue Jul 21 14:33:00 2026
+From: Broken <broken@example.com>
+To: reader@example.com
+Message-ID: <broken@example.com>
+Subject: Broken body
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+%%% definitely not base64 %%%

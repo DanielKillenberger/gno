@@ -1,0 +1,22 @@
+{
+  "sessionId": "session-42",
+  "title": "Agent retrieval review",
+  "recordedAt": "2026-07-24T09:00:00Z",
+  "participants": ["Ada", "Lin"],
+  "segments": [
+    {
+      "id": "segment-a",
+      "speaker": "Ada",
+      "start": 1.25,
+      "end": 2.5,
+      "text": "The evidence is complete."
+    },
+    {
+      "id": "segment-b",
+      "speaker": "Lin",
+      "start": "00:00:03.000",
+      "end": "00:00:04.750",
+      "text": "Land the feature."
+    }
+  ]
+}

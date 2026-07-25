@@ -93,6 +93,7 @@ import {
   ProjectAffinityInputError,
   resolveRemoteProjectAffinity,
 } from "../../core/project-affinity-surface";
+import { projectRecordEvidenceMetadata } from "../../core/record-metadata";
 import {
   retrievalTraceFilters,
   startRetrievalTraceRequest,
@@ -607,6 +608,7 @@ function readRequestedUriFromUrl(req: Request): string | undefined {
 
 interface SourceMeta {
   absPath?: string;
+  relPath: string;
   mime: string;
   ext: string;
   modifiedAt?: string;
@@ -625,7 +627,11 @@ function getCollectionByName(
 
 async function resolveAbsoluteDocPath(
   collections: Config["collections"],
-  doc: { collection: string; relPath: string }
+  doc: {
+    collection: string;
+    relPath: string;
+    recordSourcePath?: string | null;
+  }
 ): Promise<{
   collection: Config["collections"][number];
   fullPath: string;
@@ -638,7 +644,7 @@ async function resolveAbsoluteDocPath(
   const nodePath = await import("node:path"); // no bun equivalent
   let safeRelPath: string;
   try {
-    safeRelPath = validateRelPath(doc.relPath);
+    safeRelPath = validateRelPath(doc.recordSourcePath ?? doc.relPath);
   } catch {
     return null;
   }
@@ -763,6 +769,7 @@ async function buildSourceMeta(
   doc: {
     collection: string;
     relPath: string;
+    recordSourcePath?: string | null;
     sourceMime: string;
     sourceExt: string;
     sourceMtime?: string | null;
@@ -770,9 +777,14 @@ async function buildSourceMeta(
     sourceHash?: string;
   }
 ): Promise<SourceMeta> {
-  const resolved = await resolveAbsoluteDocPath(collections, doc);
+  const relPath = doc.recordSourcePath ?? doc.relPath;
+  const resolved = await resolveAbsoluteDocPath(collections, {
+    collection: doc.collection,
+    relPath,
+  });
   return {
     absPath: resolved?.fullPath,
+    relPath,
     mime: doc.sourceMime,
     ext: doc.sourceExt,
     modifiedAt: doc.sourceMtime ?? undefined,
@@ -780,6 +792,20 @@ async function buildSourceMeta(
     sourceHash: doc.sourceHash,
   };
 }
+
+const capabilitiesForDocument = (
+  doc: Pick<
+    DocumentRow,
+    "sourceExt" | "sourceMime" | "mirrorHash" | "recordKey"
+  >,
+  contentAvailable = doc.mirrorHash !== null
+) =>
+  getDocumentCapabilities({
+    sourceExt: doc.sourceExt,
+    sourceMime: doc.sourceMime,
+    contentAvailable,
+    recordKey: doc.recordKey,
+  });
 
 async function resolveDocumentReference(
   store: Pick<SqliteAdapter, "getDocumentByDocid" | "getDocumentByUri">,
@@ -1613,7 +1639,7 @@ export async function handleDocs(
       uri: doc.uri,
       title: doc.title,
       collection: doc.collection,
-      relPath: doc.relPath,
+      relPath: doc.recordSourcePath ?? doc.relPath,
       sourceExt: doc.sourceExt,
       sourceMime: doc.sourceMime,
       updatedAt: doc.updatedAt,
@@ -1790,12 +1816,10 @@ export async function handleDoc(
   }
 
   const contentAvailable = content !== null;
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable,
-  });
+  const capabilities = capabilitiesForDocument(doc, contentAvailable);
   const source = await buildSourceMeta(config.collections, doc);
+  const record = projectRecordEvidenceMetadata(doc);
+  const relPath = doc.recordSourcePath ?? doc.relPath;
 
   const responseData = {
     docid: doc.docid,
@@ -1804,9 +1828,10 @@ export async function handleDoc(
     content,
     contentAvailable,
     collection: doc.collection,
-    relPath: doc.relPath,
+    relPath,
     tags,
     source,
+    record,
     capabilities,
   };
   const continuationTraceId = request
@@ -2079,6 +2104,15 @@ export async function handleRenameDoc(
   }
 
   const doc = docResult.value;
+  const capabilities = capabilitiesForDocument(doc);
+  if (!capabilities.editable) {
+    return errorResponse(
+      "READ_ONLY",
+      capabilities.reason ??
+        "This document cannot be renamed in place from GNO.",
+      409
+    );
+  }
   const resolvedDocPath = await resolveAbsoluteDocPath(
     ctxHolder.config.collections,
     doc
@@ -2094,20 +2128,6 @@ export async function handleRenameDoc(
   const file = Bun.file(fullPath);
   if (!(await file.exists())) {
     return errorResponse("FILE_NOT_FOUND", "Source file no longer exists", 404);
-  }
-
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable: doc.mirrorHash !== null,
-  });
-  if (!capabilities.editable) {
-    return errorResponse(
-      "READ_ONLY",
-      capabilities.reason ??
-        "This document cannot be renamed in place from GNO.",
-      409
-    );
   }
 
   const nodePath = await import("node:path"); // no bun equivalent
@@ -2206,11 +2226,7 @@ export async function handleRefactorPlan(
   }
 
   const doc = docResult.value;
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable: doc.mirrorHash !== null,
-  });
+  const capabilities = capabilitiesForDocument(doc);
   if (!capabilities.editable) {
     return errorResponse(
       "READ_ONLY",
@@ -2333,11 +2349,7 @@ export async function handleTrashDoc(
   }
   const { collection, fullPath } = resolvedDocPath;
 
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable: doc.mirrorHash !== null,
-  });
+  const capabilities = capabilitiesForDocument(doc);
   if (!capabilities.editable) {
     return errorResponse(
       "READ_ONLY",
@@ -2432,11 +2444,7 @@ export async function handleMoveDoc(
     return errorResponse("NOT_FOUND", "Document not found", 404);
   }
   const doc = docResult.value;
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable: doc.mirrorHash !== null,
-  });
+  const capabilities = capabilitiesForDocument(doc);
   if (!capabilities.editable) {
     return errorResponse(
       "READ_ONLY",
@@ -2563,11 +2571,7 @@ export async function handleDuplicateDoc(
     return errorResponse("NOT_FOUND", "Document not found", 404);
   }
   const doc = docResult.value;
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable: doc.mirrorHash !== null,
-  });
+  const capabilities = capabilitiesForDocument(doc);
   if (!capabilities.editable) {
     return errorResponse(
       "READ_ONLY",
@@ -2837,6 +2841,15 @@ export async function handleUpdateDoc(
   }
 
   const doc = docResult.value;
+  const capabilities = capabilitiesForDocument(doc);
+  if (hasContent && !capabilities.editable) {
+    return errorResponse(
+      "READ_ONLY",
+      capabilities.reason ??
+        "This document cannot be edited in place. Create an editable markdown copy instead.",
+      409
+    );
+  }
 
   const resolvedDocPath = await resolveAbsoluteDocPath(
     ctxHolder.config.collections,
@@ -2884,20 +2897,6 @@ export async function handleUpdateDoc(
         409
       );
     }
-  }
-
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable: doc.mirrorHash !== null,
-  });
-  if (hasContent && !capabilities.editable) {
-    return errorResponse(
-      "READ_ONLY",
-      capabilities.reason ??
-        "This document cannot be edited in place. Create an editable markdown copy instead.",
-      409
-    );
   }
 
   let writeBack: "applied" | "skipped_unsupported" | undefined;
@@ -3044,11 +3043,7 @@ export async function handleCreateEditableCopy(
 
   const doc = docResult.value;
   const contentAvailable = doc.mirrorHash !== null;
-  const capabilities = getDocumentCapabilities({
-    sourceExt: doc.sourceExt,
-    sourceMime: doc.sourceMime,
-    contentAvailable,
-  });
+  const capabilities = capabilitiesForDocument(doc, contentAvailable);
   if (capabilities.editable) {
     return errorResponse(
       "VALIDATION",
@@ -3094,12 +3089,15 @@ export async function handleCreateEditableCopy(
     const existingRelPaths = listResult.ok
       ? listResult.value.map((entry) => entry.relPath)
       : [];
-    relPath = deriveEditableCopyRelPath(doc.relPath, existingRelPaths);
+    relPath = deriveEditableCopyRelPath(
+      doc.recordSourcePath ?? doc.relPath,
+      existingRelPaths
+    );
   }
 
   const title =
     doc.title ??
-    doc.relPath
+    (doc.recordSourcePath ?? doc.relPath)
       .split("/")
       .pop()
       ?.replace(/\.[^.]+$/, "") ??

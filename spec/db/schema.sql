@@ -92,6 +92,12 @@ CREATE TABLE IF NOT EXISTS documents (
   converter_version TEXT,
   language_hint TEXT,               -- BCP-47 or NULL
   content_type_source TEXT,         -- frontmatter | rules | default | extension | null
+  record_key TEXT,                  -- opaque stable logical-record identity
+  record_source_path TEXT,          -- collection-relative export/container path
+  record_source_locator TEXT,       -- bounded exact record/cue/message/event locator
+  record_metadata TEXT,             -- bounded canonical JSON record metadata
+  record_anchors TEXT,              -- bounded canonical JSON exact anchors
+  record_adapter_fingerprint TEXT,  -- config-bound adapter identity for re-import invalidation
 
   -- Status
   active INTEGER NOT NULL DEFAULT 1,
@@ -116,6 +122,12 @@ CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
 CREATE INDEX IF NOT EXISTS idx_documents_mirror_hash ON documents(mirror_hash);
 CREATE INDEX IF NOT EXISTS idx_documents_docid ON documents(docid);
 CREATE INDEX IF NOT EXISTS idx_documents_uri ON documents(uri);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_record_key
+  ON documents(collection, record_source_path, record_key)
+  WHERE record_source_path IS NOT NULL AND record_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_record_source_path
+  ON documents(collection, record_source_path)
+  WHERE record_source_path IS NOT NULL;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Content (content-addressed markdown mirrors)

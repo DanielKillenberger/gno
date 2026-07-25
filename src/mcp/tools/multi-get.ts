@@ -11,6 +11,10 @@ import type { ToolContext } from "../server";
 
 import { decorateUriForIndex, parseUri } from "../../app/constants";
 import { resolveEffectiveIndex } from "../../core/indexed-reference";
+import {
+  projectRecordEvidenceMetadata,
+  type RecordEvidenceMetadata,
+} from "../../core/record-metadata";
 import { parseRef } from "../../core/ref-parser";
 import { openScopedIndexStore } from "../../store/sqlite/scoped-index";
 import { runTool, type ToolResult } from "./index";
@@ -37,6 +41,7 @@ interface DocumentResult {
     modifiedAt?: string;
     sizeBytes?: number;
   };
+  record?: RecordEvidenceMetadata;
 }
 
 interface MultiGetResponse {
@@ -234,13 +239,14 @@ export function handleMultiGet(
 
           // Build absPath
           const uriParsed = parseUri(doc.uri);
+          const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
           let absPath: string | undefined;
           if (uriParsed) {
             const collection = ctx.collections.find(
               (c) => c.name === uriParsed.collection
             );
             if (collection) {
-              absPath = pathJoin(collection.path, doc.relPath);
+              absPath = pathJoin(collection.path, sourceRelPath);
             }
           }
 
@@ -253,12 +259,13 @@ export function handleMultiGet(
             truncated,
             source: {
               absPath,
-              relPath: doc.relPath,
+              relPath: sourceRelPath,
               mime: doc.sourceMime,
               ext: doc.sourceExt,
               modifiedAt: doc.sourceMtime,
               sizeBytes: doc.sourceSize,
             },
+            record: projectRecordEvidenceMetadata(doc),
           });
         }
 

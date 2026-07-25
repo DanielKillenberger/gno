@@ -1024,6 +1024,12 @@ fields, alongside `tags`, `docid`, `uri`, scores, and source metadata. Use those
 fields when an agent needs to distinguish canonical typed pages from broader
 category filters.
 
+Portable export records additionally expose a bounded `record` object in
+structured search/get/multi-get/Ask results. Read its exact locator and anchors
+for citations and its adapter ID/version/configuration fingerprint for
+reproducibility; use the unique `uri` or `docid` for `gno_get`, not the shared
+container path in `source.relPath`.
+
 ### gno_vsearch
 
 Vector semantic search.

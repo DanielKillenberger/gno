@@ -15,6 +15,7 @@ import type {
   SearchResults,
 } from "./types";
 
+import { projectRecordEvidenceMetadata } from "../core/record-metadata";
 import { getContentBatch } from "../store/content-batch";
 import { err, ok } from "../store/types";
 import { createChunkLookup } from "./chunk-lookup";
@@ -85,8 +86,9 @@ interface BuildResultContext {
 /** Build SearchResult from FtsResult and related data */
 function buildSearchResult(ctx: BuildResultContext): SearchResult {
   const { fts, chunk, collectionPath, options, fullContent } = ctx;
+  const sourceRelPath = fts.recordSourcePath ?? fts.relPath ?? "";
   const source: SearchResultSource = {
-    relPath: fts.relPath ?? "",
+    relPath: sourceRelPath,
     // Use actual source metadata with fallback to markdown defaults
     mime: fts.sourceMime ?? "text/markdown",
     ext: fts.sourceExt ?? ".md",
@@ -97,8 +99,8 @@ function buildSearchResult(ctx: BuildResultContext): SearchResult {
   };
 
   // Add absPath if we have collection path (cross-platform safe)
-  if (collectionPath && fts.relPath) {
-    source.absPath = pathJoin(collectionPath, fts.relPath);
+  if (collectionPath && sourceRelPath) {
+    source.absPath = pathJoin(collectionPath, sourceRelPath);
   }
 
   // Determine snippet content and range
@@ -134,6 +136,7 @@ function buildSearchResult(ctx: BuildResultContext): SearchResult {
     snippetRange,
     source,
     conversion: fts.mirrorHash ? { mirrorHash: fts.mirrorHash } : undefined,
+    record: projectRecordEvidenceMetadata(fts),
   };
   if (!(chunk && fts.mirrorHash)) return result;
   return attachSearchResultPlannerMetadata(result, {
@@ -287,7 +290,11 @@ export async function searchBm25(
 
     const excluded =
       matchesExcludedText(
-        [fts.title ?? "", fts.relPath ?? "", fts.snippet ?? ""],
+        [
+          fts.title ?? "",
+          fts.recordSourcePath ?? fts.relPath ?? "",
+          fts.snippet ?? "",
+        ],
         options.exclude
       ) ||
       matchesExcludedChunks(

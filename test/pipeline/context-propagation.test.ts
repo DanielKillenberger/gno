@@ -95,7 +95,11 @@ const contexts: ContextRow[] = [
   },
 ];
 
-function createStore(configuredContexts: ContextRow[]): {
+function createStore(
+  configuredContexts: ContextRow[],
+  sourceDocument: DocumentRow = document,
+  sourceFtsResult: FtsResult = ftsResult
+): {
   contextReads: () => number;
   store: StorePort;
 } {
@@ -106,7 +110,10 @@ function createStore(configuredContexts: ContextRow[]): {
       reads += 1;
       return { ok: true as const, value: configuredContexts };
     },
-    searchFts: async () => ({ ok: true as const, value: [ftsResult] }),
+    searchFts: async () => ({
+      ok: true as const,
+      value: [sourceFtsResult],
+    }),
     getCollections: async () => ({
       ok: true as const,
       value: [
@@ -124,7 +131,7 @@ function createStore(configuredContexts: ContextRow[]): {
     }),
     getDocumentsByMirrorHashes: async () => ({
       ok: true as const,
-      value: [document],
+      value: [sourceDocument],
     }),
     getChunksBatch: async () => ({
       ok: true as const,
@@ -175,6 +182,8 @@ async function runAllPipelines(configuredContexts: ContextRow[]): Promise<{
   contexts: Array<string | undefined>;
   ownContextFields: boolean[];
   reads: number[];
+  sourcePaths: string[];
+  uris: string[];
 }> {
   const bm25Store = createStore(configuredContexts);
   const bm25 = await searchBm25(bm25Store.store, "context", {
@@ -233,6 +242,8 @@ async function runAllPipelines(configuredContexts: ContextRow[]): Promise<{
       vectorStore.contextReads(),
       hybridStore.contextReads(),
     ],
+    sourcePaths: results.map((result) => result?.source.relPath ?? ""),
+    uris: results.map((result) => result?.uri ?? ""),
   };
 }
 
@@ -254,5 +265,108 @@ describe("retrieval context propagation", () => {
     expect(result.contexts).toEqual([undefined, undefined, undefined]);
     expect(result.ownContextFields).toEqual([false, false, false]);
     expect(result.reads).toEqual([1, 1, 1]);
+  });
+
+  test("matches configured contexts against logical record source paths", async () => {
+    const recordDocument: DocumentRow = {
+      ...document,
+      relPath: ".gno/records/jsonl/decision.md",
+      uri: "gno://notes/.gno/records/jsonl/decision.md",
+      converterId: "jsonl",
+      converterVersion: "1.0.0",
+      recordKey: "DEC-42",
+      recordSourcePath: "exports/decisions.jsonl",
+      recordSourceLocator: "jsonl:42",
+      recordMetadata: { author: "Decision owner" },
+      recordAnchors: [{ kind: "line", value: "42" }],
+      recordAdapterFingerprint: "jsonl-fixture-fingerprint",
+    };
+    const recordFtsResult: FtsResult = {
+      ...ftsResult,
+      relPath: recordDocument.relPath,
+      uri: recordDocument.uri,
+      converterId: recordDocument.converterId ?? undefined,
+      converterVersion: recordDocument.converterVersion ?? undefined,
+      recordKey: recordDocument.recordKey ?? undefined,
+      recordSourcePath: recordDocument.recordSourcePath ?? undefined,
+      recordSourceLocator: recordDocument.recordSourceLocator ?? undefined,
+      recordMetadata: recordDocument.recordMetadata ?? undefined,
+      recordAnchors: recordDocument.recordAnchors ?? undefined,
+      recordAdapterFingerprint:
+        recordDocument.recordAdapterFingerprint ?? undefined,
+    };
+    const logicalContexts: ContextRow[] = [
+      {
+        scopeType: "prefix",
+        scopeKey: "gno://notes/exports",
+        text: "Export guidance",
+        syncedAt: NOW,
+      },
+    ];
+
+    const bm25Store = createStore(
+      logicalContexts,
+      recordDocument,
+      recordFtsResult
+    );
+    const bm25 = await searchBm25(bm25Store.store, "decision", { limit: 1 });
+    const vectorStore = createStore(
+      logicalContexts,
+      recordDocument,
+      recordFtsResult
+    );
+    const vector = await searchVectorWithEmbedding(
+      {
+        store: vectorStore.store,
+        vectorIndex,
+        embedPort,
+        config: {} as Config,
+      },
+      "decision",
+      new Float32Array([0.1, 0.2, 0.3]),
+      { limit: 1 }
+    );
+    const hybridStore = createStore(
+      logicalContexts,
+      recordDocument,
+      recordFtsResult
+    );
+    const hybrid = await searchHybrid(
+      {
+        store: hybridStore.store,
+        config: {} as Config,
+        vectorIndex,
+        embedPort,
+        expandPort: null,
+        rerankPort,
+      },
+      "decision",
+      { limit: 1, noExpand: true }
+    );
+
+    expect(bm25.ok).toBe(true);
+    expect(vector.ok).toBe(true);
+    expect(hybrid.ok).toBe(true);
+    if (!(bm25.ok && vector.ok && hybrid.ok)) return;
+    const results = [
+      bm25.value.results[0],
+      vector.value.results[0],
+      hybrid.value.results[0],
+    ];
+    expect(results.map((result) => result?.context)).toEqual([
+      "Export guidance",
+      "Export guidance",
+      "Export guidance",
+    ]);
+    expect(results.map((result) => result?.source.relPath)).toEqual([
+      "exports/decisions.jsonl",
+      "exports/decisions.jsonl",
+      "exports/decisions.jsonl",
+    ]);
+    expect(results.map((result) => result?.uri)).toEqual([
+      recordDocument.uri,
+      recordDocument.uri,
+      recordDocument.uri,
+    ]);
   });
 });

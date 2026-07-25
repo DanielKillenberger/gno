@@ -42,6 +42,9 @@ const EMPTY_EDGE_CONFIDENCE: Record<GraphEdgeConfidence, number> = {
   similarity: 0,
 };
 
+const sourceRelPath = (doc: DocumentRow): string =>
+  doc.recordSourcePath ?? doc.relPath;
+
 const confidenceWeight = (confidence: GraphEdgeConfidence): number => {
   switch (confidence) {
     case "explicit":
@@ -253,8 +256,8 @@ export async function expandGraphCandidates(
     }
     if (
       options.relPathPrefix !== undefined &&
-      doc.relPath !== options.relPathPrefix &&
-      !doc.relPath.startsWith(`${options.relPathPrefix}/`)
+      sourceRelPath(doc) !== options.relPathPrefix &&
+      !sourceRelPath(doc).startsWith(`${options.relPathPrefix}/`)
     ) {
       continue;
     }
@@ -337,8 +340,8 @@ export async function expandGraphCandidates(
     (doc) =>
       doc.mirrorHash &&
       (options.relPathPrefix === undefined ||
-        doc.relPath === options.relPathPrefix ||
-        doc.relPath.startsWith(`${options.relPathPrefix}/`)) &&
+        sourceRelPath(doc) === options.relPathPrefix ||
+        sourceRelPath(doc).startsWith(`${options.relPathPrefix}/`)) &&
       matchesDocumentFilters(doc, options)
   );
   const docs = await filterDocsByTags(store, metadataFilteredDocs, options);

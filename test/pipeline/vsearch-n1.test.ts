@@ -24,11 +24,16 @@ const NOW = "2026-02-22T00:00:00.000Z";
 const makeDoc = (
   id: number,
   mirrorHash: string,
-  metadata?: { sourceMtime?: string; frontmatterDate?: string | null }
+  metadata?: {
+    sourceMtime?: string;
+    frontmatterDate?: string | null;
+    relPath?: string;
+    recordSourcePath?: string;
+  }
 ): DocumentRow => ({
   id,
   collection: "notes",
-  relPath: `${mirrorHash}.md`,
+  relPath: metadata?.relPath ?? `${mirrorHash}.md`,
   sourceHash: `source_${mirrorHash}`,
   sourceMime: "text/markdown",
   sourceExt: ".md",
@@ -49,6 +54,7 @@ const makeDoc = (
   createdAt: NOW,
   updatedAt: NOW,
   frontmatterDate: metadata?.frontmatterDate ?? null,
+  recordSourcePath: metadata?.recordSourcePath ?? null,
 });
 
 const makeChunk = (mirrorHash: string, seq: number): ChunkRow => ({
@@ -77,6 +83,104 @@ const TEST_COLLECTIONS: CollectionRow[] = [
 ];
 
 describe("searchVectorWithEmbedding N+1 guard", () => {
+  test("filters and projects logical record paths while retaining virtual identity", async () => {
+    const recordDoc: DocumentRow = {
+      ...makeDoc(1, "record", {
+        relPath: ".gno/records/jsonl/decision.md",
+        recordSourcePath: "exports/decisions.jsonl",
+      }),
+      uri: "gno://notes/.gno/records/jsonl/decision.md",
+      converterId: "jsonl",
+      converterVersion: "1.0.0",
+      recordKey: "DEC-42",
+      recordSourceLocator: "jsonl:42",
+      recordMetadata: { author: "Decision owner" },
+      recordAnchors: [{ kind: "line", value: "42" }],
+      recordAdapterFingerprint: "jsonl-fixture-fingerprint",
+    };
+    const store: Partial<StorePort> = {
+      getDocumentsByMirrorHashes: async () => ({
+        ok: true as const,
+        value: [recordDoc],
+      }),
+      getCollections: async () => ({
+        ok: true as const,
+        value: TEST_COLLECTIONS,
+      }),
+      getChunksBatch: async () => ({
+        ok: true as const,
+        value: new Map([["record", [makeChunk("record", 0)]]]),
+      }),
+    };
+    const vectorIndex: VectorIndexPort = {
+      searchAvailable: true,
+      model: "test-model",
+      dimensions: 3,
+      vecDirty: false,
+      upsertVectors: async () => ({ ok: true, value: undefined }),
+      deleteVectorsForMirror: async () => ({ ok: true, value: undefined }),
+      searchNearest: async () => ({
+        ok: true as const,
+        value: [{ mirrorHash: "record", seq: 0, distance: 0.1 }],
+      }),
+      rebuildVecIndex: async () => ({ ok: true, value: undefined }),
+      syncVecIndex: async () => ({ ok: true, value: { added: 0, removed: 0 } }),
+    };
+
+    const result = await searchVectorWithEmbedding(
+      {
+        store: store as StorePort,
+        vectorIndex,
+        embedPort: {} as EmbeddingPort,
+        config: {} as Config,
+      },
+      "decision",
+      new Float32Array([0.1, 0.2, 0.3]),
+      {
+        limit: 1,
+        retrievalScope: {
+          relPathPrefix: "exports",
+          allowedMirrorHashes: ["record"],
+        },
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results).toHaveLength(1);
+    expect(result.value.results[0]?.uri).toBe(
+      "gno://notes/.gno/records/jsonl/decision.md"
+    );
+    expect(result.value.results[0]?.source.relPath).toBe(
+      "exports/decisions.jsonl"
+    );
+    expect(result.value.results[0]?.record?.adapter.fingerprint).toBe(
+      "jsonl-fixture-fingerprint"
+    );
+
+    const virtualScope = await searchVectorWithEmbedding(
+      {
+        store: store as StorePort,
+        vectorIndex,
+        embedPort: {} as EmbeddingPort,
+        config: {} as Config,
+      },
+      "decision",
+      new Float32Array([0.1, 0.2, 0.3]),
+      {
+        limit: 1,
+        retrievalScope: {
+          relPathPrefix: ".gno/records",
+          allowedMirrorHashes: ["record"],
+        },
+      }
+    );
+    expect(virtualScope.ok).toBe(true);
+    if (virtualScope.ok) {
+      expect(virtualScope.value.results).toEqual([]);
+    }
+  });
+
   test("content-type boosts neither oversample nor rescue below-minScore neighbors", async () => {
     let capturedLimit: number | undefined;
     let capturedMinScore: number | undefined;

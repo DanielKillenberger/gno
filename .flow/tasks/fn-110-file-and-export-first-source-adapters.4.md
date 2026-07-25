@@ -37,9 +37,8 @@ Deliver implement bounded icalendar adapter as one implementation-sized incremen
 
 
 ## Done summary
-TBD
-
+Added a bounded RFC 5545 iCalendar adapter preserving UID and recurrence identity, UTC/TZID/floating semantics, people, dates, EXDATE/RDATE/RRULE source, safe text, and occurrence anchors. Malformed/truncated calendars remain partial and cannot authorize deletions; recurrence and line expansion are capped.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 6626754e, f18c0664, 5147e87d
+- Tests: bun test test/converters/ical.test.ts (14 pass), bun test focused fn110 integration suite (190 pass)
 - PRs:
