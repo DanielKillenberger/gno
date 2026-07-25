@@ -41,9 +41,15 @@ Deliver enforce policy at every current network-capable boundary as one implemen
 
 
 ## Done summary
-TBD
+Implemented fail-closed enforcement at every currently enumerated network-capable boundary.
 
+- Added a checked boundary inventory covering listeners, direct fetches, external processes, HTTP inference, MCP tools/resources, local publish export, and disabled private/remote paths.
+- Enforced collection policy per HTTP MCP request and batch member using the current peer classification; bearer authentication and write authorization remain independent gates.
+- Replaced direct HTTP model fetches with policy-first, DNS-pinned transport, exact DNS rechecks, same-origin redirect handling, and stable redacted denials.
+- Gated sync update commands, git pulls, non-loopback daemon status, loopback clip writes, and local publish artifact construction before content or metadata transfer.
+- Kept remote publish upload, private agent access, and server-side encrypted-space decryption structurally unavailable.
+- Updated CLI/MCP schemas, public docs, integration/package smoke coverage, and adversarial policy/DNS/session tests.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 281dd274
+- Tests: bun test — 3393 pass, 2 skip, 0 fail across 423 files, bun test test/egress/enforcement.test.ts — 14 pass, 0 fail, bun run lint:check — 0 warnings, 0 errors, formatting clean, bun run docs:verify — 13 pass, 2 semantic-model-cache skips, 0 fail, bun run test:package — packed install/resident gateway smoke passed, .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json — valid
 - PRs:
