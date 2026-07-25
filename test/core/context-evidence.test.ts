@@ -124,6 +124,8 @@ const createStore = (
           exclude: null,
           updateCmd: null,
           languageHint: null,
+          egressPolicy: "local_only",
+          egressPolicySource: "legacy_default",
           syncedAt: "2026-07-22T10:00:00.000Z",
         },
       ]),

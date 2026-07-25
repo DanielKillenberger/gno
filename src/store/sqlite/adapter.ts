@@ -15,7 +15,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // node:path basename: no Bun path utilities.
 import { basename } from "node:path";
 
-import type { Collection, Context, FtsTokenizer } from "../../config/types";
 import type {
   ActivationIndexDocument,
   ActivationIndexIdentity,
@@ -93,6 +92,14 @@ import type {
 import type { SqliteDbProvider } from "./types";
 
 import { buildUri, deriveDocid, stripUriIndex } from "../../app/constants";
+import {
+  type Collection,
+  type Context,
+  type EgressPolicy,
+  type EgressPolicySource,
+  type FtsTokenizer,
+  resolveConfiguredEgressPolicy,
+} from "../../config/types";
 import { analyzeGraphCommunities } from "../../core/graph-analysis";
 import {
   buildWikiBestMatchSubquery,
@@ -589,8 +596,11 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
 
         // Upsert collections
         const stmt = db.prepare(`
-          INSERT INTO collections (name, path, pattern, include, exclude, update_cmd, language_hint, synced_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          INSERT INTO collections (
+            name, path, pattern, include, exclude, update_cmd, language_hint,
+            egress_policy, egress_policy_source, synced_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
           ON CONFLICT(name) DO UPDATE SET
             path = excluded.path,
             pattern = excluded.pattern,
@@ -598,10 +608,23 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             exclude = excluded.exclude,
             update_cmd = excluded.update_cmd,
             language_hint = excluded.language_hint,
+            egress_policy = CASE
+              WHEN excluded.egress_policy_source = 'config_default'
+                AND collections.egress_policy_source = 'legacy_default'
+              THEN collections.egress_policy
+              ELSE excluded.egress_policy
+            END,
+            egress_policy_source = CASE
+              WHEN excluded.egress_policy_source = 'config_default'
+                AND collections.egress_policy_source = 'legacy_default'
+              THEN collections.egress_policy_source
+              ELSE excluded.egress_policy_source
+            END,
             synced_at = datetime('now')
         `);
 
         for (const c of collections) {
+          const egress = resolveConfiguredEgressPolicy(c);
           stmt.run(
             c.name,
             c.path,
@@ -609,7 +632,9 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             c.include.length > 0 ? JSON.stringify(c.include) : null,
             c.exclude.length > 0 ? JSON.stringify(c.exclude) : null,
             c.updateCmd ?? null,
-            c.languageHint ?? null
+            c.languageHint ?? null,
+            egress.policy,
+            egress.source
           );
         }
       });
@@ -631,8 +656,11 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     try {
       const db = this.ensureOpen();
       const stmt = db.prepare(`
-        INSERT INTO collections (name, path, pattern, include, exclude, update_cmd, language_hint, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO collections (
+          name, path, pattern, include, exclude, update_cmd, language_hint,
+          egress_policy, egress_policy_source, synced_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(name) DO UPDATE SET
           path = excluded.path,
           pattern = excluded.pattern,
@@ -640,6 +668,18 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           exclude = excluded.exclude,
           update_cmd = excluded.update_cmd,
           language_hint = excluded.language_hint,
+          egress_policy = CASE
+            WHEN excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            THEN collections.egress_policy
+            ELSE excluded.egress_policy
+          END,
+          egress_policy_source = CASE
+            WHEN excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            THEN collections.egress_policy_source
+            ELSE excluded.egress_policy_source
+          END,
           synced_at = datetime('now')
         WHERE collections.path IS NOT excluded.path
           OR collections.pattern IS NOT excluded.pattern
@@ -647,9 +687,20 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           OR collections.exclude IS NOT excluded.exclude
           OR collections.update_cmd IS NOT excluded.update_cmd
           OR collections.language_hint IS NOT excluded.language_hint
+          OR (
+            NOT (
+              excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            )
+            AND (
+              collections.egress_policy IS NOT excluded.egress_policy
+              OR collections.egress_policy_source IS NOT excluded.egress_policy_source
+            )
+          )
       `);
       const transaction = db.transaction(() => {
         for (const collection of collections) {
+          const egress = resolveConfiguredEgressPolicy(collection);
           stmt.run(
             collection.name,
             collection.path,
@@ -661,7 +712,9 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
               ? JSON.stringify(collection.exclude)
               : null,
             collection.updateCmd ?? null,
-            collection.languageHint ?? null
+            collection.languageHint ?? null,
+            egress.policy,
+            egress.source
           );
         }
       });
@@ -4709,6 +4762,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       interface CollectionStat {
         name: string;
         path: string;
+        egress_policy: EgressPolicy;
+        egress_policy_source: EgressPolicySource;
         total: number;
         active: number;
         errored: number;
@@ -4760,6 +4815,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
           SELECT
             c.name,
             c.path,
+            c.egress_policy,
+            c.egress_policy_source,
             COALESCE(ds.total, 0) AS total,
             COALESCE(ds.active, 0) AS active,
             COALESCE(ds.errored, 0) AS errored,
@@ -4856,6 +4913,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         collections: collectionStats.map((s) => ({
           name: s.name,
           path: s.path,
+          egressPolicy: s.egress_policy,
+          egressPolicySource: s.egress_policy_source,
           totalDocuments: s.total,
           activeDocuments: s.active,
           errorDocuments: s.errored,
@@ -5132,6 +5191,8 @@ interface DbCollectionRow {
   exclude: string | null;
   update_cmd: string | null;
   language_hint: string | null;
+  egress_policy: EgressPolicy;
+  egress_policy_source: EgressPolicySource;
   synced_at: string;
 }
 
@@ -5230,6 +5291,8 @@ function mapCollectionRow(row: DbCollectionRow): CollectionRow {
     exclude: row.exclude ? JSON.parse(row.exclude) : null,
     updateCmd: row.update_cmd,
     languageHint: row.language_hint,
+    egressPolicy: row.egress_policy,
+    egressPolicySource: row.egress_policy_source,
     syncedAt: row.synced_at,
   };
 }

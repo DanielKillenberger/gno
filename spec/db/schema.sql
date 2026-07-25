@@ -49,6 +49,20 @@ CREATE TABLE IF NOT EXISTS collections (
   exclude TEXT,              -- JSON array of patterns
   update_cmd TEXT,
   language_hint TEXT,        -- BCP-47 or NULL
+  egress_policy TEXT NOT NULL DEFAULT 'local_only'
+    CHECK (egress_policy IN ('local_only', 'lan', 'remote')),
+  egress_policy_source TEXT NOT NULL DEFAULT 'legacy_default'
+    CHECK (
+      egress_policy_source IN (
+        'explicit',
+        'config_default',
+        'legacy_default'
+      )
+    )
+    CHECK (
+      egress_policy_source = 'explicit'
+      OR egress_policy = 'local_only'
+    ),
   synced_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

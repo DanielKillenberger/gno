@@ -125,6 +125,8 @@ function createStore(
           exclude: null,
           updateCmd: null,
           languageHint: null,
+          egressPolicy: "local_only",
+          egressPolicySource: "legacy_default",
           syncedAt: NOW,
         },
       ],

@@ -5,7 +5,13 @@
  * @module src/store/types
  */
 
-import type { Collection, Context, FtsTokenizer } from "../config/types";
+import type {
+  Collection,
+  Context,
+  EgressPolicy,
+  EgressPolicySource,
+  FtsTokenizer,
+} from "../config/types";
 import type { RecordAnchor, RecordMetadata } from "../converters/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,6 +79,10 @@ export interface CollectionRow {
   exclude: string[] | null;
   updateCmd: string | null;
   languageHint: string | null;
+  /** Effective fail-closed content transfer boundary. */
+  egressPolicy: EgressPolicy;
+  /** Whether policy was explicit or supplied by a safe default. */
+  egressPolicySource: EgressPolicySource;
   syncedAt: string;
 }
 
@@ -612,6 +622,10 @@ export interface FtsResult {
 export interface CollectionStatus {
   name: string;
   path: string;
+  /** Effective fail-closed content transfer boundary. */
+  egressPolicy: EgressPolicy;
+  /** Whether policy was explicit or supplied by a safe default. */
+  egressPolicySource: EgressPolicySource;
   totalDocuments: number;
   activeDocuments: number;
   errorDocuments: number;

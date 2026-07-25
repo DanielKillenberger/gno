@@ -48,6 +48,28 @@ export type FtsTokenizer = (typeof FTS_TOKENIZERS)[number];
 /** Default FTS tokenizer - snowball english for multilingual stemming */
 export const DEFAULT_FTS_TOKENIZER: FtsTokenizer = "snowball english";
 
+/** Collection-owned boundary for where indexed content may travel. */
+export const EGRESS_POLICIES = ["local_only", "lan", "remote"] as const;
+export const EgressPolicySchema = z.enum(EGRESS_POLICIES);
+export type EgressPolicy = z.infer<typeof EgressPolicySchema>;
+
+/** Missing policy is always interpreted as the fail-closed local-only default. */
+export const DEFAULT_EGRESS_POLICY: EgressPolicy = "local_only";
+
+/** Provenance for an effective collection egress policy. */
+export const EGRESS_POLICY_SOURCES = [
+  "explicit",
+  "config_default",
+  "legacy_default",
+] as const;
+export const EgressPolicySourceSchema = z.enum(EGRESS_POLICY_SOURCES);
+export type EgressPolicySource = z.infer<typeof EgressPolicySourceSchema>;
+
+export interface EffectiveConfiguredEgressPolicy {
+  policy: EgressPolicy;
+  source: Extract<EgressPolicySource, "explicit" | "config_default">;
+}
+
 /**
  * BCP-47 language tag pattern (simplified, case-insensitive).
  * Matches: en, de, fr, zh-CN, zh-Hans, und, en-US, etc.
@@ -104,6 +126,12 @@ export const CollectionSchema = z.object({
     })
     .optional(),
 
+  /**
+   * Explicit collection egress boundary. Absence remains valid for legacy
+   * configs and resolves to local_only rather than relaxing access.
+   */
+  egressPolicy: EgressPolicySchema.optional(),
+
   /** Optional per-collection model overrides */
   models: z
     .object({
@@ -132,6 +160,22 @@ export const CollectionSchema = z.object({
 
 export type Collection = z.infer<typeof CollectionSchema>;
 export type CollectionModelOverrides = NonNullable<Collection["models"]>;
+
+/** Resolve config input without erasing whether the user made an explicit choice. */
+export function resolveConfiguredEgressPolicy(
+  collection: Pick<Collection, "egressPolicy">
+): EffectiveConfiguredEgressPolicy {
+  if (collection.egressPolicy === undefined) {
+    return {
+      policy: DEFAULT_EGRESS_POLICY,
+      source: "config_default",
+    };
+  }
+  return {
+    policy: collection.egressPolicy,
+    source: "explicit",
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Project Affinity Input

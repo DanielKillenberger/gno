@@ -73,6 +73,8 @@ const collections: CollectionRow[] = ["other", "project"].map((name) => ({
   exclude: null,
   updateCmd: null,
   languageHint: null,
+  egressPolicy: "local_only",
+  egressPolicySource: "legacy_default",
   syncedAt: "2026-01-01T00:00:00.000Z",
 }));
 

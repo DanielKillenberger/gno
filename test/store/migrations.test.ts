@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { verifyLexicalActivation } from "../../src/core/activation-verifier";
 import { getSchemaVersion, migrations, runMigrations } from "../../src/store";
+import { migration as collectionEgressMigration } from "../../src/store/migrations/023-collection-egress-policy";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
 
@@ -20,6 +21,66 @@ describe("store migrations", () => {
 
   afterEach(async () => {
     await safeRm(testDir);
+  });
+
+  test("defaults legacy collections local-only and supports rollback", () => {
+    const db = new Database(dbPath);
+    try {
+      expect(runMigrations(db, migrations.slice(0, 22), "unicode61").ok).toBe(
+        true
+      );
+      db.run(
+        `INSERT INTO collections (name, path, pattern)
+         VALUES ('legacy', '/legacy', '**/*')`
+      );
+
+      collectionEgressMigration.up(db, "unicode61");
+      expect(
+        db
+          .query<{ egress_policy: string; egress_policy_source: string }, []>(
+            `SELECT egress_policy, egress_policy_source
+             FROM collections WHERE name = 'legacy'`
+          )
+          .get()
+      ).toEqual({
+        egress_policy: "local_only",
+        egress_policy_source: "legacy_default",
+      });
+      expect(() =>
+        db.run(
+          "UPDATE collections SET egress_policy = 'future' WHERE name = 'legacy'"
+        )
+      ).toThrow();
+      expect(() =>
+        db.run(
+          `UPDATE collections SET egress_policy_source = 'inferred'
+           WHERE name = 'legacy'`
+        )
+      ).toThrow();
+      expect(() =>
+        db.run(
+          `UPDATE collections SET egress_policy = 'remote'
+           WHERE name = 'legacy'`
+        )
+      ).toThrow();
+
+      collectionEgressMigration.down?.(db);
+      const columns = db
+        .query<{ name: string }, []>("PRAGMA table_info(collections)")
+        .all()
+        .map((column) => column.name);
+      expect(columns).not.toContain("egress_policy");
+      expect(columns).not.toContain("egress_policy_source");
+      expect(
+        db
+          .query<{ name: string }, []>(
+            "SELECT name FROM collections WHERE name = 'legacy'"
+          )
+          .get()
+      ).toEqual({ name: "legacy" });
+    } finally {
+      db.close();
+    }
   });
 
   test("upgrades v5 databases without non-constant ALTER TABLE defaults", () => {
@@ -54,7 +115,7 @@ describe("store migrations", () => {
 
       const upgradeResult = runMigrations(db, migrations, "unicode61");
       expect(upgradeResult.ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
 
       const indexedRow = db
         .query<{ indexed_at: string | null }, []>(
@@ -63,6 +124,17 @@ describe("store migrations", () => {
         .get();
       expect(indexedRow).toBeDefined();
       expect(indexedRow?.indexed_at).not.toBeNull();
+      expect(
+        db
+          .query<{ egress_policy: string; egress_policy_source: string }, []>(
+            `SELECT egress_policy, egress_policy_source
+             FROM collections WHERE name = 'notes'`
+          )
+          .get()
+      ).toEqual({
+        egress_policy: "local_only",
+        egress_policy_source: "legacy_default",
+      });
 
       const vectorColumns = db
         .query<{ name: string }, []>("PRAGMA table_info(content_vectors)")
@@ -121,7 +193,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
       db.run(
         `INSERT INTO contexts (scope_type, scope_key, text)
          VALUES ('collection', 'notes:', 'Additional guidance')`
@@ -149,7 +221,7 @@ describe("store migrations", () => {
 
     try {
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
 
       const savedTables = db
         .query<{ name: string }, []>(
@@ -298,7 +370,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
       expect(
         db
           .query<{ retained_entries: number; retained_bytes: number }, []>(
@@ -333,7 +405,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
       expect(
         db
           .query<
@@ -392,7 +464,7 @@ describe("store migrations", () => {
       );
 
       expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
       expect(
         db
           .query<
@@ -484,7 +556,7 @@ describe("store migrations", () => {
 
       const upgraded = runMigrations(db, migrations, "unicode61");
       expect(upgraded.ok).toBe(true);
-      expect(getSchemaVersion(db)).toBe(22);
+      expect(getSchemaVersion(db)).toBe(23);
       const rows = db
         .query<{ rel_path: string; fts_mirror_hash: string | null }, []>(
           "SELECT rel_path, fts_mirror_hash FROM documents ORDER BY rel_path"
