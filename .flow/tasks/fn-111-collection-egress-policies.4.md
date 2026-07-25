@@ -49,6 +49,7 @@ Completed restrictive egress propagation and audit hardening across Context Caps
 - Added atomic audit insert-and-retention with decision recomputation and tamper rejection.
 - Added explicit trace creation-digest migration marker, safe legacy retry normalization, and persisted scope widening from actual evidence.
 - Validated artifact lineage before emission and added adversarial, migration, trace, and regression coverage.
+- Closed the final scope-resolution overwrite edge by validating and snapshotting the complete bounded raw lineage before any lookup or selection; duplicate, conflicting, sparse, oversized, proxy, and hostile inputs now fail with stable provenance errors at resolver and planner boundaries.
 
 Validation:
 - `bun run lint:check`
@@ -58,7 +59,9 @@ Validation:
 - Targeted adversarial egress suite — 61 passed, 0 failed
 - Retrieval trace/replay suite — 65 passed, 0 failed
 - Affected search/hybrid suite — 21 passed, 0 failed
+- Final lineage/planner/Capsule/publish focused suite — 39 passed, 0 failed
+- Final egress/trace/Capsule/publish affected suite — 116 passed, 0 failed
 ## Evidence
-- Commits: 19554534, f212e228, 5bbb1187, c61b1638, 016e3f16, 48247149
-- Tests: bun run lint:check, bun test (3418 pass, 2 expected skips, 0 fail), bun run docs:verify (13 pass, 2 model-cache skips, 0 fail), bun run test:package, targeted adversarial egress tests (61 pass, 0 fail), retrieval trace and replay tests (65 pass, 0 fail), affected search and hybrid tests (21 pass, 0 fail)
+- Commits: 19554534, f212e228, 5bbb1187, c61b1638, 016e3f16, 48247149, 3847fdcf
+- Tests: bun run lint:check, bun test (3418 pass, 2 expected skips, 0 fail), bun run docs:verify (13 pass, 2 model-cache skips, 0 fail), bun run test:package, targeted adversarial egress tests (61 pass, 0 fail), retrieval trace and replay tests (65 pass, 0 fail), affected search and hybrid tests (21 pass, 0 fail), final lineage/planner/Capsule/publish focused tests (39 pass, 0 fail), final egress/trace/Capsule/publish affected tests (116 pass, 0 fail)
 - PRs:
