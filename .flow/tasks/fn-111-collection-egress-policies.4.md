@@ -42,8 +42,23 @@ Deliver propagate restrictive policy through mixed and derived data with audit a
 
 
 ## Done summary
-Propagated deterministic egress lineage through retrieval results, Context Capsules, trace exports and replay, change journals, publishing, browser clips, and record adapters. Added mixed-source default-deny and explicit-partial planning, content-free bounded audit receipts with retention and purge, compatibility migrations, schemas, documentation, regression coverage, and refreshed deterministic benchmark receipts.
+Completed restrictive egress propagation and audit hardening across Context Capsules, retrieval traces, publishing artifacts, change journals, and persisted receipts.
+
+- Enforced canonical, duplicate-free lineage with fail-closed unknown-owner handling.
+- Bound Capsule 1.1 aggregate lineage to requested scope plus every materialized evidence owner before identity hashing.
+- Added atomic audit insert-and-retention with decision recomputation and tamper rejection.
+- Added explicit trace creation-digest migration marker, safe legacy retry normalization, and persisted scope widening from actual evidence.
+- Validated artifact lineage before emission and added adversarial, migration, trace, and regression coverage.
+
+Validation:
+- `bun run lint:check`
+- `bun test` — 3,418 passed, 2 expected skips, 0 failed
+- `bun run docs:verify` — 13 passed, 2 model-cache skips, 0 failed
+- `bun run test:package` — passed on clean bounded retry after one transient freed-port collision
+- Targeted adversarial egress suite — 61 passed, 0 failed
+- Retrieval trace/replay suite — 65 passed, 0 failed
+- Affected search/hybrid suite — 21 passed, 0 failed
 ## Evidence
-- Commits: 19554534, f212e228, 5bbb1187, c61b1638, 016e3f16
-- Tests: bun run lint:check, bun test (3407 pass, 2 expected platform or opt-in skips, 0 fail), bun run docs:verify (13 pass, 2 cached-model skips, 0 fail), bun run test:package, bun run eval:agentic -- --write, focused integration and task suites (114 pass, 0 fail)
+- Commits: 19554534, f212e228, 5bbb1187, c61b1638, 016e3f16, 48247149
+- Tests: bun run lint:check, bun test (3418 pass, 2 expected skips, 0 fail), bun run docs:verify (13 pass, 2 model-cache skips, 0 fail), bun run test:package, targeted adversarial egress tests (61 pass, 0 fail), retrieval trace and replay tests (65 pass, 0 fail), affected search and hybrid tests (21 pass, 0 fail)
 - PRs:
