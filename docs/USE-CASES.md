@@ -435,7 +435,10 @@ The default `Qwen3-Embedding-0.6B-GGUF` model supports cross-language vector
 retrieval. The committed semantic fixture is small: 15 FastAPI documents in
 five languages and 13 queries. It is evidence for the default-model decision,
 not a general guarantee for every classified or indexed language. Dedicated
-lexical CJK benchmarking remains pending.
+lexical CJK benchmarking is committed, but production tokenization remains
+unchanged: the frozen Chinese promotion gates were not met, so fn-109
+intentionally shipped no analyzer change. Treat CJK lexical fallback as
+measured degraded behavior, not a multilingual-quality guarantee.
 
 ## Incremental Updates
 

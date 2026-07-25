@@ -120,13 +120,17 @@
 - slug: multi-format
   title: Multi-Format Indexing
   headline: Index Everything You Write
-  description: GNO indexes Markdown, PDF, Word, Excel, PowerPoint, and plain text with structural chunking, frontmatter extraction, and seven-language document detection.
+  description: GNO indexes documents plus portable mail, calendar, browser, transcript, and JSONL exports as independent read-only records with exact source lineage.
   icon: multi-format
   benefits:
     - Markdown with frontmatter extraction
     - PDF text extraction
     - Office documents (DOCX, XLSX, PPTX)
     - Plain text files
+    - Portable JSONL/NDJSON records and explicit browser bookmark/history exports
+    - EML/MBOX mail and ICS calendar events
+    - WebVTT/SRT plus configured JSON/text transcripts
+    - Read-only logical records with exact source locators and bounded metadata
     - Automatic structural first-pass chunking for ts/js/python/go/rust family
     - Document detection for en, de, fr, it, zh, ja, and ko
     - Content deduplication via mirror hashing
@@ -156,10 +160,11 @@
 - slug: mcp-integration
   title: MCP Integration
   headline: Give Your AI Assistant Memory
-  description: Connect GNO to 10 automatically configured clients via MCP. Default mode exposes 17 read-only tools; explicit write mode exposes 28 total for retrieval, graph, diagnostics, and mutation.
+  description: Connect GNO to 10 automatically configured clients via MCP. Default mode exposes 25 read-only tools; explicit write mode exposes 40 total for retrieval, Context Capsules, Knowledge Delta, diagnostics, and mutation.
   icon: mcp-integration
   benefits:
-    - 17 tools by default; 28 total with writes explicitly enabled
+    - 25 tools by default; 40 total with writes explicitly enabled
+    - Context Capsule build/verify, Knowledge Delta, and verified Ask
     - Works with Claude Desktop, Cursor, Zed, Windsurf, Amp
     - Also supports Raycast, LM Studio, LibreChat
     - Resource URIs for direct document access

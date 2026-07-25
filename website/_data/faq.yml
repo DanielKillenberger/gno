@@ -23,7 +23,7 @@
         Yes. Run gno daemon for foreground indexing, or gno daemon --detach on macOS/Linux. Manage the detached process with gno daemon --status and gno daemon --stop. Windows uses foreground mode, WSL, or a service wrapper.
 
     - q: What file formats does GNO support?
-      a: GNO indexes Markdown (.md) with frontmatter extraction, PDF (.pdf), Microsoft Word (.docx), Excel (.xlsx), PowerPoint (.pptx), and plain text files. Indexed-document detection covers English, German, French, Italian, Chinese, Japanese, and Korean.
+      a: GNO indexes Markdown, PDF, Word, Excel, PowerPoint, and plain text. It also imports portable JSONL/NDJSON, EML/MBOX, ICS, WebVTT/SRT, explicit browser bookmark/history exports, and configured JSON/text transcript exports as independent read-only records. These adapters read selected files only; they do not access live accounts or browser state.
 
     - q: Can I edit PDFs or Word docs directly in GNO?
       a: >
@@ -125,7 +125,7 @@
 
     - q: How do I use GNO with Cursor, Zed, or Windsurf?
       a: >
-        Install GNO as an MCP server with gno mcp install --target cursor (or zed, windsurf, amp, etc.). Default mode exposes 17 read-only retrieval, graph, status, and job tools. Starting MCP with --enable-write adds 11 mutation tools, for 28 total.
+        Install GNO as an MCP server with gno mcp install --target cursor (or zed, windsurf, amp, etc.). Default mode exposes 25 read-only retrieval, Context Capsule, Knowledge Delta, graph, status, and job tools. Starting MCP with --enable-write adds 15 mutation tools, for 40 total.
 
     - q: What is MCP?
       a: Model Context Protocol (MCP) is a standard for AI assistants to access external tools. GNO provides an MCP server so Claude Desktop, Cursor, Zed, Windsurf, Amp, Raycast, and more can search your documents.

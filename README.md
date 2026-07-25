@@ -112,12 +112,22 @@ gno daemon --detach  # headless continuous indexing (background; --status / --st
 
 <!-- public-truth:current-version -->
 
-> Current release: **v1.28.0** — see [CHANGELOG.md](./CHANGELOG.md)
+> Current release: **v1.29.0** — see [CHANGELOG.md](./CHANGELOG.md)
 
 <!-- /public-truth -->
 
 > Full release history: [CHANGELOG.md](./CHANGELOG.md)
 
+- **Trustworthy local context compiler**: deterministic Context Capsules replace
+  repeated agent `query → get → multi-get` orchestration with one bounded,
+  citation-complete evidence handoff. The promoted benchmark retained 100%
+  completion accuracy while reducing retrieval calls by 48.94% and
+  model-visible context by 44.12%, with 100% exact claim-span linkage.
+- **Verified answers and private quality learning**: opt-in verified Ask checks
+  every substantive claim against one closed Capsule and abstains below complete
+  support. Local traces, explicit judgments, content-free qrels export, and
+  read-only replay turn real misses into regression evidence without automatic
+  personalization.
 - **Project-aware retrieval affinity**: trusted local CLI searches can use the
   current workspace or explicit `--project-root` values as a transparent,
   explainable `+0.03` soft ranking signal. Filters remain hard, and untrusted
@@ -147,6 +157,18 @@ gno daemon --detach  # headless continuous indexing (background; --status / --st
   capture. A loopback `gno serve` pairing, server-owned preview, exact
   provenance, and idempotent recovery protect every write; no history, cookies,
   remote fetch, store listing, or Firefox parity is claimed.
+- **Verified setup and portable project profiles**: `gno setup <folder>` proves
+  an exact lexical result before success; optional `.gno/index.yml` profiles
+  carry explicit collection, context, model, content-type, and project-affinity
+  intent without storing the index in the repository.
+- **Portable export adapters**: JSONL/NDJSON, EML/MBOX, ICS, WebVTT/SRT,
+  explicit browser exports, and configured transcript exports become bounded,
+  read-only logical records with exact file provenance—never live-account
+  connectors.
+- **Collection-owned egress policy**: every collection has an effective
+  `local_only`, `lan`, or `remote` boundary that follows mixed and derived
+  evidence through resident serving, inference, publishing, exports, Capsules,
+  and traces. Authentication never overrides policy.
 - **Schema-lite content types**: optional `contentTypes` rules map configured
   frontmatter `type` values or path prefixes to canonical `contentType` metadata
   in JSON search/query results and can apply one bounded, explainable
@@ -911,6 +933,10 @@ graph TD
 | **MCP Server**       | 10 automatic client targets; 25 read-only tools, 40 with writes enabled                     |
 | **Knowledge Delta**  | Bounded metadata history, structural diffs, and dependency impact paths                     |
 | **Context Capsules** | Deterministic evidence bundles plus saved-file freshness reverification                     |
+| **Verified Ask**     | Claim-by-claim evidence checks with explicit abstention                                     |
+| **Private Replay**   | Opt-in local traces, explicit qrels, and read-only ranking comparison                       |
+| **Verified Setup**   | Exact lexical activation proof plus portable project-local profiles                         |
+| **Browser Clipper**  | Explicit selection/Reader capture through visible loopback pairing                          |
 | **Collections**      | Organize sources with patterns, contexts, and <code>local_only / lan / remote</code> policy |
 | **Tag Filtering**    | Frontmatter tags with hierarchical paths, filter via `--tags-any`/`--tags-all`              |
 | **Note Linking**     | Wiki links, backlinks, related notes, cross-collection navigation                           |
