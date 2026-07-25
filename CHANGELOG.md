@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration-bound provenance, a reserved virtual-record namespace, and
   redacted partial-import receipts. Export adapters never inspect live account
   or browser state, execute content, fetch remote data, or unpack archives.
+- Updated Vitest to 4.1.0 to remove the development UI server arbitrary-file
+  read and execution advisory affecting earlier 4.x releases.
 
 ## [1.27.1] - 2026-07-24
 
