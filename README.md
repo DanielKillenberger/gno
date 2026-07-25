@@ -22,12 +22,12 @@ gno mcp install --target cursor    # or claude-code, claude-desktop, zed, ...
 
 Most retrieval tools return a ranked list and leave the rest to optimism. Four things here are different, and each one is measurable rather than adjectival:
 
-| | What it does | Why it matters |
-| :--- | :--- | :--- |
-| **[Context Capsules](https://gno.sh/docs/context-capsules)** | Compiles one bounded evidence bundle per goal: exact line spans, content hashes, one global token budget, collapsed duplicates, and a written list of what it could *not* find | Your agent reads once instead of searching five times. **48.94% fewer retrieval calls, 44.12% less model-visible context, 100% task accuracy retained** across 48 paired benchmark tasks |
-| **[Verified answers](https://gno.sh/docs/cli)** | `gno ask --verify` generates against one closed Capsule, classifies every substantive claim, and withholds the draft below 100% support | An abstention naming the failing claim beats a confident paragraph you have to fact-check by hand |
-| **[Verified setup](https://gno.sh/docs/project-profiles)** | `gno setup` returns only after lexical search finds a real hit derived from *your* corpus | No green checkmark over a folder that indexed but cannot be searched |
-| **[Egress policy](https://gno.sh/docs/collection-egress)** | Per-collection fail-closed `local_only` / `lan` / `remote`, inherited by every derived Capsule, trace, and export | Mixed setups are normal. Pin the client work local while your notes use the LAN GPU box |
+|                                                              | What it does                                                                                                                                                                   | Why it matters                                                                                                                                                                           |
+| :----------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[Context Capsules](https://gno.sh/docs/context-capsules)** | Compiles one bounded evidence bundle per goal: exact line spans, content hashes, one global token budget, collapsed duplicates, and a written list of what it could _not_ find | Your agent reads once instead of searching five times. **48.94% fewer retrieval calls, 44.12% less model-visible context, 100% task accuracy retained** across 48 paired benchmark tasks |
+| **[Verified answers](https://gno.sh/docs/cli)**              | `gno ask --verify` generates against one closed Capsule, classifies every substantive claim, and withholds the draft below 100% support                                        | An abstention naming the failing claim beats a confident paragraph you have to fact-check by hand                                                                                        |
+| **[Verified setup](https://gno.sh/docs/project-profiles)**   | `gno setup` returns only after lexical search finds a real hit derived from _your_ corpus                                                                                      | No green checkmark over a folder that indexed but cannot be searched                                                                                                                     |
+| **[Egress policy](https://gno.sh/docs/collection-egress)**   | Per-collection fail-closed `local_only` / `lan` / `remote`, inherited by every derived Capsule, trace, and export                                                              | Mixed setups are normal. Pin the client work local while your notes use the LAN GPU box                                                                                                  |
 
 Everything runs on your machine. Zero telemetry. The three network boundaries are explicit: downloading a model, configuring an HTTP inference endpoint, and uploading an artifact you exported for publishing.
 
@@ -101,7 +101,7 @@ gno daemon --detach  # headless indexing + resident MCP gateway
 
 <!-- public-truth:current-version -->
 
-> Current release: **v1.29.2** — see [CHANGELOG.md](./CHANGELOG.md)
+> Current release: **v1.29.4** — see [CHANGELOG.md](./CHANGELOG.md)
 
 <!-- /public-truth -->
 

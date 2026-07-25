@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.29.4] - 2026-07-25
+
+### Changed
+
+- Rewrote the README opening to lead with what distinguishes GNO — Context
+  Capsules, verified answers, retrieval-proven setup, and collection egress
+  policy — with the measured benchmark result beside each claim instead of an
+  adjective.
+- Rewrote `llms.txt` to cover the current surface, including Context Capsules,
+  verified Ask, Knowledge Delta, private retrieval learning, egress policy, the
+  guides, and the honest limits. It no longer references a nonexistent
+  `docs/NOTES.md`.
+
+### Fixed
+
+- Repointed fifteen `https://gno.sh/docs/UPPERCASE/` README links that returned
+  404 after the site moved to lowercase slugs. Daemon documentation now points
+  at the daemon-mode feature page, which is where it lives on the site.
+- Synchronized the `current-version` public-truth markers in `README.md` and
+  `website/_config.yml`, which the previous release bump left at `1.29.2` and
+  which had been failing `docs:truth` and `docs:verify` on `main`.
+
 ## [1.29.3] - 2026-07-25
 
 ### Fixed
@@ -1882,7 +1904,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.29.3...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.29.4...HEAD
+[1.29.4]: https://github.com/gmickel/gno/compare/v1.29.3...v1.29.4
 [1.29.3]: https://github.com/gmickel/gno/compare/v1.29.2...v1.29.3
 [1.29.2]: https://github.com/gmickel/gno/compare/v1.29.1...v1.29.2
 [1.29.1]: https://github.com/gmickel/gno/compare/v1.29.0...v1.29.1
