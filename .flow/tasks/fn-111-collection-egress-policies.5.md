@@ -37,8 +37,12 @@ Deliver expose policy configuration checks and denials across surfaces as one im
 
 
 ## Done summary
-Exposed collection egress policy management, checks, denials, and audit controls across CLI, REST, MCP, SDK, Web/Desktop, and closed output schemas. Policy relaxations require confirmation bound to the current policy/version; runtime authorization rebinds immutable lineage to current policy, records content-free audit receipts, and denies before trace export persistence. Resident policy changes rotate authorization epochs, invalidate HTTP MCP sessions/caches, and make queued work retry before execution. Local trace inspection, labeling, deletion, and purge remain independent of egress policy. Added deterministic policy state/check/set contracts, atomic config/store projection, audit show/status/delete/purge with physical cleanup reporting, visible Web relaxation confirmation, and cross-surface regression coverage. Updated CLI/MCP/API/Web docs and retrieval eval callsites for explicit egress scope.
+Hardened collection egress policy management across CLI, REST, MCP, SDK, Web/Desktop, and persisted SQLite state. Relaxation confirmations now bind collection, current policy, durable monotonic revision, and target policy; replayed, stale, cross-collection, cross-target, and concurrent reuse fail closed. All runtime entry points share getter-safe closed validation, REST bodies are byte-bounded before buffering, and invalid input causes no config, store, audit, session, or job mutation.
+
+Trace export identity now binds the current policy lineage while preserving immutable historical trace provenance. Resident authorization epochs guard delayed and streaming REST/MCP responses; the mutating MCP request advances to the new epoch while older active responses emit only a content-free retry result. Policy session invalidation rejects new requests immediately and defers closing active sessions until their response finishes.
+
+Added Web/Desktop policy explain controls and newest-first audit receipt inspection, exact show, confirmed delete/purge, opaque pagination, and truthful SQLite cleanup results. Updated schemas, migration 25, CLI/MCP/API/Web documentation, and regression coverage.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f0799c9b
+- Tests: bun run lint:check, bun run typecheck, bun test (3443 pass, 2 expected skips, 0 fail), bun run docs:verify (13 pass, 0 fail, 2 model-cache skips), bun run verify:clipper-package, bun run test:package, autoresearch-gno-skill eval.py (47/47, 100%), .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json
 - PRs:
