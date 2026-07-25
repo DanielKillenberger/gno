@@ -72,6 +72,11 @@ deactivates records that disappeared. A partial snapshot—malformed row,
 truncated file, invalid framing, or any cap failure—never deactivates unseen
 records, so a damaged export cannot authorize deletion.
 
+For JSONL, configure `fieldMapping.id` or provide a conventional `id` field
+when updates must preserve identity. If neither exists, GNO derives identity
+from the row's canonical content. Editing that row therefore appears as one
+removed record plus one added record, not an in-place update.
+
 Search and get results report the real container path in `source.relPath` and a
 `record` object with the bounded locator and metadata. The unique `gno://` URI
 addresses GNO's internal virtual document; use that URI or its docid for

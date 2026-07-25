@@ -1224,6 +1224,7 @@ GET /api/doc?uri=gno://notes/projects/readme.md
   "tags": ["work", "project/alpha"],
   "source": {
     "absPath": "/Users/you/notes/projects/readme.md",
+    "relPath": "projects/readme.md",
     "mime": "text/markdown",
     "ext": ".md",
     "modifiedAt": "2025-01-15T09:00:00Z",
@@ -1241,6 +1242,42 @@ GET /api/doc?uri=gno://notes/projects/readme.md
 ```
 
 For converted source formats such as PDF or DOCX, `capabilities.editable` is `false` and `capabilities.canCreateEditableCopy` is `true`. Those documents remain viewable/searchable, but GNO will not write converted markdown back into the original binary source file.
+
+Logical records derived from JSONL, mail, calendar, transcript, or browser
+exports are also read-only. Their top-level `relPath` and `source.relPath`
+identify the real export container while the `uri` identifies the virtual
+record. These responses additionally include a bounded `record` object:
+
+```json
+{
+  "record": {
+    "recordKey": "a1b2...",
+    "sourceLocator": "lines:1-3",
+    "anchors": [
+      {
+        "kind": "timestamp",
+        "value": "00:01.000",
+        "endValue": "00:03.000"
+      }
+    ],
+    "adapter": {
+      "id": "adapter/transcript",
+      "version": "1.0.0",
+      "fingerprint": "b3c4..."
+    },
+    "author": "Ada",
+    "participants": ["Ada"],
+    "sessionId": "session-7"
+  },
+  "capabilities": {
+    "editable": false,
+    "mode": "read_only"
+  }
+}
+```
+
+Regenerate or edit the source export to change a logical record; GNO never
+writes through its reserved virtual-record path.
 
 **Example**:
 
