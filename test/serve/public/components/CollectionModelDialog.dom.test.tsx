@@ -87,7 +87,7 @@ describe("CollectionModelDialog DOM interactions", () => {
     expect(screen.getByText("Re-index needed after save")).toBeTruthy();
 
     await user.click(
-      screen.getByRole("button", { name: /save model settings/i })
+      screen.getByRole("button", { name: /save collection settings/i })
     );
 
     await waitFor(() => {
@@ -107,5 +107,61 @@ describe("CollectionModelDialog DOM interactions", () => {
     expect(apiFetch.mock.calls[0]?.[0]).toBe("/api/collections/docs");
     expect(requestOptions?.method).toBe("PATCH");
     expect(requestBody.models?.embed).toContain("Qwen3-Embedding-0.6B-GGUF");
+  });
+
+  test("requires visible version-bound confirmation before relaxing policy", async () => {
+    apiFetch.mockImplementation(async () => apiOk({}));
+    const { CollectionModelDialog } =
+      await import("../../../../src/serve/public/components/CollectionModelDialog");
+    const { user } = renderWithUser(
+      <CollectionModelDialog
+        collection={{
+          chunkCount: 0,
+          documentCount: 0,
+          name: "private-notes",
+          path: "/tmp/private",
+          egressPolicy: {
+            schemaVersion: "1.0",
+            collection: "private-notes",
+            configuredPolicy: null,
+            effectivePolicy: "local_only",
+            source: "config_default",
+            version: `egress-policy-v1:${"a".repeat(64)}`,
+          },
+        }}
+        onOpenChange={() => undefined}
+        onSaved={() => undefined}
+        open={true}
+      />
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Collection policy"),
+      "remote"
+    );
+    const save = screen.getByRole("button", {
+      name: /save collection settings/i,
+    });
+    expect((save as HTMLButtonElement).disabled).toBeTrue();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /I confirm this expands where collection content may travel/i,
+      })
+    );
+    expect((save as HTMLButtonElement).disabled).toBeFalse();
+    await user.click(save);
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    expect(apiFetch.mock.calls[0]?.[0]).toBe(
+      "/api/collections/private-notes/egress-policy"
+    );
+    const request = apiFetch.mock.calls[0]?.[1] as RequestInit;
+    const body = request.body;
+    expect(JSON.parse(typeof body === "string" ? body : "{}")).toMatchObject({
+      policy: "remote",
+      confirmation: {
+        currentPolicy: "local_only",
+        currentVersion: `egress-policy-v1:${"a".repeat(64)}`,
+        acknowledged: true,
+      },
+    });
   });
 });

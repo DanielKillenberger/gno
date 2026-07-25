@@ -2366,6 +2366,36 @@ MCP Server Status
 
 ---
 
+## Collection Egress Policy and Audit Tools
+
+Read tools:
+
+- `gno_egress_policy_get { collection }` returns configured/effective policy,
+  provenance source, and the current confirmation version.
+- `gno_egress_check` accepts exact collection scope, action, destination zone,
+  caller authentication/authorization, content class, and partial mode. It
+  performs no action and returns the canonical decision/explanation contract.
+- `gno_egress_audit_list`, `gno_egress_audit_show`, and
+  `gno_egress_audit_status` expose only content-free local receipts.
+
+Write-enabled tools:
+
+- `gno_egress_policy_set` requires confirmation
+  `{ currentPolicy, currentVersion, acknowledged: true }` for relaxation.
+- `gno_egress_audit_delete` deletes exactly one receipt.
+- `gno_egress_audit_purge { confirm: true }` deletes only audit receipts.
+
+Policy does not replace transport authentication or `enableWrite`. Local audit
+inspection remains available when outbound content is denied. Retrieval-trace
+export resolves exact trace lineage and checks policy before creating or
+reusing an export receipt; missing traces return `NOT_FOUND` before policy
+evaluation.
+
+Schemas: `collection-egress-policy.schema.json`,
+`collection-egress-policy-set.schema.json`,
+`collection-egress-check.schema.json`, and
+`egress-audit-management.schema.json`.
+
 ## See Also
 
 - [CLI Specification](./cli.md)

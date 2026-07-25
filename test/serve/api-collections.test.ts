@@ -23,11 +23,14 @@ import type { ContextHolder } from "../../src/serve/routes/api";
 
 import {
   handleClearCollectionEmbeddings,
+  handleCollectionEgressCheck,
+  handleCollectionEgressPolicy,
   handleCollections,
   handleCreateCollection,
   handleDeleteCollection,
   handleImportPreview,
   handleUpdateCollection,
+  handleUpdateCollectionEgressPolicy,
 } from "../../src/serve/routes/api";
 import { safeRm } from "../helpers/cleanup";
 
@@ -191,6 +194,109 @@ describe("GET /api/collections", () => {
     expect(body[0]?.effectiveModels.embed).toBe("hf:test/embed.gguf");
     expect(body[0]?.modelSources.embed).toBe("override");
     expect(body[0]?.activePresetId).toBe("slim-tuned");
+  });
+});
+
+describe("collection egress policy API", () => {
+  test("returns the effective policy and explain-only denial contract", async () => {
+    const ctxHolder = createMockContextHolder({
+      collections: [
+        {
+          name: "docs",
+          path: "/tmp/docs",
+          pattern: "**/*.md",
+          include: [],
+          exclude: [],
+        },
+      ],
+    });
+    const stateResponse = handleCollectionEgressPolicy(ctxHolder, "docs");
+    expect(await stateResponse.json()).toMatchObject({
+      effectivePolicy: "local_only",
+      source: "config_default",
+    });
+    const checked = await handleCollectionEgressCheck(
+      ctxHolder,
+      new Request("http://localhost/api/egress/check", {
+        method: "POST",
+        body: JSON.stringify({
+          collections: ["docs"],
+          action: "export",
+          destinationZone: "remote",
+          caller: { authenticated: true, operationAuthorized: true },
+          contentClass: "retrieval_trace",
+        }),
+      })
+    );
+    expect(await checked.json()).toMatchObject({
+      mode: "denied",
+      decision: { reason: "POLICY_LOCAL_ONLY" },
+    });
+  });
+
+  test("requires bound confirmation for relaxation and invalidates resident state", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "gno-policy-api-"));
+    try {
+      const collection = {
+        name: "docs",
+        path: tmpDir,
+        pattern: "**/*.md",
+        include: [],
+        exclude: [],
+      };
+      await writeConfig({ collections: [collection] });
+      const ctxHolder = createMockContextHolder({
+        collections: [collection],
+      });
+      let invalidated = 0;
+      ctxHolder.invalidateEgressPolicy = () => {
+        invalidated += 1;
+        return Promise.resolve({
+          policyEpoch: `egress-epoch-v1:${"a".repeat(64)}`,
+          queuedJobsInvalidated: 1,
+          sessionsInvalidated: 1,
+          staleWorkMustRetry: true,
+        });
+      };
+      const current = (await handleCollectionEgressPolicy(
+        ctxHolder,
+        "docs"
+      ).json()) as { effectivePolicy: "local_only"; version: string };
+      const unconfirmed = await handleUpdateCollectionEgressPolicy(
+        ctxHolder,
+        createMockStore() as never,
+        "docs",
+        new Request("http://localhost/api/collections/docs/egress-policy", {
+          method: "PUT",
+          body: JSON.stringify({ policy: "remote" }),
+        })
+      );
+      expect(unconfirmed.status).toBe(409);
+      const changed = await handleUpdateCollectionEgressPolicy(
+        ctxHolder,
+        createMockStore() as never,
+        "docs",
+        new Request("http://localhost/api/collections/docs/egress-policy", {
+          method: "PUT",
+          body: JSON.stringify({
+            policy: "remote",
+            confirmation: {
+              currentPolicy: current.effectivePolicy,
+              currentVersion: current.version,
+              acknowledged: true,
+            },
+          }),
+        })
+      );
+      expect(changed.status).toBe(200);
+      expect(await changed.json()).toMatchObject({
+        change: "relaxed",
+        invalidation: { staleWorkMustRetry: true },
+      });
+      expect(invalidated).toBe(1);
+    } finally {
+      await safeRm(tmpDir);
+    }
   });
 });
 

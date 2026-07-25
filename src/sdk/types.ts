@@ -12,12 +12,26 @@ import type { ContentTypeBoostStatus } from "../config/content-types";
 import type { Config } from "../config/types";
 import type { CaptureInput, CaptureReceipt } from "../core/capture";
 import type {
+  CollectionEgressCheckInput,
+  CollectionEgressCheckResult,
+  CollectionEgressPolicySetResult,
+  CollectionEgressPolicyState,
+  EgressRelaxationConfirmation,
+} from "../core/collection-egress-policy-service";
+import type {
   ContextCapsuleErrorCode,
   ContextCapsuleV1,
   ContextCapsuleVerification,
 } from "../core/context-capsule";
 import type { ContextEvidenceErrorCode } from "../core/context-evidence";
 import type { ContextVerifierErrorCode } from "../core/context-verifier";
+import type {
+  EgressAuditDeleteResult,
+  EgressAuditListResult,
+  EgressAuditPurgeManagementResult,
+  EgressAuditShowResult,
+  EgressAuditStatusResult,
+} from "../core/egress-audit";
 import type {
   KnowledgeChangesResult,
   KnowledgeDiffResult,
@@ -300,6 +314,25 @@ export interface GnoClient {
   ): Promise<RetrievalTraceExportResult>;
   deleteRetrievalTrace(traceId: string): Promise<RetrievalTraceDeleteResult>;
   purgeRetrievalTraces(): Promise<RetrievalTraceManagementPurgeResult>;
+  getCollectionEgressPolicy(
+    collection: string
+  ): Promise<CollectionEgressPolicyState>;
+  setCollectionEgressPolicy(
+    collection: string,
+    policy: import("../config/types").EgressPolicy,
+    confirmation?: EgressRelaxationConfirmation
+  ): Promise<CollectionEgressPolicySetResult>;
+  checkEgress(
+    input: CollectionEgressCheckInput
+  ): Promise<CollectionEgressCheckResult>;
+  listEgressAudits(options?: {
+    limit?: number;
+    cursor?: string;
+  }): Promise<EgressAuditListResult>;
+  getEgressAudit(auditId: string): Promise<EgressAuditShowResult>;
+  getEgressAuditStatus(): Promise<EgressAuditStatusResult>;
+  deleteEgressAudit(auditId: string): Promise<EgressAuditDeleteResult>;
+  purgeEgressAudits(): Promise<EgressAuditPurgeManagementResult>;
   update(options?: GnoUpdateOptions): Promise<SyncResult>;
   embed(options?: GnoEmbedOptions): Promise<GnoEmbedResult>;
   index(options?: GnoIndexOptions): Promise<GnoIndexResult>;

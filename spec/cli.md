@@ -672,6 +672,42 @@ gno collection clear-embeddings <name> [--all] [--json]
 
 ---
 
+### gno collection policy
+
+Inspect, change, or explain one collection-owned egress boundary.
+
+```bash
+gno collection policy get <name>
+gno collection policy set <name> <local_only|lan|remote> [--confirm-relaxation <current-version>]
+gno collection policy check --action <action> --destination <zone> --content-class <class> [-c <name>...] [--authenticated] [--authorized] [--partial] [--explain-egress]
+```
+
+`get` returns the configured value, effective value, provenance source, and a
+version fingerprint. Tightening is immediate. Relaxation requires
+`--confirm-relaxation` with the exact current version returned by `get`;
+stale confirmation fails without changing config or the index projection.
+`check` and `--explain-egress` perform no action. They return the same
+content-free decision, lineage, partial disclosure, audit metadata, and
+remediation contract.
+
+### gno egress-audit
+
+Manage local content-free policy decision receipts:
+
+```bash
+gno egress-audit list [--limit <n>] [--cursor <cursor>]
+gno egress-audit show <audit-id>
+gno egress-audit status
+gno egress-audit delete <audit-id>
+gno egress-audit purge
+```
+
+Pages are newest-first. Delete/purge report truthful SQLite physical cleanup
+status. These local inspection and deletion commands never require a relaxed
+collection policy.
+
+---
+
 ### gno embed
 
 Generate embeddings for indexed chunks.

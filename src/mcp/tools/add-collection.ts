@@ -140,6 +140,7 @@ export function handleAddCollection(
         if (!collection) {
           throw new Error("RUNTIME: Collection missing after add");
         }
+        await ctx.invalidateEgressPolicy?.();
 
         const jobId = await ctx.jobManager.startJobWithLock(
           "add",

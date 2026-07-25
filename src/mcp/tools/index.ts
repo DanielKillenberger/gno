@@ -31,6 +31,22 @@ import {
 } from "./changes";
 import { handleClearCollectionEmbeddings } from "./clear-collection-embeddings";
 import { handleContext, handleContextVerify } from "./context";
+import {
+  egressAuditIdInputSchema,
+  egressAuditListInputSchema,
+  egressAuditPurgeInputSchema,
+  egressCheckInputSchema,
+  egressPolicyGetInputSchema,
+  egressPolicySetInputSchema,
+  handleEgressAuditDelete,
+  handleEgressAuditList,
+  handleEgressAuditPurge,
+  handleEgressAuditShow,
+  handleEgressAuditStatus,
+  handleEgressCheck,
+  handleEgressPolicyGet,
+  handleEgressPolicySet,
+} from "./egress";
 import { handleEmbed } from "./embed";
 import { handleGet } from "./get";
 import { handleIndex } from "./index-cmd";
@@ -125,6 +141,9 @@ export const MCP_WRITE_TOOL_NAMES = new Set([
   "gno_trace_export",
   "gno_trace_delete",
   "gno_trace_purge",
+  "gno_egress_policy_set",
+  "gno_egress_audit_delete",
+  "gno_egress_audit_purge",
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1060,6 +1079,41 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   );
 
   server.tool(
+    "gno_egress_policy_get",
+    "Show one collection's configured and effective egress policy, provenance source, and confirmation-bound version.",
+    egressPolicyGetInputSchema.shape,
+    (args) => handleEgressPolicyGet(args, ctx)
+  );
+
+  server.tool(
+    "gno_egress_check",
+    "Check or explain an exact action, destination, caller, content class, and collection scope without performing the action.",
+    egressCheckInputSchema.shape,
+    (args) => handleEgressCheck(args, ctx)
+  );
+
+  server.tool(
+    "gno_egress_audit_list",
+    "List content-free local egress decisions newest-first through an opaque cursor.",
+    egressAuditListInputSchema.shape,
+    (args) => handleEgressAuditList(args, ctx)
+  );
+
+  server.tool(
+    "gno_egress_audit_show",
+    "Inspect one content-free local egress decision receipt.",
+    egressAuditIdInputSchema.shape,
+    (args) => handleEgressAuditShow(args, ctx)
+  );
+
+  server.tool(
+    "gno_egress_audit_status",
+    "Show local egress audit retention and storage status.",
+    {},
+    (args) => handleEgressAuditStatus(args, ctx)
+  );
+
+  server.tool(
     "gno_changes",
     "List retained metadata-only document changes with opaque cursor pagination and retention disclosure.",
     changesInputSchema.shape,
@@ -1151,6 +1205,27 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   );
 
   if (ctx.enableWrite) {
+    server.tool(
+      "gno_egress_policy_set",
+      "Set one collection policy. Relaxation requires confirmation bound to the current policy and version.",
+      egressPolicySetInputSchema.shape,
+      (args) => handleEgressPolicySet(args, ctx)
+    );
+
+    server.tool(
+      "gno_egress_audit_delete",
+      "Delete exactly one local egress audit receipt with physical cleanup status.",
+      egressAuditIdInputSchema.shape,
+      (args) => handleEgressAuditDelete(args, ctx)
+    );
+
+    server.tool(
+      "gno_egress_audit_purge",
+      "Purge local egress audit receipts only. Requires confirm=true.",
+      egressAuditPurgeInputSchema.shape,
+      (args) => handleEgressAuditPurge(args, ctx)
+    );
+
     server.tool(
       "gno_trace_label",
       "Append an explicit relevant, irrelevant, or missing_expected judgment to a local retrieval trace.",

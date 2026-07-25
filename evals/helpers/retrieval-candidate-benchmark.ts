@@ -441,6 +441,7 @@ async function ensureVectorIndex(runtime: {
 
   const embedResult = await runtime.llm.createEmbeddingPort(embedUri, {
     policy: POLICY,
+    egressCollections: "all",
   });
   if (!embedResult.ok) {
     throw new Error(`Failed to load embed model: ${embedResult.error.message}`);
@@ -453,6 +454,7 @@ async function ensureVectorIndex(runtime: {
 
   const rerankResult = await runtime.llm.createRerankPort(rerankUri, {
     policy: POLICY,
+    egressCollections: "all",
   });
   if (!rerankResult.ok) {
     throw new Error(
@@ -765,6 +767,7 @@ async function benchmarkCandidate(
 ): Promise<CandidateBenchmarkResult> {
   const genResult = await runtime.llm.createGenerationPort(candidate.uri, {
     policy: POLICY,
+    egressCollections: "all",
   });
   if (!genResult.ok) {
     return {

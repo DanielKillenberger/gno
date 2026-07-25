@@ -2105,6 +2105,129 @@ function wireManagementCommands(program: Command): void {
       });
     });
 
+  const collectionPolicyCmd = collectionCmd
+    .command("policy")
+    .description("Inspect and change collection egress policy");
+
+  collectionPolicyCmd
+    .command("get <name>")
+    .description("Show effective policy, source, and confirmation version")
+    .action(async (name: string) => {
+      const { collectionPolicyGet } = await import("./commands/collection");
+      await collectionPolicyGet(name, { configPath: getGlobals().config });
+    });
+
+  collectionPolicyCmd
+    .command("set <name> <policy>")
+    .description("Set local_only, lan, or remote policy")
+    .option(
+      "--confirm-relaxation <current-version>",
+      "confirm relaxation against the current policy version"
+    )
+    .action(
+      async (
+        name: string,
+        policy: string,
+        cmdOpts: Record<string, unknown>
+      ) => {
+        if (!["local_only", "lan", "remote"].includes(policy)) {
+          throw new CliError(
+            "VALIDATION",
+            "Policy must be local_only, lan, or remote"
+          );
+        }
+        const { collectionPolicySet } = await import("./commands/collection");
+        await collectionPolicySet(
+          name,
+          policy as "local_only" | "lan" | "remote",
+          {
+            configPath: getGlobals().config,
+            confirmRelaxation: cmdOpts.confirmRelaxation as string | undefined,
+          }
+        );
+      }
+    );
+
+  collectionPolicyCmd
+    .command("check")
+    .description("Check or explain an exact egress decision without acting")
+    .requiredOption("--action <action>", "egress action")
+    .requiredOption(
+      "--destination <zone>",
+      "local_process, loopback, lan, remote"
+    )
+    .requiredOption("--content-class <class>", "content class")
+    .option(
+      "-c, --collection <name>",
+      "collection scope (repeatable)",
+      collectRepeatableValue,
+      []
+    )
+    .option("--authenticated", "caller authentication succeeded")
+    .option("--authorized", "operation authorization succeeded")
+    .option("--partial", "explicitly permit partial collection results")
+    .option(
+      "--explain-egress",
+      "return the same decision contract without performing an action"
+    )
+    .action(async (cmdOpts: Record<string, unknown>) => {
+      const { collectionPolicyCheck } = await import("./commands/collection");
+      await collectionPolicyCheck(
+        {
+          collections: cmdOpts.collection as string[],
+          action: cmdOpts.action as Parameters<
+            typeof collectionPolicyCheck
+          >[0]["action"],
+          destinationZone: cmdOpts.destination as Parameters<
+            typeof collectionPolicyCheck
+          >[0]["destinationZone"],
+          contentClass: cmdOpts.contentClass as Parameters<
+            typeof collectionPolicyCheck
+          >[0]["contentClass"],
+          authenticated: Boolean(cmdOpts.authenticated),
+          authorized: Boolean(cmdOpts.authorized),
+          partial: Boolean(cmdOpts.partial),
+        },
+        { configPath: getGlobals().config }
+      );
+    });
+
+  const egressAuditCmd = program
+    .command("egress-audit")
+    .description("Manage local content-free egress audit receipts");
+  egressAuditCmd
+    .command("list")
+    .option("--limit <count>", "page size", Number)
+    .option("--cursor <cursor>", "opaque next-page cursor")
+    .action(async (cmdOpts: Record<string, unknown>) => {
+      const { egressAuditList } = await import("./commands/egress-audit");
+      await egressAuditList(
+        {
+          limit: cmdOpts.limit as number | undefined,
+          cursor: cmdOpts.cursor as string | undefined,
+        },
+        { configPath: getGlobals().config }
+      );
+    });
+  egressAuditCmd.command("show <audit-id>").action(async (auditId: string) => {
+    const { egressAuditShow } = await import("./commands/egress-audit");
+    await egressAuditShow(auditId, { configPath: getGlobals().config });
+  });
+  egressAuditCmd.command("status").action(async () => {
+    const { egressAuditStatus } = await import("./commands/egress-audit");
+    await egressAuditStatus({ configPath: getGlobals().config });
+  });
+  egressAuditCmd
+    .command("delete <audit-id>")
+    .action(async (auditId: string) => {
+      const { egressAuditDelete } = await import("./commands/egress-audit");
+      await egressAuditDelete(auditId, { configPath: getGlobals().config });
+    });
+  egressAuditCmd.command("purge").action(async () => {
+    const { egressAuditPurge } = await import("./commands/egress-audit");
+    await egressAuditPurge({ configPath: getGlobals().config });
+  });
+
   // context subcommands
   const contextCmd = program
     .command("context")

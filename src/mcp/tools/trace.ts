@@ -106,7 +106,13 @@ const runTraceWrite = <T>(
     async () => {
       if (!ctx.enableWrite) return writeDisabled();
       return withWriteLock(ctx.writeLockPath, async () =>
-        unwrap(await operation(new RetrievalTraceManagementService(ctx.store)))
+        unwrap(
+          await operation(
+            new RetrievalTraceManagementService(ctx.store, {
+              authorizeExport: ctx.authorizeTraceExport,
+            })
+          )
+        )
       );
     },
     jsonText

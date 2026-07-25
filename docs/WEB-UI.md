@@ -343,6 +343,7 @@ View and manage your document collections:
 - **Chunk count**: Text segments created
 - **Embedded %**: Vector embedding progress
 - **Model settings**: Per-collection override editor with inherited-vs-overridden role display
+- **Data boundary**: Effective `local_only`, `lan`, or `remote` policy with provenance
 - **Embedding cleanup**: Clear stale or all embeddings for one collection
 - **Re-index**: Update collection index
 - **Remove**: Delete collection from config
@@ -378,12 +379,17 @@ The dialog shows:
 - one row per role: `embed`, `rerank`, `expand`, `gen`
 - the effective model URI for each role
 - whether the role is inherited from the active preset or overridden on the collection
+- the collection-owned data boundary and whether it is explicit or defaulted
 
 You can:
 
 - paste a model URI into one role without redefining the rest
 - clear one role override and return it to preset inheritance
 - keep the global preset unchanged for all other collections
+- tighten the data boundary immediately
+- relax it only after checking the visible confirmation; the confirmation is
+  bound to the policy version loaded by the dialog, so stale tabs cannot relax
+  a newer policy
 
 If you change the collection's **embed** model on an already-indexed collection, GNO warns that vector search quality will depend on running embeddings for that collection again.
 

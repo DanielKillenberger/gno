@@ -684,6 +684,37 @@ gno embed --collection notes
 
 Shared vectors still referenced by other active collections are retained.
 
+### gno collection policy
+
+Collection policy controls where source and derived content may travel:
+
+```bash
+gno collection policy get notes
+gno collection policy set notes local_only
+gno collection policy set notes remote --confirm-relaxation 'egress-policy-v1:…'
+gno collection policy check --action export --destination remote \
+  --content-class retrieval_trace --collection notes \
+  --authenticated --authorized --explain-egress
+```
+
+Policies become less restrictive in the order `local_only` → `lan` → `remote`.
+Relaxation is never inferred: first run `get`, review the current value/source,
+then pass its exact version to `--confirm-relaxation`. Tightening invalidates
+resident sessions and queued work; stale jobs must be retried and rechecked.
+
+Local content-free receipts:
+
+```bash
+gno egress-audit list
+gno egress-audit show <audit-id>
+gno egress-audit status
+gno egress-audit delete <audit-id>
+gno egress-audit purge
+```
+
+Audit inspection/deletion remains local and usable even when an outbound action
+is denied.
+
 ### gno embed
 
 Generate embeddings for all collections or one collection.

@@ -81,6 +81,10 @@ async function loadAllSchemas(): Promise<void> {
     "retrieval-trace-export",
     "retrieval-trace-delete",
     "retrieval-trace-purge",
+    "collection-egress-policy",
+    "collection-egress-policy-set",
+    "collection-egress-check",
+    "egress-audit-management",
   ];
 
   for (const name of schemaFiles) {

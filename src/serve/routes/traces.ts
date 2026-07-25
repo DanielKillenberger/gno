@@ -1,17 +1,20 @@
 /** Loopback REST handlers for private retrieval trace management. */
 
+import type { Collection } from "../../config/types";
 import type {
   RetrievalTraceExportRequest,
   RetrievalTraceLabelRequest,
 } from "../../core/retrieval-trace-management";
 import type { StoreError, StorePort, StoreResult } from "../../store/types";
 
+import { authorizeCurrentEgress } from "../../core/egress-authorization";
 import { RetrievalTraceManagementService } from "../../core/retrieval-trace-management";
 
 const errorStatus = (error: StoreError): number => {
   if (error.code === "NOT_FOUND") return 404;
   if (error.code === "CONSTRAINT_VIOLATION") return 409;
   if (error.code === "INVALID_INPUT") return 400;
+  if (error.code === "EGRESS_DENIED") return 403;
   return 500;
 };
 
@@ -135,14 +138,34 @@ export const handleTraceLabel = async (
 
 export const handleTraceExport = async (
   store: StorePort,
-  request: Request
+  request: Request,
+  collections: readonly Collection[] = []
 ): Promise<Response> => {
   const body = await parseJsonObject(request);
   if (body instanceof Response) return body;
   return response(
-    await new RetrievalTraceManagementService(store).export(
-      body as unknown as RetrievalTraceExportRequest
-    )
+    await new RetrievalTraceManagementService(store, {
+      authorizeExport: async (lineage) => {
+        const hostname = new URL(request.url).hostname;
+        const destinationZone = ["localhost", "127.0.0.1", "::1"].includes(
+          hostname
+        )
+          ? "local_process"
+          : "remote";
+        return authorizeCurrentEgress({
+          store,
+          config: { collections },
+          lineage,
+          action: "export",
+          destinationZone,
+          caller: {
+            authenticated: true,
+            operationAuthorized: true,
+          },
+          contentClass: "retrieval_trace",
+        });
+      },
+    }).export(body as unknown as RetrievalTraceExportRequest)
   );
 };
 

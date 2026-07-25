@@ -179,6 +179,44 @@ describe("egress audit receipts", () => {
     ).toBe(priorSecureDelete);
   });
 
+  test("shows status and deletes exactly one receipt", async () => {
+    const service = new EgressAuditService(store, {
+      clock: () => 20_000,
+      idFactory: () => "audit-exact",
+    });
+    expect(
+      (
+        await service.record({
+          decision: decision("loopback"),
+          lineage,
+          contentClass: "capsule",
+          retention,
+        })
+      ).ok
+    ).toBeTrue();
+    expect(await service.show("audit-exact")).toMatchObject({
+      ok: true,
+      value: { receipt: { auditId: "audit-exact" } },
+    });
+    expect(await service.status()).toMatchObject({
+      ok: true,
+      value: {
+        receipts: 1,
+        retention: {
+          maxAgeDays: 30,
+          maxReceipts: 10_000,
+          maxBytes: 4 * 1024 * 1024,
+        },
+      },
+    });
+    expect(await service.delete("audit-exact")).toMatchObject({
+      ok: true,
+      value: { auditId: "audit-exact", deleted: 1 },
+    });
+    expect((await service.show("audit-exact")).ok).toBeFalse();
+    expect((await service.delete("audit-exact")).ok).toBeFalse();
+  });
+
   test("rejects caller-forged decision metadata before persistence", async () => {
     const service = new EgressAuditService(store, {
       clock: () => 50_000,

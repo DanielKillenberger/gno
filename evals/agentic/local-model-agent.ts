@@ -274,6 +274,7 @@ const createDefaultRuntime: LocalModelRuntimeFactory = async (
   const adapter = new LlmAdapter(config);
   const portResult = await adapter.createGenerationPort(fileUri, {
     policy: { offline: true, allowDownload: false },
+    egressCollections: "all",
   });
   if (!portResult.ok) {
     throw new AgenticHarnessError(

@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gno.sh/schemas/collection-egress-policy-set.schema.json",
+  "title": "Collection egress policy mutation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "previous",
+    "current",
+    "change",
+    "invalidation"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "previous": {
+      "$ref": "collection-egress-policy.schema.json"
+    },
+    "current": {
+      "$ref": "collection-egress-policy.schema.json"
+    },
+    "change": {
+      "enum": ["tightened", "relaxed", "unchanged"]
+    },
+    "invalidation": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policyEpoch",
+            "queuedJobsInvalidated",
+            "sessionsInvalidated",
+            "staleWorkMustRetry"
+          ],
+          "properties": {
+            "policyEpoch": {
+              "type": "string",
+              "pattern": "^egress-epoch-v1:[a-f0-9]{64}$"
+            },
+            "queuedJobsInvalidated": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sessionsInvalidated": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "staleWorkMustRetry": { "const": true }
+          }
+        }
+      ]
+    }
+  }
+}

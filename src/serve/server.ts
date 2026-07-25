@@ -26,6 +26,8 @@ import {
   handleBrowseTree,
   handleCapabilities,
   handleClearCollectionEmbeddings,
+  handleCollectionEgressCheck,
+  handleCollectionEgressPolicy,
   handleCollections,
   handleConnectors,
   handleCreateFolder,
@@ -43,6 +45,11 @@ import {
   handleDuplicateDoc,
   handleEmbed,
   handleEmbedStatus,
+  handleEgressAuditDelete,
+  handleEgressAuditList,
+  handleEgressAuditPurge,
+  handleEgressAuditShow,
+  handleEgressAuditStatus,
   handleHealth,
   handleImportPreview,
   handleInstallConnector,
@@ -66,6 +73,7 @@ import {
   handleTags,
   handleTrashDoc,
   handleUpdateCollection,
+  handleUpdateCollectionEgressPolicy,
   handleUpdateDoc,
   handleVerifyConnector,
 } from "./routes/api";
@@ -304,7 +312,7 @@ export async function startServer(
             }
             return withSecurityHeaders(
               await handleResidentRead(runtime as ResidentRuntime, req, () =>
-                handleTraceExport(store, req)
+                handleTraceExport(store, req, ctxHolder.config.collections)
               ),
               isDev
             );
@@ -394,6 +402,53 @@ export async function startServer(
             }
             return withSecurityHeaders(
               await handleCreateCollection(ctxHolder, store, req),
+              isDev
+            );
+          },
+        },
+        "/api/egress/check": {
+          POST: async (req: Request) =>
+            withSecurityHeaders(
+              await handleCollectionEgressCheck(ctxHolder, req),
+              isDev
+            ),
+        },
+        "/api/egress/audits/status": {
+          GET: async () =>
+            withSecurityHeaders(await handleEgressAuditStatus(store), isDev),
+        },
+        "/api/egress/audits": {
+          GET: async (req: Request) =>
+            withSecurityHeaders(await handleEgressAuditList(store, req), isDev),
+          DELETE: async (req: Request) => {
+            if (!isRequestAllowed(req, port)) {
+              return withSecurityHeaders(forbiddenResponse(), isDev);
+            }
+            return withSecurityHeaders(
+              await handleEgressAuditPurge(store),
+              isDev
+            );
+          },
+        },
+        "/api/egress/audits/:auditId": {
+          GET: async (req: Request) => {
+            const auditId = decodeURIComponent(
+              new URL(req.url).pathname.split("/").at(-1) ?? ""
+            );
+            return withSecurityHeaders(
+              await handleEgressAuditShow(store, auditId),
+              isDev
+            );
+          },
+          DELETE: async (req: Request) => {
+            if (!isRequestAllowed(req, port)) {
+              return withSecurityHeaders(forbiddenResponse(), isDev);
+            }
+            const auditId = decodeURIComponent(
+              new URL(req.url).pathname.split("/").at(-1) ?? ""
+            );
+            return withSecurityHeaders(
+              await handleEgressAuditDelete(store, auditId),
               isDev
             );
           },
@@ -889,6 +944,32 @@ export async function startServer(
             );
             return withSecurityHeaders(
               await handleDeleteCollection(ctxHolder, store, name),
+              isDev
+            );
+          },
+        },
+        "/api/collections/:name/egress-policy": {
+          GET: (req: Request) => {
+            const parts = new URL(req.url).pathname.split("/");
+            const name = decodeURIComponent(parts.at(-2) ?? "");
+            return withSecurityHeaders(
+              handleCollectionEgressPolicy(ctxHolder, name),
+              isDev
+            );
+          },
+          PUT: async (req: Request) => {
+            if (!isRequestAllowed(req, port)) {
+              return withSecurityHeaders(forbiddenResponse(), isDev);
+            }
+            const parts = new URL(req.url).pathname.split("/");
+            const name = decodeURIComponent(parts.at(-2) ?? "");
+            return withSecurityHeaders(
+              await handleUpdateCollectionEgressPolicy(
+                ctxHolder,
+                store,
+                name,
+                req
+              ),
               isDev
             );
           },

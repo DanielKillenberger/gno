@@ -91,6 +91,7 @@ interface CollectionStats {
     "override" | "preset" | "default"
   >;
   pattern?: string;
+  egressPolicy?: CollectionModelDetails["egressPolicy"];
 }
 
 interface StatusResponse {
@@ -411,6 +412,7 @@ export default function Collections({ navigate }: PageProps) {
         models: config?.models,
         modelSources: config?.modelSources,
         pattern: config?.pattern,
+        egressPolicy: config?.egressPolicy,
       };
     });
 

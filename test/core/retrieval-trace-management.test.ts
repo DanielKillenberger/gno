@@ -10,6 +10,7 @@ import type {
   RetrievalTraceTerminalStatus,
 } from "../../src/store/types";
 
+import { authorizeCurrentEgress } from "../../src/core/egress-authorization";
 import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import { SqliteAdapter } from "../../src/store";
@@ -375,6 +376,73 @@ describe("retrieval trace management", () => {
     });
     expect(malformed.ok).toBeFalse();
     if (!malformed.ok) expect(malformed.error.code).toBe("INVALID_INPUT");
+  });
+
+  test("checks exact lineage before export and leaves no denied artifact state", async () => {
+    expect(
+      (await store.createRetrievalTrace(traceInput("blocked", 1000))).ok
+    ).toBeTrue();
+    expect(
+      (await store.finalizeRetrievalTrace("blocked", "completed", 1001)).ok
+    ).toBeTrue();
+    const service = new RetrievalTraceManagementService(store, {
+      authorizeExport: (lineage) =>
+        authorizeCurrentEgress({
+          store,
+          config: {
+            collections: [
+              {
+                name: "notes",
+                path: "/tmp/notes",
+                pattern: "**/*.md",
+                include: [],
+                exclude: [],
+                egressPolicy: "local_only",
+              },
+            ],
+          },
+          lineage,
+          action: "export",
+          destinationZone: "remote",
+          caller: { authenticated: true, operationAuthorized: true },
+          contentClass: "retrieval_trace",
+        }),
+    });
+    const denied = await service.export({ traceIds: ["blocked"] });
+    expect(denied).toMatchObject({
+      ok: false,
+      error: { code: "EGRESS_DENIED" },
+    });
+    const counts = store
+      .getRawDb()
+      .query<{ exports: number; links: number }, []>(
+        `SELECT
+           (SELECT COUNT(*) FROM retrieval_trace_exports) AS exports,
+           (SELECT COUNT(*) FROM retrieval_trace_export_traces) AS links`
+      )
+      .get();
+    expect(counts).toEqual({ exports: 0, links: 0 });
+    expect(
+      store
+        .getRawDb()
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM egress_audit_receipts"
+        )
+        .get()?.count
+    ).toBe(1);
+
+    let gateCalled = false;
+    const missing = await new RetrievalTraceManagementService(store, {
+      authorizeExport: async () => {
+        gateCalled = true;
+        return { ok: true, value: undefined };
+      },
+    }).export({ traceIds: ["missing"] });
+    expect(missing).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
+    expect(gateCalled).toBeFalse();
   });
 
   test("rejects deletion of an unknown trace instead of fabricating a receipt", async () => {

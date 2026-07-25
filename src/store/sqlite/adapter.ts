@@ -45,11 +45,14 @@ import type {
   DocumentRow,
   EmbeddingCleanupStats,
   EgressAuditCursor,
+  EgressAuditDeleteResult,
   EgressAuditPage,
   EgressAuditPurgeResult,
   EgressAuditReceiptInput,
+  EgressAuditReceiptRow,
   EgressAuditRetentionPolicy,
   EgressAuditRetentionResult,
+  EgressAuditStatusResult,
   FtsResult,
   FtsSearchOptions,
   GetGraphOptions,
@@ -144,7 +147,10 @@ import {
 import {
   appendEgressAuditReceipt as appendStoredEgressAuditReceipt,
   appendEgressAuditReceiptWithRetention as appendStoredEgressAuditReceiptWithRetention,
+  deleteEgressAuditReceipt as deleteStoredEgressAuditReceipt,
   enforceEgressAuditRetention as enforceStoredEgressAuditRetention,
+  getEgressAuditReceipt as getStoredEgressAuditReceipt,
+  getEgressAuditStatus as getStoredEgressAuditStatus,
   listEgressAuditReceipts as listStoredEgressAuditReceipts,
   purgeEgressAuditReceipts as purgeStoredEgressAuditReceipts,
 } from "./egress-audit-store";
@@ -1137,6 +1143,22 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     cursor?: EgressAuditCursor
   ): Promise<StoreResult<EgressAuditPage>> {
     return listStoredEgressAuditReceipts(this.ensureOpen(), limit, cursor);
+  }
+
+  async getEgressAuditReceipt(
+    auditId: string
+  ): Promise<StoreResult<EgressAuditReceiptRow | null>> {
+    return getStoredEgressAuditReceipt(this.ensureOpen(), auditId);
+  }
+
+  async deleteEgressAuditReceipt(
+    auditId: string
+  ): Promise<StoreResult<EgressAuditDeleteResult>> {
+    return deleteStoredEgressAuditReceipt(this.ensureOpen(), auditId);
+  }
+
+  async getEgressAuditStatus(): Promise<StoreResult<EgressAuditStatusResult>> {
+    return getStoredEgressAuditStatus(this.ensureOpen());
   }
 
   async enforceEgressAuditRetention(

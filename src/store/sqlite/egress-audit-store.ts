@@ -4,12 +4,14 @@ import type { Database } from "bun:sqlite";
 
 import type {
   EgressAuditCursor,
+  EgressAuditDeleteResult,
   EgressAuditPage,
   EgressAuditPurgeResult,
   EgressAuditReceiptInput,
   EgressAuditReceiptRow,
   EgressAuditRetentionPolicy,
   EgressAuditRetentionResult,
+  EgressAuditStatusResult,
   RetrievalTraceAppendResult,
   StoreResult,
 } from "../types";
@@ -266,6 +268,122 @@ export const listEgressAuditReceipts = (
   }
 };
 
+export const getEgressAuditReceipt = (
+  db: Database,
+  auditId: string
+): StoreResult<EgressAuditReceiptRow | null> => {
+  try {
+    if (auditId.length < 1 || auditId.length > 128) {
+      throw new RangeError("Invalid egress audit ID");
+    }
+    const row = db
+      .query<DbAuditRow, [string]>(
+        "SELECT * FROM egress_audit_receipts WHERE audit_id = ?"
+      )
+      .get(auditId);
+    return ok(row ? mapRow(row) : null);
+  } catch (cause) {
+    return err(
+      cause instanceof RangeError ? "INVALID_INPUT" : "QUERY_FAILED",
+      cause instanceof Error ? cause.message : "Failed to get egress audit",
+      cause
+    );
+  }
+};
+
+const checkpointAfterDelete = (
+  db: Database,
+  deleted: number
+): Omit<EgressAuditPurgeResult, "deleted"> & { deleted: number } => {
+  try {
+    const checkpoint =
+      db
+        .query<{ busy: number; log: number; checkpointed: number }, []>(
+          "PRAGMA wal_checkpoint(TRUNCATE)"
+        )
+        .get() ?? undefined;
+    return {
+      deleted,
+      physicalCleanup:
+        checkpoint?.busy === 0 &&
+        (checkpoint.log === 0 || checkpoint.log === -1)
+          ? "completed"
+          : "wal_busy",
+      checkpointedFrames: checkpoint?.checkpointed ?? 0,
+      remainingWalFrames: checkpoint?.log ?? -1,
+    };
+  } catch {
+    return {
+      deleted,
+      physicalCleanup: "failed",
+      checkpointedFrames: 0,
+      remainingWalFrames: -1,
+    };
+  }
+};
+
+export const deleteEgressAuditReceipt = (
+  db: Database,
+  auditId: string
+): StoreResult<EgressAuditDeleteResult> => {
+  const prior = readSecureDelete(db);
+  try {
+    if (auditId.length < 1 || auditId.length > 128) {
+      throw new RangeError("Invalid egress audit ID");
+    }
+    db.exec("PRAGMA secure_delete = ON");
+    const deleted = db.run(
+      "DELETE FROM egress_audit_receipts WHERE audit_id = ?",
+      [auditId]
+    ).changes;
+    return ok({ auditId, ...checkpointAfterDelete(db, deleted) });
+  } catch (cause) {
+    return err(
+      cause instanceof RangeError ? "INVALID_INPUT" : "QUERY_FAILED",
+      cause instanceof Error ? cause.message : "Failed to delete egress audit",
+      cause
+    );
+  } finally {
+    restoreSecureDelete(db, prior);
+  }
+};
+
+export const getEgressAuditStatus = (
+  db: Database
+): StoreResult<EgressAuditStatusResult> => {
+  try {
+    const row = db
+      .query<
+        {
+          receipts: number;
+          bytes: number | null;
+          oldest_created_at_ms: number | null;
+          newest_created_at_ms: number | null;
+        },
+        []
+      >(
+        `SELECT COUNT(*) AS receipts,
+                SUM(byte_size) AS bytes,
+                MIN(created_at_ms) AS oldest_created_at_ms,
+                MAX(created_at_ms) AS newest_created_at_ms
+         FROM egress_audit_receipts`
+      )
+      .get();
+    return ok({
+      receipts: row?.receipts ?? 0,
+      bytes: row?.bytes ?? 0,
+      oldestCreatedAtMs: row?.oldest_created_at_ms ?? null,
+      newestCreatedAtMs: row?.newest_created_at_ms ?? null,
+    });
+  } catch (cause) {
+    return err(
+      "QUERY_FAILED",
+      cause instanceof Error ? cause.message : "Failed to inspect egress audit",
+      cause
+    );
+  }
+};
+
 const validateRetention = (
   policy: EgressAuditRetentionPolicy,
   nowMs: number
@@ -354,34 +472,7 @@ export const purgeEgressAuditReceipts = (
     const deleted = db.transaction(
       () => db.run("DELETE FROM egress_audit_receipts").changes
     )();
-    let checkpoint:
-      | { busy: number; log: number; checkpointed: number }
-      | undefined;
-    try {
-      checkpoint =
-        db
-          .query<{ busy: number; log: number; checkpointed: number }, []>(
-            "PRAGMA wal_checkpoint(TRUNCATE)"
-          )
-          .get() ?? undefined;
-    } catch {
-      return ok({
-        deleted,
-        physicalCleanup: "failed",
-        checkpointedFrames: 0,
-        remainingWalFrames: -1,
-      });
-    }
-    return ok({
-      deleted,
-      physicalCleanup:
-        checkpoint?.busy === 0 &&
-        (checkpoint.log === 0 || checkpoint.log === -1)
-          ? "completed"
-          : "wal_busy",
-      checkpointedFrames: checkpoint?.checkpointed ?? 0,
-      remainingWalFrames: checkpoint?.log ?? -1,
-    });
+    return ok(checkpointAfterDelete(db, deleted));
   } catch (cause) {
     return err(
       "QUERY_FAILED",

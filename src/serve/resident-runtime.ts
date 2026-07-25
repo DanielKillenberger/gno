@@ -32,6 +32,8 @@ import {
   loadConfig,
 } from "../config";
 import { SavedCapsuleReverificationScheduler } from "../core/capsule-reverification-scheduler";
+import { collectionEgressPolicyEpoch } from "../core/collection-egress-policy-service";
+import { authorizeCurrentEgress } from "../core/egress-authorization";
 import { acquireWriteLock } from "../core/file-lock";
 import { JobManager } from "../core/job-manager";
 import { recordContentMutation } from "../core/mutation-generations";
@@ -107,6 +109,7 @@ export interface ResidentRuntime {
   setTransportStatusProvider(
     provider: (() => HttpMcpTransportStatus) | null
   ): void;
+  setPolicySessionInvalidator(invalidator: (() => Promise<void>) | null): void;
   admitRequest(signal?: AbortSignal): ResidentRequestHandle | null;
   withModelLease<T>(operation: () => Promise<T>): Promise<T>;
   markContentMutation(): void;
@@ -306,6 +309,7 @@ export async function startResidentRuntime(
     serverInstanceId,
     toolMutex,
   });
+  jobManager.setAuthorizationEpoch(collectionEgressPolicyEpoch(initialConfig));
   ctxHolder.jobManager = jobManager;
   const admission = new AdmissionController();
   const readerGate = new ReaderGate(
@@ -315,6 +319,7 @@ export async function startResidentRuntime(
   const startedAt = Date.now();
   let listenerPort: number | null = null;
   let transportStatusProvider: (() => HttpMcpTransportStatus) | null = null;
+  let policySessionInvalidator: (() => Promise<void>) | null = null;
   let shutdownState: ResidentStatus["shutdown"]["state"] = "none";
   let admissionState: ResidentStatus["admission"]["state"] = "accepting";
   let disposed = false;
@@ -359,7 +364,32 @@ export async function startResidentRuntime(
     markIndexMutation: () => {
       generations.index += 1;
     },
+    invalidateEgressPolicy: async () =>
+      (await ctxHolder.invalidateEgressPolicy?.()) ?? {
+        policyEpoch: collectionEgressPolicyEpoch(ctxHolder.config),
+        queuedJobsInvalidated: 0,
+        sessionsInvalidated: 0,
+        staleWorkMustRetry: true,
+      },
   });
+  mcpContext.authorizeTraceExport = async (lineage) => {
+    const egress = mcpContext.getEgressContext?.();
+    return authorizeCurrentEgress({
+      store,
+      config: ctxHolder.config,
+      lineage,
+      action: "export",
+      destinationZone:
+        egress?.destinationZone === "loopback"
+          ? "local_process"
+          : (egress?.destinationZone ?? "local_process"),
+      caller: egress?.caller ?? {
+        authenticated: true,
+        operationAuthorized: true,
+      },
+      contentClass: "retrieval_trace",
+    });
+  };
 
   const runtime: ResidentRuntime = {
     mode: options.mode ?? "serve",
@@ -450,6 +480,9 @@ export async function startResidentRuntime(
     setTransportStatusProvider(provider) {
       transportStatusProvider = provider;
     },
+    setPolicySessionInvalidator(invalidator) {
+      policySessionInvalidator = invalidator;
+    },
     async syncAll(syncOptions = {}) {
       const config = ctxHolder.config;
       const syncAllService = deps.syncAllService
@@ -508,6 +541,18 @@ export async function startResidentRuntime(
   };
   ctxHolder.startBackgroundWork = (operation) =>
     runtime.startBackgroundWork(operation);
+  ctxHolder.invalidateEgressPolicy = async () => {
+    const sessionsInvalidated = transportStatusProvider?.().activeSessions ?? 0;
+    const policyEpoch = collectionEgressPolicyEpoch(ctxHolder.config);
+    const queuedJobsInvalidated = jobManager.setAuthorizationEpoch(policyEpoch);
+    await policySessionInvalidator?.();
+    return {
+      policyEpoch,
+      queuedJobsInvalidated,
+      sessionsInvalidated,
+      staleWorkMustRetry: true,
+    };
+  };
   mcpContext.getResidentStatus = () => runtime.getStatus();
   return { success: true, runtime };
 }

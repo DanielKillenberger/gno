@@ -6,6 +6,7 @@ import type {
   StorePort,
   StoreResult,
 } from "../store/types";
+import type { EgressLineage } from "./egress-provenance";
 import type {
   ExportRetrievalTracesInput,
   ExportRetrievalTracesResult,
@@ -58,7 +59,10 @@ export const exportRetrievalTraces = async <
 >(
   store: StorePort,
   clock: () => number,
-  input: ExportRetrievalTracesInput<Format>
+  input: ExportRetrievalTracesInput<Format>,
+  deps: {
+    authorize?: (lineage: EgressLineage) => Promise<StoreResult<void>>;
+  } = {}
 ): Promise<StoreResult<ExportRetrievalTracesResult<Format>>> => {
   const format = input.format ?? "agentic-receipt";
   if (!["agentic-receipt", "qrels"].includes(format)) {
@@ -81,6 +85,8 @@ export const exportRetrievalTraces = async <
   }
   const built = buildArtifact(format, bundles);
   if (!built.ok) return built;
+  const authorized = await deps.authorize?.(built.value.egressLineage);
+  if (authorized && !authorized.ok) return authorized;
   const artifactHash = hashTraceCanonical(built.value);
   const exportId = `trace-export-${artifactHash.slice(0, 40)}`;
   const appended = await store.appendRetrievalTraceExportManifest({

@@ -131,6 +131,20 @@ Relevant/irrelevant targets must match recorded evidence; missing-expected
 accepts a content-free document identity. Export rejects open/missing traces
 and preserves all terminal outcomes without implicit negative feedback.
 
+Collection boundary tools use the same policy contract on every transport:
+
+- `gno_egress_policy_get` shows effective policy, provenance, and confirmation version.
+- `gno_egress_check` explains an exact action/destination/caller/content-class
+  decision without performing the action.
+- `gno_egress_policy_set` is write-enabled; relaxation requires the exact
+  current policy/version and explicit acknowledgement.
+- `gno_egress_audit_list|show|status` inspect content-free local receipts;
+  `gno_egress_audit_delete|purge` are write-enabled local cleanup controls.
+
+Collection policy never replaces bearer authentication or the MCP write flag.
+Trace export resolves exact trace lineage and checks policy before creating or
+reusing an export receipt.
+
 For ambiguous terms, pass `intent` instead of stuffing extra words into `query`:
 
 ```json
@@ -1575,3 +1589,12 @@ GNO_VERBOSE=1 gno mcp
 - Index only what you need (use `--pattern` filters)
 - Use specific collections for faster searches
 - Pre-download models: `gno models pull --all`
+  Collection boundary tools:
+
+- `gno_egress_policy_get` shows effective policy, provenance, and confirmation version.
+- `gno_egress_check` explains an exact action/destination/caller/content-class
+  decision without performing the action.
+- `gno_egress_policy_set` is write-enabled; relaxation requires the exact
+  current policy/version and explicit acknowledgement.
+- `gno_egress_audit_list|show|status` inspect content-free local receipts;
+  `gno_egress_audit_delete|purge` are write-enabled local cleanup controls.

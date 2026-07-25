@@ -27,6 +27,14 @@ export const MCP_HTTP_EGRESS_TOOLS = {
   gno_diff: "metadata",
   gno_duplicate_note: "metadata",
   gno_embed: "metadata",
+  gno_egress_audit_delete: "audit_log",
+  gno_egress_audit_list: "audit_log",
+  gno_egress_audit_purge: "audit_log",
+  gno_egress_audit_show: "audit_log",
+  gno_egress_audit_status: "audit_log",
+  gno_egress_check: "audit_log",
+  gno_egress_policy_get: "metadata",
+  gno_egress_policy_set: "metadata",
   gno_get: "source",
   gno_graph: "metadata",
   gno_graph_neighbors: "metadata",
@@ -139,6 +147,9 @@ const enforceMessage = (
     const params = asRecord(message.params);
     const name = params?.name;
     if (typeof name !== "string" || !(name in MCP_HTTP_EGRESS_TOOLS)) return;
+    // Trace export is authorized inside RetrievalTraceManagementService after
+    // exact trace IDs resolve to their immutable collection lineage.
+    if (name === "gno_trace_export") return;
     contentClass =
       MCP_HTTP_EGRESS_TOOLS[name as keyof typeof MCP_HTTP_EGRESS_TOOLS];
   } else if (

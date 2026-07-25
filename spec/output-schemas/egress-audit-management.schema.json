@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gno.sh/schemas/egress-audit-management.schema.json",
+  "title": "Egress audit management output",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "receipts", "nextCursor"],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "receipts": { "type": "array" },
+        "nextCursor": { "type": ["string", "null"] }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "receipt"],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "receipt": { "type": "object" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "retention",
+        "receipts",
+        "bytes",
+        "oldestCreatedAtMs",
+        "newestCreatedAtMs"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "retention": { "type": "object" },
+        "receipts": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "oldestCreatedAtMs": { "type": ["integer", "null"] },
+        "newestCreatedAtMs": { "type": ["integer", "null"] }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "auditId",
+        "deleted",
+        "physicalCleanup",
+        "checkpointedFrames",
+        "remainingWalFrames"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "auditId": { "type": "string" },
+        "deleted": { "const": 1 },
+        "physicalCleanup": {
+          "enum": ["completed", "wal_busy", "failed"]
+        },
+        "checkpointedFrames": { "type": "integer" },
+        "remainingWalFrames": { "type": "integer" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "deleted",
+        "physicalCleanup",
+        "checkpointedFrames",
+        "remainingWalFrames"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "deleted": { "type": "integer", "minimum": 0 },
+        "physicalCleanup": {
+          "enum": ["completed", "wal_busy", "failed"]
+        },
+        "checkpointedFrames": { "type": "integer" },
+        "remainingWalFrames": { "type": "integer" }
+      }
+    }
+  ]
+}

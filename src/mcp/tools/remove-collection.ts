@@ -89,6 +89,7 @@ export function handleRemoveCollection(
         if (!mutationResult.ok) {
           throw mapConfigError(mutationResult.code, mutationResult.error);
         }
+        await ctx.invalidateEgressPolicy?.();
         ctx.markContentMutation?.();
         ctx.markIndexMutation?.();
 

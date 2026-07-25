@@ -321,10 +321,26 @@ export class HttpMcpTransport {
         }
         throw error;
       }
-      const response = await transport.handleRequest(
-        request,
-        requestBody === undefined ? undefined : { parsedBody: requestBody }
-      );
+      const handle = () =>
+        transport.handleRequest(
+          request,
+          requestBody === undefined ? undefined : { parsedBody: requestBody }
+        );
+      const destinationZone =
+        context.peerClassification?.zone ??
+        (context.identity === "loopback" ? "loopback" : "remote");
+      const response = this.#runtime.mcpContext.runWithEgressContext
+        ? await this.#runtime.mcpContext.runWithEgressContext(
+            {
+              destinationZone,
+              caller: {
+                authenticated: context.authenticated ?? false,
+                operationAuthorized: true,
+              },
+            },
+            handle
+          )
+        : await handle();
 
       if (pending) {
         session = pending.session;

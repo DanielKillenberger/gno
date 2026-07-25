@@ -1,10 +1,11 @@
 /** Bounded local management service for content-free egress receipts. */
 
 import type {
+  EgressAuditDeleteResult as StoredEgressAuditDeleteResult,
   EgressAuditPage,
+  EgressAuditPurgeResult,
   EgressAuditRetentionPolicy,
   EgressAuditRetentionResult,
-  EgressAuditPurgeResult,
   StorePort,
   StoreResult,
 } from "../store/types";
@@ -72,6 +73,28 @@ export interface EgressAuditListResult extends Omit<
   schemaVersion: "1.0";
   nextCursor: string | null;
 }
+
+export interface EgressAuditStatusResult {
+  schemaVersion: "1.0";
+  retention: EgressAuditRetentionPolicy;
+  receipts: number;
+  bytes: number;
+  oldestCreatedAtMs: number | null;
+  newestCreatedAtMs: number | null;
+}
+
+export interface EgressAuditShowResult {
+  schemaVersion: "1.0";
+  receipt: EgressAuditPage["receipts"][number];
+}
+
+export type EgressAuditDeleteResult = StoredEgressAuditDeleteResult & {
+  schemaVersion: "1.0";
+};
+
+export type EgressAuditPurgeManagementResult = EgressAuditPurgeResult & {
+  schemaVersion: "1.0";
+};
 
 export class EgressAuditService {
   private readonly clock: () => number;
@@ -175,6 +198,33 @@ export class EgressAuditService {
     });
   }
 
+  async show(auditId: string): Promise<StoreResult<EgressAuditShowResult>> {
+    const receipt = await this.store.getEgressAuditReceipt(auditId);
+    if (!receipt.ok) return receipt;
+    return receipt.value
+      ? ok({ schemaVersion: "1.0", receipt: receipt.value })
+      : err("NOT_FOUND", "Egress audit receipt not found");
+  }
+
+  async status(): Promise<StoreResult<EgressAuditStatusResult>> {
+    const status = await this.store.getEgressAuditStatus();
+    return status.ok
+      ? ok({
+          schemaVersion: "1.0",
+          retention: { ...DEFAULT_RETENTION },
+          ...status.value,
+        })
+      : status;
+  }
+
+  async delete(auditId: string): Promise<StoreResult<EgressAuditDeleteResult>> {
+    const deleted = await this.store.deleteEgressAuditReceipt(auditId);
+    if (!deleted.ok) return deleted;
+    return deleted.value.deleted === 0
+      ? err("NOT_FOUND", "Egress audit receipt not found")
+      : ok({ schemaVersion: "1.0" as const, ...deleted.value });
+  }
+
   enforceRetention(
     policy: EgressAuditRetentionPolicy,
     nowMs = this.clock()
@@ -182,7 +232,8 @@ export class EgressAuditService {
     return this.store.enforceEgressAuditRetention(policy, nowMs);
   }
 
-  purge(): Promise<StoreResult<EgressAuditPurgeResult>> {
-    return this.store.purgeEgressAuditReceipts();
+  async purge(): Promise<StoreResult<EgressAuditPurgeManagementResult>> {
+    const purged = await this.store.purgeEgressAuditReceipts();
+    return purged.ok ? ok({ schemaVersion: "1.0", ...purged.value }) : purged;
   }
 }

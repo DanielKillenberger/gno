@@ -79,6 +79,10 @@ import {
   planCapture,
 } from "../core/capture";
 import { writeCapturePlanFile } from "../core/capture-write";
+import { CollectionEgressPolicyService } from "../core/collection-egress-policy-service";
+import { applyConfigChange } from "../core/config-mutation";
+import { EgressAuditService } from "../core/egress-audit";
+import { authorizeCurrentEgress } from "../core/egress-authorization";
 import {
   atomicWrite,
   copyFilePath,
@@ -270,7 +274,7 @@ async function resolveClientState(
 }
 
 class GnoClientImpl implements GnoClient {
-  readonly config: Config;
+  config: Config;
   readonly dbPath: string;
   readonly configPath: string | null;
   readonly configSource: "file" | "inline";
@@ -1237,7 +1241,19 @@ class GnoClientImpl implements GnoClient {
   ) {
     this.assertOpen();
     return unwrapTraceStore(
-      await new RetrievalTraceManagementService(this.store).export(input)
+      await new RetrievalTraceManagementService(this.store, {
+        authorizeExport: async (lineage) => {
+          return authorizeCurrentEgress({
+            store: this.store,
+            config: this.config,
+            lineage,
+            action: "export",
+            destinationZone: "local_process",
+            caller: { authenticated: true, operationAuthorized: true },
+            contentClass: "retrieval_trace",
+          });
+        },
+      }).export(input)
     );
   }
 
@@ -1253,6 +1269,90 @@ class GnoClientImpl implements GnoClient {
     return unwrapTraceStore(
       await new RetrievalTraceManagementService(this.store).purge()
     );
+  }
+
+  async getCollectionEgressPolicy(collection: string) {
+    this.assertOpen();
+    const state = new CollectionEgressPolicyService({
+      getConfig: () => this.config,
+    }).get(collection);
+    if (!state) throw sdkError("VALIDATION", "Collection not found");
+    return state;
+  }
+
+  async setCollectionEgressPolicy(
+    collection: string,
+    policy: import("../config/types").EgressPolicy,
+    confirmation?: import("../core/collection-egress-policy-service").EgressRelaxationConfirmation
+  ) {
+    this.assertOpen();
+    if (!this.configPath) {
+      throw sdkError(
+        "VALIDATION",
+        "Inline-config clients cannot persist collection policy changes"
+      );
+    }
+    const service = new CollectionEgressPolicyService({
+      getConfig: () => this.config,
+      mutateConfig: (mutate) =>
+        applyConfigChange(
+          {
+            store: this.store,
+            configPath: this.configPath ?? undefined,
+            onConfigUpdated: (config) => {
+              this.config = config;
+            },
+          },
+          mutate
+        ),
+    });
+    const result = await service.set({
+      collection,
+      policy,
+      confirmation,
+    });
+    if (!result.ok) throw sdkError("VALIDATION", result.error);
+    return result.value;
+  }
+
+  async checkEgress(
+    input: import("../core/collection-egress-policy-service").CollectionEgressCheckInput
+  ) {
+    this.assertOpen();
+    return new CollectionEgressPolicyService({
+      getConfig: () => this.config,
+    }).check(input);
+  }
+
+  async listEgressAudits(options: { limit?: number; cursor?: string } = {}) {
+    this.assertOpen();
+    return unwrapTraceStore(
+      await new EgressAuditService(this.store).list(options)
+    );
+  }
+
+  async getEgressAudit(auditId: string) {
+    this.assertOpen();
+    return unwrapTraceStore(
+      await new EgressAuditService(this.store).show(auditId)
+    );
+  }
+
+  async getEgressAuditStatus() {
+    this.assertOpen();
+    return unwrapTraceStore(await new EgressAuditService(this.store).status());
+  }
+
+  async deleteEgressAudit(auditId: string) {
+    this.assertOpen();
+    return unwrapTraceStore(
+      await new EgressAuditService(this.store).delete(auditId)
+    );
+  }
+
+  async purgeEgressAudits() {
+    this.assertOpen();
+    return unwrapTraceStore(await new EgressAuditService(this.store).purge());
   }
 
   async update(options: GnoUpdateOptions = {}): Promise<SyncResult> {

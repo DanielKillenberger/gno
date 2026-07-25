@@ -8,6 +8,10 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../hooks/use-api";
+import {
+  CollectionEgressPolicyEditor,
+  type CollectionEgressPolicy,
+} from "./CollectionEgressPolicyEditor";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -50,6 +54,14 @@ export interface CollectionModelDetails {
   name: string;
   path: string;
   pattern?: string;
+  egressPolicy?: {
+    schemaVersion: "1.0";
+    collection: string;
+    configuredPolicy: "local_only" | "lan" | "remote" | null;
+    effectivePolicy: "local_only" | "lan" | "remote";
+    source: "explicit" | "config_default";
+    version: string;
+  } | null;
 }
 
 interface UpdateCollectionResponse {
@@ -132,6 +144,9 @@ export function CollectionModelDialog({
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [policyDraft, setPolicyDraft] =
+    useState<CollectionEgressPolicy>("local_only");
+  const [relaxationConfirmed, setRelaxationConfirmed] = useState(false);
   const showCodeRecommendation =
     collection !== null &&
     collectionLooksCodeHeavy(collection) &&
@@ -150,6 +165,8 @@ export function CollectionModelDialog({
     });
     setError(null);
     setSaving(false);
+    setPolicyDraft(collection.egressPolicy?.effectivePolicy ?? "local_only");
+    setRelaxationConfirmed(false);
   }, [collection, open]);
 
   const patch = useMemo(() => {
@@ -170,7 +187,13 @@ export function CollectionModelDialog({
     return nextPatch;
   }, [collection, draft]);
 
-  const hasChanges = Object.keys(patch).length > 0;
+  const originalPolicy =
+    collection?.egressPolicy?.effectivePolicy ?? "local_only";
+  const policyChanged = policyDraft !== originalPolicy;
+  const policyOrder = { local_only: 0, lan: 1, remote: 2 } as const;
+  const policyRelaxed =
+    policyChanged && policyOrder[policyDraft] > policyOrder[originalPolicy];
+  const hasChanges = Object.keys(patch).length > 0 || policyChanged;
   const embedChanged = Object.hasOwn(patch, "embed");
 
   const handleSave = async () => {
@@ -181,13 +204,44 @@ export function CollectionModelDialog({
     setSaving(true);
     setError(null);
 
-    const { error: requestError } = await apiFetch<UpdateCollectionResponse>(
-      `/api/collections/${encodeURIComponent(collection.name)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({ models: patch }),
+    if (policyChanged) {
+      const state = collection.egressPolicy;
+      const { error: policyError } = await apiFetch(
+        `/api/collections/${encodeURIComponent(collection.name)}/egress-policy`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            policy: policyDraft,
+            confirmation:
+              policyRelaxed && state && relaxationConfirmed
+                ? {
+                    currentPolicy: state.effectivePolicy,
+                    currentVersion: state.version,
+                    acknowledged: true,
+                  }
+                : undefined,
+          }),
+        }
+      );
+      if (policyError) {
+        setSaving(false);
+        setError(policyError);
+        return;
       }
-    );
+    }
+
+    const requestError =
+      Object.keys(patch).length > 0
+        ? (
+            await apiFetch<UpdateCollectionResponse>(
+              `/api/collections/${encodeURIComponent(collection.name)}`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({ models: patch }),
+              }
+            )
+          ).error
+        : null;
 
     setSaving(false);
 
@@ -240,6 +294,17 @@ export function CollectionModelDialog({
         {/* Scrollable model roles */}
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <div className="divide-y divide-border/15">
+            <CollectionEgressPolicyEditor
+              confirmed={relaxationConfirmed}
+              onConfirmedChange={setRelaxationConfirmed}
+              onPolicyChange={(policy) => {
+                setPolicyDraft(policy);
+                setRelaxationConfirmed(false);
+              }}
+              policy={policyDraft}
+              relaxed={policyRelaxed}
+              source={collection?.egressPolicy?.source ?? "config_default"}
+            />
             {MODEL_ROLES.map((role) => {
               const source = collection?.modelSources?.[role] ?? "preset";
               const effectiveValue = collection?.effectiveModels?.[role] ?? "";
@@ -385,12 +450,14 @@ export function CollectionModelDialog({
           </Button>
           <Button
             className="text-xs"
-            disabled={!hasChanges || saving}
+            disabled={
+              !hasChanges || saving || (policyRelaxed && !relaxationConfirmed)
+            }
             onClick={() => void handleSave()}
             size="sm"
           >
             {saving ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-            Save model settings
+            Save collection settings
           </Button>
         </DialogFooter>
       </DialogContent>

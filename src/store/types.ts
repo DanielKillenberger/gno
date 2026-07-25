@@ -32,6 +32,7 @@ export type StoreErrorCode =
   | "INVALID_INPUT"
   | "IO_ERROR"
   | "INTERNAL"
+  | "EGRESS_DENIED"
   // Vector-specific error codes (EPIC 7)
   | "VECTOR_WRITE_FAILED"
   | "VECTOR_DELETE_FAILED"
@@ -1250,6 +1251,17 @@ export interface EgressAuditPurgeResult {
   remainingWalFrames: number;
 }
 
+export interface EgressAuditDeleteResult extends EgressAuditPurgeResult {
+  auditId: string;
+}
+
+export interface EgressAuditStatusResult {
+  receipts: number;
+  bytes: number;
+  oldestCreatedAtMs: number | null;
+  newestCreatedAtMs: number | null;
+}
+
 export interface RetrievalTraceBundle {
   trace: RetrievalTraceRow;
   runs: RetrievalTraceRunRow[];
@@ -1523,6 +1535,19 @@ export interface StorePort {
     limit: number,
     cursor?: EgressAuditCursor
   ): Promise<StoreResult<EgressAuditPage>>;
+
+  /** Inspect one content-free receipt by stable local identifier. */
+  getEgressAuditReceipt(
+    auditId: string
+  ): Promise<StoreResult<EgressAuditReceiptRow | null>>;
+
+  /** Delete exactly one audit receipt with truthful physical cleanup status. */
+  deleteEgressAuditReceipt(
+    auditId: string
+  ): Promise<StoreResult<EgressAuditDeleteResult>>;
+
+  /** Return content-free local audit storage and retention facts. */
+  getEgressAuditStatus(): Promise<StoreResult<EgressAuditStatusResult>>;
 
   /** Enforce the audit domain's independent age/count/byte policy. */
   enforceEgressAuditRetention(

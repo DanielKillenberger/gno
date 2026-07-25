@@ -5,10 +5,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { Collection, Config } from "../config/types";
+import type {
+  EgressCallerContext,
+  EgressDestinationZone,
+} from "../core/egress-policy";
+import type { EgressLineage } from "../core/egress-provenance";
 import type { JobManager } from "../core/job-manager";
 import type { ModelLease } from "../llm/nodeLlamaCpp/lifecycle";
 import type { ResidentStatus } from "../serve/status-model";
 import type { SqliteAdapter } from "../store/sqlite/adapter";
+import type { StoreResult } from "../store/types";
 
 import { MCP_SERVER_NAME, VERSION } from "../app/constants";
 import { createStandaloneResidentStatus } from "../serve/resident-status";
@@ -46,6 +52,10 @@ export class Mutex implements AsyncMutex {
 export interface ToolContextSnapshot {
   config: Config;
   collections: Collection[];
+  egress?: {
+    destinationZone: EgressDestinationZone;
+    caller: EgressCallerContext;
+  };
 }
 
 export interface ToolContext {
@@ -64,6 +74,18 @@ export interface ToolContext {
   acquireModelLease?: () => ModelLease;
   markContentMutation?: () => void;
   markIndexMutation?: () => void;
+  invalidateEgressPolicy?: () => Promise<{
+    policyEpoch: string;
+    queuedJobsInvalidated: number;
+    sessionsInvalidated: number;
+    staleWorkMustRetry: true;
+  }>;
+  authorizeTraceExport?: (lineage: EgressLineage) => Promise<StoreResult<void>>;
+  getEgressContext?: () => ToolContextSnapshot["egress"];
+  runWithEgressContext?<T>(
+    egress: NonNullable<ToolContextSnapshot["egress"]>,
+    operation: () => Promise<T>
+  ): Promise<T>;
   runWithSnapshot?<T>(operation: () => Promise<T>): Promise<T>;
 }
 
@@ -83,6 +105,8 @@ export interface CreateToolContextOptions {
   acquireModelLease?: () => ModelLease;
   markContentMutation?: () => void;
   markIndexMutation?: () => void;
+  invalidateEgressPolicy?: ToolContext["invalidateEgressPolicy"];
+  authorizeTraceExport?: ToolContext["authorizeTraceExport"];
 }
 
 /**
@@ -131,10 +155,27 @@ export function createToolContext(
     acquireModelLease: options.acquireModelLease,
     markContentMutation: options.markContentMutation,
     markIndexMutation: options.markIndexMutation,
+    invalidateEgressPolicy: options.invalidateEgressPolicy,
+    authorizeTraceExport: options.authorizeTraceExport,
+    getEgressContext: () => requestSnapshot.getStore()?.egress,
+    runWithEgressContext<T>(
+      egress: NonNullable<ToolContextSnapshot["egress"]>,
+      operation: () => Promise<T>
+    ): Promise<T> {
+      const config = options.getConfig();
+      return requestSnapshot.run(
+        { config, collections: config.collections, egress },
+        operation
+      );
+    },
     runWithSnapshot<T>(operation: () => Promise<T>): Promise<T> {
       const config = options.getConfig();
       return requestSnapshot.run(
-        { config, collections: config.collections },
+        {
+          config,
+          collections: config.collections,
+          egress: requestSnapshot.getStore()?.egress,
+        },
         operation
       );
     },

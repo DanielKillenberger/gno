@@ -720,6 +720,51 @@ GET /api/collections
 ```
 
 `effectiveModels` and `modelSources` exist so clients can show inherited-vs-overridden collection model state without re-implementing preset resolution logic.
+Each item also includes `egressPolicy`: configured/effective policy, provenance
+source, and the version required for an explicit relaxation confirmation.
+
+---
+
+### Collection Egress Policy
+
+```http
+GET /api/collections/:name/egress-policy
+PUT /api/collections/:name/egress-policy
+POST /api/egress/check
+```
+
+`PUT` accepts `{ "policy": "local_only|lan|remote" }`. A relaxation additionally
+requires:
+
+```json
+{
+  "confirmation": {
+    "currentPolicy": "local_only",
+    "currentVersion": "egress-policy-v1:…",
+    "acknowledged": true
+  }
+}
+```
+
+The confirmation must match the current locked config state. Successful policy
+changes sync config and DB projection, rotate the authorization epoch, close
+resident MCP sessions, and invalidate queued work. `POST /api/egress/check`
+accepts exact `collections`, `action`, `destinationZone`, `caller`, and
+`contentClass`; optional `partialResults: "explicit"` returns allowed and
+omitted collections with disclosure. It performs no protected action.
+
+Content-free local audit controls:
+
+```http
+GET    /api/egress/audits
+GET    /api/egress/audits/status
+GET    /api/egress/audits/:auditId
+DELETE /api/egress/audits/:auditId
+DELETE /api/egress/audits
+```
+
+Listing is newest-first with an opaque cursor. Deletion/purge returns exact
+counts and physical cleanup status.
 
 ---
 
