@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.29.5] - 2026-07-25
+
+### Changed
+
+- Reframed the README and `llms.txt` openings so they describe the whole
+  product before the differentiators. The previous wording led with Context
+  Capsules to the point where GNO read like a single-feature tool rather than a
+  local knowledge engine with hybrid search, a workspace, a graph, an SDK, a
+  REST API, and ten agent integrations.
+
 ## [1.29.4] - 2026-07-25
 
 ### Changed
@@ -1904,7 +1914,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.29.4...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.29.5...HEAD
+[1.29.5]: https://github.com/gmickel/gno/compare/v1.29.4...v1.29.5
 [1.29.4]: https://github.com/gmickel/gno/compare/v1.29.3...v1.29.4
 [1.29.3]: https://github.com/gmickel/gno/compare/v1.29.2...v1.29.3
 [1.29.2]: https://github.com/gmickel/gno/compare/v1.29.1...v1.29.2

@@ -2,7 +2,7 @@
 
 **Search finds. GNO proves.**
 
-A local knowledge engine for your notes, code, PDFs, and Office docs — that hands agents evidence with exact line spans and content hashes, and stops when the evidence stops.
+A local knowledge engine for your notes, code, PDFs, and Office docs. Hybrid search, a browsable workspace with graph and editor, CLI, SDK, REST API, and MCP for ten AI clients — plus retrieval that can show its work.
 
 [![npm](./assets/badges/npm.svg)](https://www.npmjs.com/package/@gmickel/gno)
 [![MIT License](./assets/badges/license.svg)](./LICENSE)
@@ -17,6 +17,12 @@ bun install -g @gmickel/gno
 gno setup ~/notes --name notes     # returns only after retrieval actually works
 gno mcp install --target cursor    # or claude-code, claude-desktop, zed, ...
 ```
+
+## What you get
+
+BM25 and vector retrieval fused and reranked over Markdown, code, PDFs, Office files, and exported mail, calendar and transcripts. A web workspace with cross-collection browse, a knowledge graph, a markdown editor and provenance-carrying capture. A fast CLI, a TypeScript SDK, a REST API, a headless daemon, and one-command install into ten agent clients. Optional hosted publishing when a slice needs a URL.
+
+That is the table stakes. Here is the part that is harder to find elsewhere.
 
 ## Why not just another local RAG tool
 
@@ -101,7 +107,7 @@ gno daemon --detach  # headless indexing + resident MCP gateway
 
 <!-- public-truth:current-version -->
 
-> Current release: **v1.29.4** — see [CHANGELOG.md](./CHANGELOG.md)
+> Current release: **v1.29.5** — see [CHANGELOG.md](./CHANGELOG.md)
 
 <!-- /public-truth -->
 

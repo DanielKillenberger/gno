@@ -1,6 +1,6 @@
 # GNO
 
-> A local knowledge engine for notes, code, PDFs, and Office documents. GNO indexes your files on your own machine and hands agents deterministic evidence: Context Capsules with exact line spans and content hashes, answers that abstain when support is incomplete, and receipts you can re-verify later. Open source, MIT licensed, zero telemetry.
+> A local knowledge engine for notes, code, PDFs, and Office documents. GNO indexes your files on your own machine and gives you hybrid keyword-plus-semantic search, a browsable workspace with knowledge graph and editor, a CLI, an SDK, a REST API, and MCP or agent-skill integration for ten AI clients. What sets it apart is that its retrieval can show its work: deterministic evidence with exact line spans and content hashes, answers that abstain when support is incomplete, and receipts you can re-verify later. Open source, MIT licensed, zero telemetry.
 
 Install with `bun install -g @gmickel/gno` (requires Bun >= 1.3), then `gno setup ~/notes --name notes`. Setup returns only after lexical search proves a real corpus-derived hit, so success means retrieval works rather than that files were copied.
 
