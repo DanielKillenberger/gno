@@ -29,6 +29,8 @@ the existing one-document converter lane.
 
 Automatic formats need no adapter configuration. Collection `include` remains
 an extension allowlist; include the desired extensions when it is nonempty.
+With the default empty `include`, an explicitly configured JSON transcript
+adapter automatically adds `.json` to the normal supported-extension scan.
 
 Use a closed JSONL mapping when export fields do not use GNO's conventional
 `id`, `title`, `text`/`content`/`body`, and `author` names:

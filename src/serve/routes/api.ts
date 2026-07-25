@@ -1639,7 +1639,7 @@ export async function handleDocs(
       uri: doc.uri,
       title: doc.title,
       collection: doc.collection,
-      relPath: doc.relPath,
+      relPath: doc.recordSourcePath ?? doc.relPath,
       sourceExt: doc.sourceExt,
       sourceMime: doc.sourceMime,
       updatedAt: doc.updatedAt,

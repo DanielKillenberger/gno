@@ -1588,17 +1588,18 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       const normalizedPathPrefix = pathPrefix
         ?.replaceAll("\\", "/")
         .replace(/^\/+|\/+$/g, "");
+      const browsePathSql = "COALESCE(d.record_source_path, d.rel_path)";
 
       if (normalizedPathPrefix) {
-        conditions.push("d.rel_path LIKE ?");
+        conditions.push(`${browsePathSql} LIKE ?`);
         params.push(`${normalizedPathPrefix}/%`);
 
         if (directChildrenOnly) {
-          conditions.push("substr(d.rel_path, ?) NOT LIKE '%/%'");
+          conditions.push(`substr(${browsePathSql}, ?) NOT LIKE '%/%'`);
           params.push(normalizedPathPrefix.length + 2);
         }
       } else if (directChildrenOnly) {
-        conditions.push("d.rel_path NOT LIKE '%/%'");
+        conditions.push(`${browsePathSql} NOT LIKE '%/%'`);
       }
 
       if (options.since) {

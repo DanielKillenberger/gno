@@ -264,6 +264,7 @@ describe("FileWalker", () => {
         root: FIXTURES_ROOT,
         pattern: "**/*",
         include: [".ts"], // Explicit: only .ts files
+        additionalDefaultExtensions: [".md"],
         exclude: [".git", "node_modules"],
         maxBytes: 10_000_000,
       });

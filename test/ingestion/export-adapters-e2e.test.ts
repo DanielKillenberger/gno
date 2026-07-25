@@ -417,6 +417,43 @@ describe("file/export adapter ingestion", () => {
     expect(secondContent?.ok && secondContent.value).toContain("new body");
   });
 
+  test("discovers configured JSON transcripts with the default include", async () => {
+    await Bun.write(
+      join(root, "configured-transcript.json"),
+      JSON.stringify({
+        id: "session-99",
+        title: "Configured transcript",
+        segments: [
+          {
+            id: "segment-1",
+            speaker: "Ada",
+            text: "JSON transcript discovery evidence",
+          },
+        ],
+      })
+    );
+    const collection = config.collections[0]!;
+    collection.recordAdapters = { transcript: { format: "json" } };
+
+    const result = await new SyncService().syncCollection(collection, store, {
+      projectTypedEdges: false,
+    });
+
+    expect(result.filesAdded).toBe(1);
+    expect(result.filesErrored).toBe(0);
+    const documents = await store.listDocuments("exports");
+    expect(documents.ok).toBe(true);
+    if (!documents.ok) return;
+    expect(
+      documents.value.some(
+        (document) =>
+          document.active &&
+          document.recordSourcePath === "configured-transcript.json" &&
+          document.converterId === "adapter/transcript"
+      )
+    ).toBe(true);
+  });
+
   test("rolls back record writes and preserves source evidence when a lane transition fails", async () => {
     const sourcePath = join(root, "atomic.txt");
     await Bun.write(sourcePath, "Alice: source evidence survives\n");

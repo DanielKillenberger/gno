@@ -146,18 +146,25 @@ async function safeRelPath(
 /**
  * Check if a file extension matches the include list.
  * Include list contains extensions like ".md" or "md" (normalized).
- * When include is empty, falls back to SUPPORTED_EXTENSIONS to avoid
- * walking files that can't be converted.
+ * When include is empty, falls back to SUPPORTED_EXTENSIONS plus extensions
+ * made convertible by explicit adapter configuration.
  */
-function matchesInclude(relPath: string, include: string[]): boolean {
+function matchesInclude(
+  relPath: string,
+  include: string[],
+  additionalDefaultExtensions: string[]
+): boolean {
   const ext = extname(relPath).toLowerCase();
   if (!ext) {
     return false;
   }
 
-  // Fallback to supported extensions when no explicit include list
+  if (include.length === 0 && SUPPORTED_EXTENSIONS.includes(ext)) {
+    return true;
+  }
+
   const effectiveInclude =
-    include.length === 0 ? SUPPORTED_EXTENSIONS : include;
+    include.length === 0 ? additionalDefaultExtensions : include;
 
   return effectiveInclude.some((inc) => {
     const normalizedInc = inc.startsWith(".")
@@ -237,7 +244,13 @@ export class FileWalker implements WalkerPort {
       }
 
       // Check include extensions
-      if (!matchesInclude(relPath, config.include)) {
+      if (
+        !matchesInclude(
+          relPath,
+          config.include,
+          config.additionalDefaultExtensions ?? []
+        )
+      ) {
         skipped.push({
           absPath,
           relPath,

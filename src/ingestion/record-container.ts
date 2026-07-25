@@ -303,7 +303,8 @@ const persistRecord = async (
   input: RecordContainerInput,
   record: Awaited<ReturnType<typeof runRecordAdapter>>["records"][number],
   existing: DocumentRow | undefined,
-  wrapInTransaction = true
+  wrapInTransaction = true,
+  rebuildEvidence = true
 ): Promise<void> => {
   const virtualPath = recordVirtualPath(input.entry.relPath, record.recordKey);
   const inferred = input.extractMetadata(
@@ -367,6 +368,7 @@ const persistRecord = async (
       }),
       "upsertDocument"
     );
+    if (!rebuildEvidence) return;
     mustOk(
       await input.store.upsertContent(record.mirrorHash, record.markdown),
       "upsertContent"
@@ -408,6 +410,23 @@ const persistRecord = async (
   if (!(wrapInTransaction && input.store.withTransaction)) return persist();
   mustOk(await input.store.withTransaction(persist), "persistRecord");
 };
+
+const sameJsonValue = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+
+const recordProvenanceChanged = (
+  input: RecordContainerInput,
+  record: Awaited<ReturnType<typeof runRecordAdapter>>["records"][number],
+  existing: DocumentRow
+): boolean =>
+  existing.sourceMime !== input.mime ||
+  existing.sourceExt !== input.ext ||
+  existing.sourceSize !== input.sourceSize ||
+  existing.sourceMtime !== input.sourceMtime ||
+  existing.sourceCtime !== input.sourceCtime ||
+  existing.recordSourcePath !== input.entry.relPath ||
+  existing.recordSourceLocator !== record.sourceLocator ||
+  !sameJsonValue(existing.recordAnchors, record.anchors);
 
 /** Stream, reconcile, and persist one export container as virtual documents. */
 export async function processRecordContainer(
@@ -486,12 +505,18 @@ export async function processRecordContainer(
       }
       if (action.type === "unchanged" && action.record) {
         const existing = priorByKey.get(action.record.recordKey);
-        if (
+        const projectionChanged =
           existing?.ingestVersion !== input.ingestVersion ||
           existing.contentTypeRulesFingerprint !==
-            input.contentTypeRulesFingerprint
-        ) {
+            input.contentTypeRulesFingerprint;
+        if (projectionChanged) {
           await persistRecord(input, action.record, existing, false);
+          changed = true;
+        } else if (
+          existing &&
+          recordProvenanceChanged(input, action.record, existing)
+        ) {
+          await persistRecord(input, action.record, existing, false, false);
           changed = true;
         }
         continue;

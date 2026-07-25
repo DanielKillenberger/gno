@@ -36,8 +36,10 @@ export interface WalkConfig {
   root: string;
   /** Glob pattern (default: **\/*) */
   pattern: string;
-  /** Extension allowlist (empty = all) */
+  /** Extension allowlist (empty = supported defaults) */
   include: string[];
+  /** Adapter-configured extensions added only to the supported defaults. */
+  additionalDefaultExtensions?: string[];
   /** Paths/patterns to exclude */
   exclude: string[];
   /** Max file size in bytes (files larger are skipped) */
@@ -276,6 +278,13 @@ export interface LanguageDetectorPort {
 // Helper to create WalkConfig from Collection
 // ─────────────────────────────────────────────────────────────────────────────
 
+const TRANSCRIPT_EXTENSION_BY_FORMAT = {
+  json: ".json",
+  srt: ".srt",
+  text: ".txt",
+  vtt: ".vtt",
+} as const;
+
 /**
  * Create WalkConfig from Collection with maxBytes override.
  */
@@ -283,10 +292,14 @@ export function collectionToWalkConfig(
   collection: Collection,
   maxBytes: number
 ): WalkConfig {
+  const transcriptFormat = collection.recordAdapters?.transcript?.format;
   return {
     root: collection.path,
     pattern: collection.pattern,
     include: collection.include,
+    additionalDefaultExtensions: transcriptFormat
+      ? [TRANSCRIPT_EXTENSION_BY_FORMAT[transcriptFormat]]
+      : [],
     exclude: collection.exclude,
     maxBytes,
   };

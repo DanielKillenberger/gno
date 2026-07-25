@@ -128,6 +128,9 @@ explicit JSON/text transcript selection; it cannot execute code. See
 [File and Export Adapters](guides/file-export-adapters.md) for the support
 matrix, fixed resource and 60-second adapter deadline caps, partial-import
 receipts, snapshot/tombstone semantics, and no-live-account security boundary.
+When `include` is empty, configuring `recordAdapters.transcript.format: json`
+also makes `.json` files discoverable. A nonempty `include` remains an explicit
+allowlist and must list `.json`.
 
 ## Resident HTTP MCP Gateway
 

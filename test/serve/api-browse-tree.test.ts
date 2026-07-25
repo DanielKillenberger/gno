@@ -45,7 +45,8 @@ describe("browse tree API", () => {
   async function createDoc(
     collection: string,
     relPath: string,
-    hash: string
+    hash: string,
+    recordSourcePath?: string
   ): Promise<void> {
     const doc: DocumentInput = {
       collection,
@@ -57,6 +58,7 @@ describe("browse tree API", () => {
       sourceMtime: new Date().toISOString(),
       title: relPath,
       mirrorHash: hash,
+      recordSourcePath,
       ingestVersion: 2,
     };
     const result = await store.upsertDocument(doc);
@@ -122,5 +124,44 @@ describe("browse tree API", () => {
       "projects/gno/spec.md",
       "projects/gno/tasks.md",
     ]);
+  });
+
+  test("browses logical records at their source container path", async () => {
+    await createDoc(
+      "notes",
+      ".gno/records/a1/message.md",
+      "hash-logical",
+      "exports/mail/archive.mbox"
+    );
+
+    const docsResponse = await handleDocs(
+      store,
+      new URL(
+        "http://localhost/api/docs?collection=notes&pathPrefix=exports/mail&directChildrenOnly=true"
+      )
+    );
+    const docsBody = (await docsResponse.json()) as {
+      documents: Array<{ relPath: string }>;
+      total: number;
+    };
+    expect(docsBody.total).toBe(1);
+    expect(docsBody.documents.map((doc) => doc.relPath)).toEqual([
+      "exports/mail/archive.mbox",
+    ]);
+
+    const treeResponse = await handleBrowseTree(store);
+    const treeBody = (await treeResponse.json()) as {
+      collections: Array<{
+        name: string;
+        children: Array<{
+          name: string;
+          children: Array<{ name: string }>;
+        }>;
+      }>;
+    };
+    const notes = treeBody.collections.find((node) => node.name === "notes");
+    expect(notes?.children[0]?.name).toBe("exports");
+    expect(notes?.children[0]?.children[0]?.name).toBe("mail");
+    expect(JSON.stringify(treeBody)).not.toContain(".gno/records");
   });
 });
