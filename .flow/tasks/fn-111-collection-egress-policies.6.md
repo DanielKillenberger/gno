@@ -40,9 +40,12 @@ Deliver prove migration adversarial enforcement and public security docs as one 
 
 
 ## Done summary
-TBD
+Completed the adversarial security, migration, and public-contract proof for collection egress policies. Added v12-to-current migration coverage proving legacy collections retain lexical retrieval and indexed state while receiving fail-closed `legacy_default` policy provenance. Expanded cross-surface trace tests to prove authentication, write authorization, and collection destination policy remain independent gates; denied MCP and REST exports expose no query, path, URI, target, or trace content and create no aggregate manifest, while local loopback inspection, delete, and physical purge remain available and truthful.
 
+Documented the complete `local_only` / `lan` / `remote` contract, revision-bound relaxation, immediate tightening invalidation, mixed-evidence restriction, explicit partial behavior, content-free audit receipts, migration friction, remote takedown responsibility, and client-encrypted never-server-decrypt boundary across repo docs, DB specification, agent skill, README, changelog, and hosted gno.sh configuration/privacy/publish/legal/pricing surfaces. Added hosted public-truth regression tests so those claims cannot silently drift.
+
+Verified the entire GNO and gno.sh surfaces. GNO lint, typecheck, 3,448-test suite, docs verifier, clipper reproducibility, packed-package smoke, and real-store integrity sentinel passed. The focused egress/security/migration lane passed 123 tests. The agent skill benchmark stayed at 47/47. gno.sh formatting, lint, typecheck, 112-test suite, production build, and 68-page prerender passed.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: d152799b, gno.sh 96995e0, gno.sh 0b473f7
+- Tests: focused egress/security/migration: 123 pass, 0 fail, 1042 assertions, bun run lint:check, bun run typecheck, bun test: 3448 pass, 2 expected skips, 0 fail, 26716 assertions, bun run docs:verify: 13 pass, 0 fail, 2 model-cache skips, bun run verify:clipper-package: reproducible SHA-256 5cdb85ddd0e73801a566527b7a908c8e0854a83c56cae281bab5f1285dae6734, bun run test:package: passed; real GNO store sentinel unchanged, autoresearch-gno-skill eval.py: 47/47, 100%, gno.sh bun run check + typecheck + bun test: 112 pass, 7 expected integration skips, 0 fail, gno.sh production build: 68 pages prerendered
 - PRs:
