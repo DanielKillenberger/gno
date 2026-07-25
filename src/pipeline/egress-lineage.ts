@@ -41,14 +41,18 @@ export const attachSearchResultEgressLineage = async (
   ];
   let ownershipDocuments = options.ownershipDocuments;
   if (ownershipDocuments === undefined) {
-    const documentsResult = await store.getDocumentsByMirrorHashes(
-      mirrorHashes,
-      {
-        activeOnly: true,
-      }
-    );
-    if (!documentsResult.ok) return documentsResult;
-    ownershipDocuments = documentsResult.value;
+    if (typeof store.getDocumentsByMirrorHashes !== "function") {
+      ownershipDocuments = [];
+    } else {
+      const documentsResult = await store.getDocumentsByMirrorHashes(
+        mirrorHashes,
+        {
+          activeOnly: true,
+        }
+      );
+      if (!documentsResult.ok) return documentsResult;
+      ownershipDocuments = documentsResult.value;
+    }
   }
   let collectionRows = options.collections;
   if (collectionRows === undefined) {

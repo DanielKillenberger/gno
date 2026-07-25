@@ -1,6 +1,6 @@
 {
   "benchmarkId": "project-affinity-promotion@1",
-  "canonicalFingerprint": "729d10f66621870924bc02b927bc4b868444d6ccb13d5a16c2f5582c3ab27aac",
+  "canonicalFingerprint": "47c7bfc849b71c7580253f64b3e498999b8b31434450e298959e884ef9edc9a5",
   "fixture": {
     "bindingFingerprint": "346f1f4cdca5b31bf9c56813c0aa5e24c4ce2ab6e1b0ca77d72b558a9a8b99e0",
     "bindings": [
@@ -135,10 +135,10 @@
         },
         {
           "path": "src/pipeline/vsearch.ts",
-          "sha256": "073792d1907d3e59e64cacb41bfaa05ead641440e40de466abff07e4afe71db7"
+          "sha256": "5e517877613d3351fa7e4d88c69e70faf74e15403cacda887d24a6320d5415e5"
         }
       ],
-      "fingerprint": "4bd4877e002c0cfd8ccc6daa29897de2b028abf2ad2867e686cee48dfd51373c"
+      "fingerprint": "2842d7993872c26beef6c9dcc51f3a898e82360ea07e724111a464208d2e4eda"
     },
     "pipeline": "searchVectorWithEmbedding",
     "producer": "runProjectAffinityOutcomeBenchmark",
