@@ -1,6 +1,8 @@
 # GNO
 
-**Local search, retrieval, and synthesis for the files you actually work in.**
+**Search finds. GNO proves.**
+
+A local knowledge engine for your notes, code, PDFs, and Office docs — that hands agents evidence with exact line spans and content hashes, and stops when the evidence stops.
 
 [![npm](./assets/badges/npm.svg)](https://www.npmjs.com/package/@gmickel/gno)
 [![MIT License](./assets/badges/license.svg)](./LICENSE)
@@ -8,103 +10,90 @@
 [![Twitter](./assets/badges/twitter.svg)](https://twitter.com/gmickel)
 [![Discord](./assets/badges/discord.svg)](https://discord.gg/nHEmyJB5tg)
 
-> [!TIP]
-> **[gno.sh/publish](https://gno.sh/publish) is live.** Turn any GNO note or collection into a polished, reader-first URL — editorial typography, scoped search, and four visibility modes from public to encrypted-before-upload. **[See the reader →](#publish-to-gnosh)**
-
-> **ClawdHub**: GNO skills bundled for Clawdbot — [clawdhub.com/gmickel/gno](https://clawdhub.com/gmickel/gno)
-
 ![GNO](./assets/og-image.png)
 
-GNO is a local knowledge engine for notes, code, PDFs, Office docs, meeting transcripts, and reference material. It gives you fast keyword search, semantic retrieval, grounded answers with citations, wiki-style linking, and a real workspace UI, while keeping the whole stack local by default.
+```bash
+bun install -g @gmickel/gno
+gno setup ~/notes --name notes     # returns only after retrieval actually works
+gno mcp install --target cursor    # or claude-code, claude-desktop, zed, ...
+```
 
-CLI retrieval also uses the current repository/workspace as a transparent soft
-ranking signal. A trusted explicit `--project-root`, nearest valid
-`.gno/index.yml`, or local cwd can add at most `+0.03` to matching collection
-results, in that precedence order; `--no-project-affinity` disables it. Profile
-defaults stay project-local and never overwrite the user default. It never overrides collection,
-tag, date, exclude, or egress filters. SDK, REST, and MCP `projectHints` are
-opaque, untrusted, limited to 16, and intentionally have zero ranking effect:
-those surfaces never probe caller or server filesystem paths. Trusted local
-diagnose output uses closed `schemaVersion: "1.1"` redacted affinity metadata;
-absent, disabled, and remote/untrusted diagnose requests preserve exact legacy
-v1.0 bytes and omit `affinity`.
+## Why not just another local RAG tool
 
-Use it when:
+Most retrieval tools return a ranked list and leave the rest to optimism. Four things here are different, and each one is measurable rather than adjectival:
 
-- your notes live in more than one folder
-- your important knowledge is split across Markdown, code, PDFs, and Office files
-- you want one retrieval layer that works from the CLI, browser, MCP, and a Bun/TypeScript SDK
-- you want better local context for agents without shipping your docs to a cloud API
+| | What it does | Why it matters |
+| :--- | :--- | :--- |
+| **[Context Capsules](https://gno.sh/docs/context-capsules)** | Compiles one bounded evidence bundle per goal: exact line spans, content hashes, one global token budget, collapsed duplicates, and a written list of what it could *not* find | Your agent reads once instead of searching five times. **48.94% fewer retrieval calls, 44.12% less model-visible context, 100% task accuracy retained** across 48 paired benchmark tasks |
+| **[Verified answers](https://gno.sh/docs/cli)** | `gno ask --verify` generates against one closed Capsule, classifies every substantive claim, and withholds the draft below 100% support | An abstention naming the failing claim beats a confident paragraph you have to fact-check by hand |
+| **[Verified setup](https://gno.sh/docs/project-profiles)** | `gno setup` returns only after lexical search finds a real hit derived from *your* corpus | No green checkmark over a folder that indexed but cannot be searched |
+| **[Egress policy](https://gno.sh/docs/collection-egress)** | Per-collection fail-closed `local_only` / `lan` / `remote`, inherited by every derived Capsule, trace, and export | Mixed setups are normal. Pin the client work local while your notes use the LAN GPU box |
 
-### What GNO Gives You
+Everything runs on your machine. Zero telemetry. The three network boundaries are explicit: downloading a model, configuring an HTTP inference endpoint, and uploading an artifact you exported for publishing.
 
-- **Fast local search**: BM25 for exact hits, vectors for concepts, hybrid for best quality
-- **Real retrieval surfaces**: CLI, Web UI, REST API, MCP, SDK
-- **Local-first answers**: grounded synthesis with citations when you want answers, raw retrieval when you do not
-- **Connected knowledge**: backlinks, related notes, graph view, cross-collection navigation
-- **Shareable, not synced**: export a note or collection to [gno.sh](https://gno.sh/publish) as a polished reader page — public, secret, invite-only, or locally encrypted before upload
-- **Operational fit**: daemon mode, model presets, remote GPU backends, safe config/state on disk
+**And when it fails, that ships too.** The CJK lexical benchmark missed its own promotion gates, so the analyzer was not shipped and [the failing numbers were published](#general-multilingual-embedding-benchmark) instead.
 
-### One-Minute Tour
+## Use it when
+
+- your knowledge is split across Markdown, code, PDFs, Office files, and exported mail or transcripts
+- you want one retrieval layer for the CLI, the browser, MCP, and a Bun/TypeScript SDK
+- you want your coding agent to have a real memory without shipping your docs to a cloud API
+- you need to prove, later, which bytes supported a conclusion
+
+## Two minutes, end to end
 
 ```bash
 # Install
 bun install -g @gmickel/gno
 
-# Prove the first folder immediately; semantic work continues independently
+# Activate a folder. Returns only after BM25 proves an exact corpus-derived hit;
+# semantic embedding continues independently in the background.
 gno setup ~/notes --name notes
 
-# In a repository with .gno/index.yml: preview, apply, and prove its collection
-gno profile diff
-gno setup . --apply-profile
-
-# Add more collections with the granular commands
+# Add more sources
 gno collection add ~/work/docs --name work-docs --pattern "**/*.{md,pdf,docx}"
 gno collection add ~/work/gno/src --name gno-code --pattern "**/*.{ts,tsx,js,jsx}"
 
-# Add context so retrieval results come back with the right framing
-gno context add "notes:" "Personal notes, journal entries, and long-form ideas"
+# Tell retrieval what each collection is for
 gno context add "work-docs:" "Architecture docs, runbooks, RFCs, meeting notes"
-gno context add "gno-code:" "Source code for the GNO application"
 
-# Sync the additional collections, then embed when you want semantic retrieval
-gno update --yes
-gno embed
+gno update --yes   # sync
+gno embed          # embed when you want semantic retrieval
 
-# Search in the way that fits the question
-gno search "DEC-0054"                            # exact keyword / identifier
-gno vsearch "retry failed jobs with backoff"     # natural-language semantic lookup
-gno query "JWT refresh token rotation" --explain # hybrid retrieval with score traces
+# Pick the search that fits the question
+gno search "DEC-0054"                            # exact identifier
+gno vsearch "retry failed jobs with backoff"     # natural language
+gno query "JWT refresh token rotation" --explain # hybrid, with score traces
 
-# Retrieve documents or export context for an agent
-gno get "gno://work-docs/architecture/auth.md"
-gno multi-get "gno-code/**/*.ts" --max-bytes 30000 --md
-gno query "deployment process" --all --files --min-score 0.35
+# Compile checkable evidence for a goal, then re-check it later
+gno context build "why we dropped the queue rewrite" \
+  --collection work-docs --budget 12000 --json --output capsule.json
+gno context verify capsule.json
 
-# Run the workspace (pick one — don't run both against the same index concurrently)
-gno serve            # browser/desktop session with the Web UI
-gno daemon --detach  # headless continuous indexing (background; --status / --stop to manage)
+# Generate only what that evidence supports
+gno ask "why did we drop the queue rewrite" --verify --show-sources
+
+# Run the workspace (pick one — not both against the same index)
+gno serve            # browser/desktop Web UI
+gno daemon --detach  # headless indexing + resident MCP gateway
 ```
+
+> [!TIP]
+> **[gno.sh/publish](https://gno.sh/publish) is live.** Turn any GNO note or collection into a reader-first URL — editorial typography, scoped search, and four visibility modes from public to encrypted-before-upload. **[See the reader →](#publish-to-gnosh)**
+
+> **ClawdHub**: GNO skills bundled for Clawdbot — [clawdhub.com/gmickel/gno](https://clawdhub.com/gmickel/gno)
 
 ---
 
 ## Contents
 
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Daemon Mode](#daemon-mode)
-- [Search Modes](#search-modes)
-- [Agent Integration](#agent-integration)
-- [Web UI](#web-ui)
-- [Publish to gno.sh](#publish-to-gnosh)
-- [REST API](#rest-api)
-- [SDK](#sdk)
-- [How It Works](#how-it-works)
-- [Features](#features)
-- [Local Models](#local-models)
-- [Fine-Tuned Models](#fine-tuned-models)
-- [Architecture](#architecture)
-- [Development](#development)
+**Start here** · [Quick Start](#quick-start) · [Installation](#installation) · [Agent Integration](#agent-integration) · [Search Modes](#search-modes)
+
+**Surfaces** · [Web UI](#web-ui) · [REST API](#rest-api) · [SDK](#sdk) · [Daemon Mode](#daemon-mode) · [Publish to gno.sh](#publish-to-gnosh)
+
+**Under the hood** · [How It Works](#how-it-works) · [Features](#features) · [Local Models](#local-models) · [Fine-Tuned Models](#fine-tuned-models) · [Architecture](#architecture) · [Development](#development)
+
+**Deep dives on gno.sh** · [Context Capsules](https://gno.sh/docs/context-capsules) · [Knowledge Delta](https://gno.sh/docs/knowledge-delta) · [Retrieval learning](https://gno.sh/docs/retrieval-learning) · [Project profiles](https://gno.sh/docs/project-profiles) · [Egress policies](https://gno.sh/docs/collection-egress) · [Export adapters](https://gno.sh/docs/file-export-adapters)
 
 ---
 
@@ -247,7 +236,7 @@ gno models pull --gen
 gno query "ECONNREFUSED 127.0.0.1:5432" --thorough
 ```
 
-> Full guide: [Fine-Tuned Models](https://gno.sh/docs/FINE-TUNED-MODELS/) · [Feature page](https://gno.sh/features/fine-tuned-models/)
+> Full guide: [Fine-Tuned Models](https://gno.sh/docs/fine-tuned-models) · [Feature page](https://gno.sh/features/fine-tuned-models)
 
 ---
 
@@ -365,7 +354,7 @@ gno skill install --target openclaw   # OpenClaw
 gno skill install --target all        # All targets
 ```
 
-> **Full setup guide**: [MCP Integration](https://gno.sh/docs/MCP/) · [CLI Reference](https://gno.sh/docs/CLI/)
+> **Full setup guide**: [MCP Integration](https://gno.sh/docs/mcp) · [CLI Reference](https://gno.sh/docs/cli)
 
 ---
 
@@ -387,7 +376,7 @@ headless. `--detach` / `--status` / `--stop` give you symmetric lifecycle
 controls so you don't need `nohup`, `launchd`, or `systemd` units. The same
 flag set is available on `gno serve`.
 
-[Daemon guide →](https://gno.sh/docs/DAEMON/)
+[Daemon guide →](https://gno.sh/features/daemon-mode)
 
 ---
 
@@ -479,7 +468,7 @@ Core SDK surface:
 - `update`, `embed`, `index`
 - `close`
 
-Full guide: [SDK docs](https://gno.sh/docs/SDK/)
+Full guide: [SDK docs](https://gno.sh/docs/sdk)
 
 ---
 
@@ -607,7 +596,7 @@ gno get "gno://work-docs/api-reference.md" --full
 gno multi-get "work-docs/**/*.md" --md --max-bytes 30000
 ```
 
-[Skill setup guide →](https://gno.sh/docs/integrations/skills/)
+[Skill setup guide →](https://gno.sh/docs/skills)
 
 ### MCP Server
 
@@ -655,7 +644,7 @@ requires an explicit restrictive bearer-token file plus exact Host and Origin
 allowlists; `gno serve` remains loopback-only. Authentication alone never
 enables mutation tools.
 
-[MCP setup guide →](https://gno.sh/docs/MCP/)
+[MCP setup guide →](https://gno.sh/docs/mcp)
 
 ---
 
@@ -758,7 +747,7 @@ telemetry. Network access occurs when GNO downloads models, when you configure
 an HTTP model backend, or when you explicitly upload an exported artifact to
 gno.sh.
 
-> **Detailed docs**: [Web UI Guide](https://gno.sh/docs/WEB-UI/)
+> **Detailed docs**: [Web UI Guide](https://gno.sh/docs/web-ui)
 
 ---
 
@@ -879,7 +868,7 @@ curl http://localhost:3000/api/health
 
 No authentication. No rate limits. Build custom tools, automate workflows, integrate with any language.
 
-> **Full reference**: [API Documentation](https://gno.sh/docs/API/)
+> **Full reference**: [API Documentation](https://gno.sh/docs/api)
 
 ---
 
@@ -914,7 +903,7 @@ graph TD
 3. **Fusion**: RRF with 2× weight for original query, tiered bonus for top ranks
 4. **Reranking**: Qwen3-Reranker scores best chunk per document (4K), blended with fusion
 
-> **Deep dive**: [How Search Works](https://gno.sh/docs/HOW-SEARCH-WORKS/)
+> **Deep dive**: [How Search Works](https://gno.sh/docs/how-search-works)
 
 ---
 
@@ -987,8 +976,8 @@ Hugging Face. The `gen:` role remains the standalone answer model.
 
 See:
 
-- [Fine-Tuned Models docs](https://gno.sh/docs/FINE-TUNED-MODELS/)
-- [Fine-Tuned Models feature page](https://gno.sh/features/fine-tuned-models/)
+- [Fine-Tuned Models docs](https://gno.sh/docs/fine-tuned-models)
+- [Fine-Tuned Models feature page](https://gno.sh/features/fine-tuned-models)
 
 ### HTTP Backends (Remote GPU)
 
@@ -1012,7 +1001,7 @@ The HTTP adapter expects the OpenAI-compatible endpoint shapes documented in
 chunk, or answer context sent to their configured model role; they are outside
 GNO's local trust boundary.
 
-> **Configuration**: [Model Setup](https://gno.sh/docs/CONFIGURATION/)
+> **Configuration**: [Model Setup](https://gno.sh/docs/configuration)
 
 Remote/BYOM guides:
 
@@ -1035,7 +1024,7 @@ Remote/BYOM guides:
 └─────────────────────────────────────────────────┘
 ```
 
-> **Details**: [Architecture](https://gno.sh/docs/ARCHITECTURE/)
+> **Details**: [Architecture](https://gno.sh/docs/architecture)
 
 ---
 

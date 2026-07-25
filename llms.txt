@@ -1,19 +1,61 @@
 # GNO
 
-> Local knowledge indexing and semantic search CLI. Indexes documents locally, provides BM25/vector/hybrid search, and generates AI answers using local LLMs. Privacy-first: all processing happens on your machine.
+> A local knowledge engine for notes, code, PDFs, and Office documents. GNO indexes your files on your own machine and hands agents deterministic evidence: Context Capsules with exact line spans and content hashes, answers that abstain when support is incomplete, and receipts you can re-verify later. Open source, MIT licensed, zero telemetry.
 
-GNO helps you build a personal knowledge base from your documents (Markdown, PDF, DOCX, etc.) and search it semantically. It supports MCP integration for AI assistants like Claude.
+Install with `bun install -g @gmickel/gno` (requires Bun >= 1.3), then `gno setup ~/notes --name notes`. Setup returns only after lexical search proves a real corpus-derived hit, so success means retrieval works rather than that files were copied.
+
+## What distinguishes GNO
+
+- **Context Capsules** — one bounded, deterministic evidence bundle per goal, with exact line ranges, source/mirror/passage hashes, declared coverage gaps, explained omissions, and one global token budget. Measured on 48 paired agentic benchmark tasks: 100% task completion accuracy retained, 48.94% fewer retrieval calls, 44.12% less model-visible context.
+- **Verified Ask** — `gno ask --verify` generates against one closed Capsule, classifies every substantive claim as supported/contradicted/insufficient/uncertain, and withholds the draft below 100% support. Abstention is a valid outcome.
+- **Knowledge Delta** — `gno changes`, `gno diff`, `gno impact`: bounded metadata-only change journal, structural diffs, and dependency impact paths. Saved Capsules can be watched and reverified when their evidence moves.
+- **Private retrieval learning** — opt-in local traces, explicit judgments only, content-free qrels export, read-only baseline-versus-candidate replay. Nothing is recorded or personalized by default.
+- **Collection egress policies** — fail-closed `local_only` / `lan` / `remote` per collection. Derived Capsules, traces, and exports inherit the most restrictive source policy; authentication never overrides it.
+- **One resident runtime** — `gno serve` and `gno daemon` share one warm store, model lifecycle, and Streamable HTTP MCP gateway at `127.0.0.1:3000/mcp`, so concurrent agent clients do not each pay a cold start.
+
+## Honest limits
+
+- The corpus, index, and built-in models stay local. Three explicit network boundaries exist: model download, a configured HTTP inference endpoint, and uploading an artifact you exported for gno.sh publishing.
+- Verified Ask checks claims only against evidence retained in its local Capsule. It is not a general fact-check and cannot make an incorrect source correct.
+- CJK lexical normalization is **not** shipped. The benchmark lane is published, it missed its frozen Chinese promotion gates, and the no-ship decision is recorded. Multilingual _semantic_ retrieval is a separate, working path.
+- File and export adapters read local export files only. They never authenticate to accounts, read live browser databases, fetch URLs, or open attachments.
+- MCP is read-only by default: 25 tools, or 40 when writes are explicitly enabled.
 
 ## Documentation
 
-- [Quickstart](docs/QUICKSTART.md): Get searching in 5 minutes
+- [Quickstart](docs/QUICKSTART.md): Get searching in five minutes
 - [Installation](docs/INSTALLATION.md): Platform setup, requirements, model downloads
 - [CLI Reference](docs/CLI.md): All commands and options
-- [Configuration](docs/CONFIGURATION.md): Collections, contexts, model presets
-- [Architecture](docs/ARCHITECTURE.md): System design, data flows
-- [MCP Integration](docs/MCP.md): Claude Desktop and Cursor setup
+- [Configuration](docs/CONFIGURATION.md): Collections, contexts, content types, model presets, egress
+- [How Search Works](docs/HOW-SEARCH-WORKS.md): Expansion, BM25, vectors, fusion, reranking
+- [Architecture](docs/ARCHITECTURE.md): System design, ports and adapters, data flow
+- [MCP Integration](docs/MCP.md): Tool surface and client setup
+- [SDK](docs/SDK.md): Embed GNO in a Bun or TypeScript app
+- [REST API](docs/API.md): HTTP surface
+- [Web UI](docs/WEB-UI.md): Browser workspace
+- [Daemon](docs/DAEMON.md): Headless indexing and the resident gateway
+- [Publishing](docs/PUBLISHING.md): Export, visibility modes, privacy boundaries
 - [Use Cases](docs/USE-CASES.md): Real-world workflows
-- [Troubleshooting](docs/TROUBLESHOOTING.md): Common issues and solutions
+- [Troubleshooting](docs/TROUBLESHOOTING.md): Common issues and fixes
+- [Structured Query Syntax](docs/SYNTAX.md): `term:`, `intent:`, `hyde:` query documents
+
+## Guides
+
+- [Project-Local Retrieval Profiles](docs/guides/project-profiles.md): Portable `.gno/index.yml` intent
+- [File and Export Adapters](docs/guides/file-export-adapters.md): JSONL, EML/MBOX, ICS, WebVTT/SRT, browser exports
+- [Code Embeddings](docs/guides/code-embeddings.md): Tuning retrieval for source code
+- [Per-Collection Models](docs/guides/per-collection-models.md): Diverging one collection from the default
+- [Bring Your Own Models](docs/guides/bring-your-own-models.md): Hugging Face, local GGUF, remote HTTP endpoints
+- [Browser Clipper](docs/integrations/browser-clipper.md): Local Chromium capture with loopback pairing
+
+## Integrations
+
+- [Claude Code](docs/integrations/claude-code.md)
+- [Claude Desktop](docs/integrations/claude-desktop.md)
+- [Cursor](docs/integrations/cursor.md)
+- [Agent Skills](docs/integrations/skills.md)
+
+Automatic MCP install targets: Claude Desktop, Claude Code, Cursor, Codex, Zed, Windsurf, OpenCode, Amp, LM Studio, LibreChat. Skill targets: Claude Code, Codex, OpenCode, OpenClaw, Hermes.
 
 ## Specifications
 
@@ -23,4 +65,7 @@ GNO helps you build a personal knowledge base from your documents (Markdown, PDF
 ## Optional
 
 - [Glossary](docs/GLOSSARY.md): Key terms and concepts
-- [Architecture Notes](docs/NOTES.md): Internal implementation details
+- [Comparisons](docs/comparisons/): GNO versus Obsidian, Khoj, PrivateGPT, grep, Elasticsearch, and others
+- [Windows Support](docs/WINDOWS.md): Scope and validation notes
+- [Changelog](CHANGELOG.md)
+- [Website](https://gno.sh) and [site llms.txt](https://gno.sh/llms.txt)
