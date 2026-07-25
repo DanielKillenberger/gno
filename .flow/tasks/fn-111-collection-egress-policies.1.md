@@ -36,9 +36,8 @@ Deliver define egress policy schema evaluator and fail-closed migration as one i
 
 
 ## Done summary
-TBD
-
+Added the fail-closed collection egress policy foundation. Collection config now accepts an explicit local_only, lan, or remote policy while preserving absence for legacy provenance; resolution defaults safely to local_only. SQLite migration 23 persists effective policy/source with closed constraints, legacy backfill, rollback, conflict-safe provenance preservation, status projection, and explicit-to-omitted tightening. A shared redacted evaluator now validates collection identity, action/destination compatibility, caller authorization/authentication, all source/derived content classes, and most-restrictive mixed-collection policy with stable allow/deny reasons. Added migration, adapter, malformed-input, full action/content matrix, authentication, restrictive-mix, and redaction coverage.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 9ccfd301
+- Tests: bun test test/egress/policy.test.ts test/store/migrations.test.ts test/store/adapter.test.ts test/store/clipper-store.test.ts (66 pass, 0 fail), bun test test/egress test/config test/core test/pipeline test/store (826 pass, 0 fail), bun test test/egress/policy.test.ts test/store/migrations.test.ts (16 pass, 0 fail after final constraint cases), bun run lint:check (type-aware oxlint and oxfmt check passed), .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json (valid, 0 errors, 0 warnings)
 - PRs:
