@@ -34,6 +34,7 @@ export const HTTP_DESTINATION_POLICY_REASONS = [
   "PROVIDER_HTTPS_REQUIRED",
   "PROXY_ENVIRONMENT_ACTIVE",
   "DNS_REBINDING",
+  "INVALID_REDIRECT_COUNT",
   "REDIRECT_LIMIT",
   "REDIRECT_ZONE_CHANGED",
   "PROVIDER_REDIRECT_ORIGIN_CHANGED",
@@ -461,13 +462,25 @@ export async function prepareHttpDestination(
   rawUrl: string,
   options: HttpDestinationPolicyOptions & { redirectCount?: number }
 ): Promise<HttpDestinationPolicyResult> {
+  const redirectCount =
+    options.redirectCount === undefined ? 0 : options.redirectCount;
+  if (!Number.isSafeInteger(redirectCount) || redirectCount < 0) {
+    return denial("INVALID_REDIRECT_COUNT", invalidClassification(), null, 0);
+  }
+  if (redirectCount > MAX_HTTP_DESTINATION_REDIRECTS) {
+    return denial(
+      "REDIRECT_LIMIT",
+      invalidClassification(),
+      null,
+      redirectCount
+    );
+  }
   const resolvedOptions = {
     maximumZone: options.maximumZone,
     resolver: options.resolver ?? defaultResolver,
     remoteProvider: options.remoteProvider ?? false,
     env: options.env ?? process.env,
   };
-  const redirectCount = options.redirectCount ?? 0;
   const prepared = await prepareDestination(
     rawUrl,
     resolvedOptions,

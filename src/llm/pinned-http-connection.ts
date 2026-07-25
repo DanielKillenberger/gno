@@ -42,6 +42,81 @@ function freezeAudit(
   return Object.freeze({ ...audit, classification });
 }
 
+function normalizedRequestError(
+  signal?: AbortSignal | null
+): PinnedHttpRequestError {
+  return new PinnedHttpRequestError(signal?.aborted === true);
+}
+
+function releaseReaderLock(
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): void {
+  try {
+    reader.releaseLock();
+  } catch {
+    // The sanitized stream is already terminal; never replace its safe error.
+  }
+}
+
+function sanitizeResponseBody(
+  body: ReadableStream<Uint8Array> | null,
+  signal?: AbortSignal | null
+): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller): Promise<void> {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          releaseReaderLock(reader);
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch {
+        releaseReaderLock(reader);
+        controller.error(normalizedRequestError(signal));
+      }
+    },
+    async cancel(reason): Promise<void> {
+      try {
+        await reader.cancel(reason);
+        releaseReaderLock(reader);
+      } catch {
+        releaseReaderLock(reader);
+        throw normalizedRequestError(signal);
+      }
+    },
+  });
+}
+
+function buildPinnedRequestInit(
+  init: BunFetchRequestInit,
+  headers: Headers,
+  tls: BunFetchRequestInitTLS
+): BunFetchRequestInit {
+  return {
+    body: init.body,
+    cache: init.cache,
+    credentials: init.credentials,
+    decompress: init.decompress,
+    headers,
+    integrity: init.integrity,
+    keepalive: init.keepalive,
+    method: init.method,
+    mode: init.mode,
+    priority: init.priority,
+    redirect: "manual",
+    referrer: init.referrer,
+    referrerPolicy: init.referrerPolicy,
+    signal: init.signal,
+    tls,
+    verbose: false,
+    window: init.window,
+  };
+}
+
 /**
  * JSON/log projection is redacted. request() is the only raw target consumer;
  * it preserves Host/SNI while forcing an IP URL and manual redirects.
@@ -86,20 +161,17 @@ export class PinnedHttpConnection {
       serverName: this.#tlsServerName,
     };
     try {
-      const response = await fetchFn(this.#targetUrl, {
-        ...init,
-        headers,
-        redirect: "manual",
-        tls,
-        proxy: undefined,
-      });
-      return new Response(response.body, {
+      const response = await fetchFn(
+        this.#targetUrl,
+        buildPinnedRequestInit(init, headers, tls)
+      );
+      return new Response(sanitizeResponseBody(response.body, init.signal), {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
       });
     } catch {
-      throw new PinnedHttpRequestError(init.signal?.aborted === true);
+      throw normalizedRequestError(init.signal);
     }
   }
 }
