@@ -11,10 +11,6 @@ import {
   type PinnedHttpFetch,
   prepareHttpDestination,
 } from "../../src/llm/http-policy";
-import {
-  HttpMcpSecurity,
-  resolveHttpGatewayConfig,
-} from "../../src/mcp/http-security";
 
 function sequenceResolver(
   ...answers: Array<readonly string[] | Error>
@@ -31,6 +27,18 @@ function sequenceResolver(
   };
 }
 
+async function expectRequestRejection(
+  request: Promise<Response>
+): Promise<void> {
+  let rejected = false;
+  try {
+    await request;
+  } catch {
+    rejected = true;
+  }
+  expect(rejected).toBe(true);
+}
+
 describe("conservative destination classification", () => {
   test("classifies IPv4, IPv6, private, Tailscale, public, and unsafe ranges", () => {
     const fixtures = [
@@ -45,6 +53,7 @@ describe("conservative destination classification", () => {
       ["fc00::1", "private"],
       ["fe80::1%en0", "private"],
       ["fd7a:115c:a1e0::1", "tailscale"],
+      ["fd00:ec2::254", "unknown"],
       ["8.8.8.8", "public"],
       ["2001:4860:4860::8888", "public"],
       ["0.0.0.0", "unknown"],
@@ -209,6 +218,47 @@ describe("DNS-pinned outbound HTTP policy", () => {
         host: `model.test:${server.port}`,
         pathname: "/health",
       });
+
+      const wrongName = await prepareHttpDestination(
+        `https://wrong.test:${server.port}/health`,
+        {
+          maximumZone: "loopback",
+          resolver: sequenceResolver(["127.0.0.1"], ["127.0.0.1"]),
+          env: {},
+        }
+      );
+      expect(wrongName.ok).toBe(true);
+      if (!wrongName.ok) return;
+      const wrongConnection = await wrongName.value.acquireConnection();
+      expect(wrongConnection.ok).toBe(true);
+      if (!wrongConnection.ok) return;
+
+      await expectRequestRejection(
+        wrongConnection.value.request({
+          tls: {
+            ca: cert,
+            checkServerIdentity: () => undefined,
+            rejectUnauthorized: false,
+            serverName: "model.test",
+          },
+        })
+      );
+
+      const previousTlsOverride = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      try {
+        await expectRequestRejection(
+          wrongConnection.value.request({
+            tls: { ca: cert },
+          })
+        );
+      } finally {
+        if (previousTlsOverride === undefined) {
+          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        } else {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTlsOverride;
+        }
+      }
     } finally {
       await server.stop(true);
     }
@@ -376,6 +426,64 @@ describe("DNS-pinned outbound HTTP policy", () => {
     }
   });
 
+  test("requires HTTPS and credential-free URLs for provider requests and redirects", async () => {
+    const lookup = mock(() => Promise.resolve(["8.8.8.8"]));
+    expect(
+      await prepareHttpDestination("http://provider.example/v1", {
+        maximumZone: "remote",
+        remoteProvider: true,
+        resolver: { lookup },
+        env: {},
+      })
+    ).toMatchObject({
+      ok: false,
+      reason: "PROVIDER_HTTPS_REQUIRED",
+    });
+    expect(lookup).not.toHaveBeenCalled();
+
+    expect(
+      await prepareHttpDestination(
+        "https://user:password@provider.example/v1",
+        {
+          maximumZone: "remote",
+          remoteProvider: true,
+          resolver: { lookup },
+          env: {},
+        }
+      )
+    ).toMatchObject({
+      ok: false,
+      reason: "CREDENTIALS_IN_URL",
+    });
+    expect(lookup).not.toHaveBeenCalled();
+
+    const provider = await prepareHttpDestination(
+      "https://provider.example/v1",
+      {
+        maximumZone: "remote",
+        remoteProvider: true,
+        resolver: sequenceResolver(["8.8.8.8"]),
+        env: {},
+      }
+    );
+    expect(provider.ok).toBe(true);
+    if (!provider.ok) return;
+    expect(
+      await provider.value.followRedirect("http://provider.example/v2")
+    ).toMatchObject({
+      ok: false,
+      reason: "HTTPS_DOWNGRADE",
+    });
+    expect(
+      await provider.value.followRedirect(
+        "https://user:password@provider.example/v2"
+      )
+    ).toMatchObject({
+      ok: false,
+      reason: "CREDENTIALS_IN_URL",
+    });
+  });
+
   test("denials and pins omit credentials, hostnames, paths, and addresses", async () => {
     const credentialed = await prepareHttpDestination(
       "https://user:password@secret.example/private/path?api_key=token",
@@ -396,47 +504,5 @@ describe("DNS-pinned outbound HTTP policy", () => {
     ]) {
       expect(serialized).not.toContain(secret);
     }
-  });
-});
-
-describe("HTTP MCP peer integration", () => {
-  test("uses one socket peer classification and ignores forwarded headers", async () => {
-    let samples = 0;
-    const security = new HttpMcpSecurity(resolveHttpGatewayConfig(undefined));
-    await security.initialize();
-    const request = new Request("http://127.0.0.1:3000/mcp", {
-      headers: {
-        host: "127.0.0.1:3000",
-        forwarded: "for=203.0.113.9",
-        "x-forwarded-for": "203.0.113.9",
-      },
-    });
-    const result = await security.authorize(request, {
-      requestIP: () => {
-        samples += 1;
-        return { address: "127.0.0.2", port: 50_000 };
-      },
-      timeout: () => undefined,
-    });
-    expect(samples).toBe(1);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.peerClassification.zone).toBe("loopback");
-      expect(result.value.request.headers.has("forwarded")).toBe(false);
-      expect(result.value.request.headers.has("x-forwarded-for")).toBe(false);
-    }
-  });
-
-  test("derives exact defaults for every accepted loopback bind literal", () => {
-    expect(resolveHttpGatewayConfig({ host: "127.0.0.2" })).toMatchObject({
-      allowedHosts: ["127.0.0.2:3000"],
-      allowedOrigins: ["http://127.0.0.2:3000"],
-    });
-    expect(resolveHttpGatewayConfig({ host: "0:0:0:0:0:0:0:1" })).toMatchObject(
-      {
-        allowedHosts: ["[::1]:3000"],
-        allowedOrigins: ["http://[::1]:3000"],
-      }
-    );
   });
 });

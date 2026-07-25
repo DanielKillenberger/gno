@@ -46,9 +46,17 @@ export class PinnedHttpConnection {
   ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("host", this.#hostHeader);
-    const tls = this.#tlsServerName
-      ? { ...init.tls, serverName: this.#tlsServerName }
-      : init.tls;
+    const {
+      checkServerIdentity: _ignoredIdentityOverride,
+      rejectUnauthorized: _ignoredVerificationOverride,
+      serverName: _ignoredServerNameOverride,
+      ...callerTls
+    } = init.tls ?? {};
+    const tls = {
+      ...callerTls,
+      rejectUnauthorized: true,
+      serverName: this.#tlsServerName,
+    };
     return fetchFn(this.#targetUrl, {
       ...init,
       headers,

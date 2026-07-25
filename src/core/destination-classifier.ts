@@ -158,6 +158,12 @@ function classifyIpv6(groups: readonly number[]): DestinationAddressClass {
   if (first === 0xfd7a && second === 0x115c && third === 0xa1e0) {
     return "tailscale";
   }
+  const isAwsInstanceMetadata =
+    first === 0xfd00 &&
+    second === 0x0ec2 &&
+    groups.slice(2, 7).every((group) => group === 0) &&
+    groups[7] === 0x0254;
+  if (isAwsInstanceMetadata) return "unknown";
   if ((first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80) {
     return "private";
   }

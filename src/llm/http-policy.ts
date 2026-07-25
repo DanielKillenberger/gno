@@ -28,6 +28,7 @@ export const HTTP_DESTINATION_POLICY_REASONS = [
   "DNS_RESULT_LIMIT",
   "ZONE_NOT_ALLOWED",
   "PROVIDER_ADDRESS_NOT_PUBLIC",
+  "PROVIDER_HTTPS_REQUIRED",
   "PROXY_ENVIRONMENT_ACTIVE",
   "DNS_REBINDING",
   "REDIRECT_LIMIT",
@@ -240,6 +241,9 @@ async function prepareDestination(
   }
   if (url.username || url.password) {
     return denial("CREDENTIALS_IN_URL", invalid, url, redirectCount);
+  }
+  if (options.remoteProvider && url.protocol !== "https:") {
+    return denial("PROVIDER_HTTPS_REQUIRED", invalid, url, redirectCount);
   }
   if (options.maximumZone !== "remote" && hasActiveProxy(options.env)) {
     return denial("PROXY_ENVIRONMENT_ACTIVE", invalid, url, redirectCount);
