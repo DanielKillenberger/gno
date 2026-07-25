@@ -11,7 +11,10 @@ import type {
 } from "../../src/store/types";
 
 import { authorizeCurrentEgress } from "../../src/core/egress-authorization";
-import { legacyLocalOnlyEgressLineage } from "../../src/core/egress-provenance";
+import {
+  createEgressLineage,
+  legacyLocalOnlyEgressLineage,
+} from "../../src/core/egress-provenance";
 import { RetrievalTraceManagementService } from "../../src/core/retrieval-trace-management";
 import { SqliteAdapter } from "../../src/store";
 import { safeRm } from "../helpers/cleanup";
@@ -433,9 +436,9 @@ describe("retrieval trace management", () => {
 
     let gateCalled = false;
     const missing = await new RetrievalTraceManagementService(store, {
-      authorizeExport: async () => {
+      authorizeExport: async (lineage) => {
         gateCalled = true;
-        return { ok: true, value: undefined };
+        return { ok: true, value: lineage };
       },
     }).export({ traceIds: ["missing"] });
     expect(missing).toMatchObject({
@@ -443,6 +446,78 @@ describe("retrieval trace management", () => {
       error: { code: "NOT_FOUND" },
     });
     expect(gateCalled).toBeFalse();
+  });
+
+  test("binds export identity to current policy lineage without rewriting historical traces", async () => {
+    const historicalRemote = createEgressLineage([
+      { collection: "notes", policy: "remote", source: "explicit" },
+    ]);
+    expect(
+      (
+        await store.createRetrievalTrace({
+          ...traceInput("rebound", 1000),
+          egressLineage: historicalRemote,
+        })
+      ).ok
+    ).toBeTrue();
+    expect(
+      (await store.finalizeRetrievalTrace("rebound", "completed", 1001)).ok
+    ).toBeTrue();
+    let destinationZone: "local_process" | "remote" = "remote";
+    let policy: "local_only" | "remote" = "remote";
+    const service = new RetrievalTraceManagementService(store, {
+      clock: () => 2000,
+      authorizeExport: (lineage) =>
+        authorizeCurrentEgress({
+          store,
+          config: {
+            collections: [
+              {
+                name: "notes",
+                path: "/tmp/notes",
+                pattern: "**/*.md",
+                include: [],
+                exclude: [],
+                egressPolicy: policy,
+              },
+            ],
+          },
+          lineage,
+          action: "export",
+          destinationZone,
+          caller: { authenticated: true, operationAuthorized: true },
+          contentClass: "retrieval_trace",
+        }),
+    });
+    const remote = await service.export({ traceIds: ["rebound"] });
+    expect(remote.ok).toBeTrue();
+    if (!remote.ok) return;
+    expect(remote.value.artifact.egressLineage.effectivePolicy).toBe("remote");
+
+    policy = "local_only";
+    destinationZone = "local_process";
+    const local = await service.export({ traceIds: ["rebound"] });
+    expect(local.ok).toBeTrue();
+    if (!local.ok) return;
+    expect(local.value.result).toBe("inserted");
+    expect(local.value.manifest.exportId).not.toBe(
+      remote.value.manifest.exportId
+    );
+    expect(local.value.manifest.artifactHash).not.toBe(
+      remote.value.manifest.artifactHash
+    );
+    expect(local.value.artifact.egressLineage.effectivePolicy).toBe(
+      "local_only"
+    );
+    const duplicate = await service.export({ traceIds: ["rebound"] });
+    expect(duplicate.ok && duplicate.value.result).toBe("duplicate");
+    expect(duplicate.ok && duplicate.value.manifest.exportId).toBe(
+      local.value.manifest.exportId
+    );
+    const stored = await store.getRetrievalTrace("rebound");
+    expect(stored.ok && stored.value?.trace.egressLineage.effectivePolicy).toBe(
+      "remote"
+    );
   });
 
   test("rejects deletion of an unknown trace instead of fabricating a receipt", async () => {

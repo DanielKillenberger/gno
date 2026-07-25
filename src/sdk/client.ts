@@ -79,6 +79,7 @@ import {
   planCapture,
 } from "../core/capture";
 import { writeCapturePlanFile } from "../core/capture-write";
+import { projectCollectionEgressPolicy } from "../core/collection-egress-policy-projection";
 import { CollectionEgressPolicyService } from "../core/collection-egress-policy-service";
 import { applyConfigChange } from "../core/config-mutation";
 import { EgressAuditService } from "../core/egress-audit";
@@ -1276,8 +1277,13 @@ class GnoClientImpl implements GnoClient {
     const state = new CollectionEgressPolicyService({
       getConfig: () => this.config,
     }).get(collection);
-    if (!state) throw sdkError("VALIDATION", "Collection not found");
-    return state;
+    if (!state.ok) {
+      throw sdkError(
+        state.code === "NOT_FOUND" ? "NOT_FOUND" : "VALIDATION",
+        state.error
+      );
+    }
+    return state.value;
   }
 
   async setCollectionEgressPolicy(
@@ -1302,6 +1308,8 @@ class GnoClientImpl implements GnoClient {
             onConfigUpdated: (config) => {
               this.config = config;
             },
+            projectStore: (store, config) =>
+              projectCollectionEgressPolicy(store, config, collection),
           },
           mutate
         ),
@@ -1319,9 +1327,11 @@ class GnoClientImpl implements GnoClient {
     input: import("../core/collection-egress-policy-service").CollectionEgressCheckInput
   ) {
     this.assertOpen();
-    return new CollectionEgressPolicyService({
+    const result = new CollectionEgressPolicyService({
       getConfig: () => this.config,
     }).check(input);
+    if (!result.ok) throw sdkError("VALIDATION", result.error);
+    return result.value;
   }
 
   async listEgressAudits(options: { limit?: number; cursor?: string } = {}) {

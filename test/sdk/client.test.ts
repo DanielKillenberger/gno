@@ -171,6 +171,15 @@ describe("SDK client", () => {
     expect(status.contentTypeBoost).not.toHaveProperty("prefixes");
   });
 
+  test("rejects hostile direct policy checks through the SDK", async () => {
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    expect(client.checkEgress(revoked.proxy as never)).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "Unreadable input object",
+    });
+  });
+
   test("lists indexed documents", async () => {
     const result = await client.list({ limit: 5 });
     expect(result.documents.length).toBeGreaterThan(0);

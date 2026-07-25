@@ -8,10 +8,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../hooks/use-api";
+import { CollectionEgressCheckPanel } from "./CollectionEgressCheckPanel";
 import {
   CollectionEgressPolicyEditor,
   type CollectionEgressPolicy,
 } from "./CollectionEgressPolicyEditor";
+import { EgressAuditPanel } from "./EgressAuditPanel";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -60,6 +62,7 @@ export interface CollectionModelDetails {
     configuredPolicy: "local_only" | "lan" | "remote" | null;
     effectivePolicy: "local_only" | "lan" | "remote";
     source: "explicit" | "config_default";
+    revision: number;
     version: string;
   } | null;
 }
@@ -215,8 +218,10 @@ export function CollectionModelDialog({
             confirmation:
               policyRelaxed && state && relaxationConfirmed
                 ? {
+                    collection: state.collection,
                     currentPolicy: state.effectivePolicy,
-                    currentVersion: state.version,
+                    currentRevision: state.revision,
+                    targetPolicy: policyDraft,
                     acknowledged: true,
                   }
                 : undefined,
@@ -303,8 +308,17 @@ export function CollectionModelDialog({
               }}
               policy={policyDraft}
               relaxed={policyRelaxed}
+              revision={collection?.egressPolicy?.revision ?? 0}
               source={collection?.egressPolicy?.source ?? "config_default"}
             />
+            {collection ? (
+              <CollectionEgressCheckPanel
+                collection={collection.name}
+                effectivePolicy={originalPolicy}
+                source={collection.egressPolicy?.source ?? "config_default"}
+              />
+            ) : null}
+            <EgressAuditPanel />
             {MODEL_ROLES.map((role) => {
               const source = collection?.modelSources?.[role] ?? "preset";
               const effectiveValue = collection?.effectiveModels?.[role] ?? "";

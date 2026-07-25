@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS collections (
       egress_policy_source = 'explicit'
       OR egress_policy = 'local_only'
     ),
+  egress_policy_revision INTEGER NOT NULL DEFAULT 0
+    CHECK (egress_policy_revision >= 0),
   synced_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

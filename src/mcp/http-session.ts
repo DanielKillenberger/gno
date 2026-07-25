@@ -43,6 +43,7 @@ export interface PendingHttpMcpSession {
 }
 
 interface OwnedHttpMcpSession extends HttpMcpSession {
+  invalidated: boolean;
   releaseRuntimeSession(): void;
 }
 
@@ -133,6 +134,10 @@ export class HttpMcpSessionStore {
   finishRequest(session: HttpMcpSession): void {
     session.activeRequests = Math.max(0, session.activeRequests - 1);
     session.lastActivityAt = this.#now();
+    const owned = session as OwnedHttpMcpSession;
+    if (owned.invalidated && owned.activeRequests === 0) {
+      void owned.server.close().catch(() => undefined);
+    }
   }
 
   async createPendingSession(
@@ -168,6 +173,7 @@ export class HttpMcpSessionStore {
           transport,
           lastActivityAt: this.#now(),
           activeRequests: 0,
+          invalidated: false,
           releaseRuntimeSession,
         };
         this.#sessions.set(sessionId, host.session);
@@ -250,14 +256,19 @@ export class HttpMcpSessionStore {
   async closeSessions(): Promise<void> {
     const sessions = [...this.#sessions.values()];
     this.#sessions.clear();
-    for (const session of sessions) session.releaseRuntimeSession();
+    for (const session of sessions) {
+      session.invalidated = true;
+      session.releaseRuntimeSession();
+    }
 
     const pending = [...this.#pending];
     this.#pending.clear();
     for (const host of pending) host.discarded = true;
 
     await Promise.allSettled([
-      ...sessions.map((session) => session.server.close()),
+      ...sessions
+        .filter((session) => session.activeRequests === 0)
+        .map((session) => session.server.close()),
       ...pending.map((host) => host.server.close()),
     ]);
   }

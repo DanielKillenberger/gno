@@ -133,11 +133,13 @@ and preserves all terminal outcomes without implicit negative feedback.
 
 Collection boundary tools use the same policy contract on every transport:
 
-- `gno_egress_policy_get` shows effective policy, provenance, and confirmation version.
+- `gno_egress_policy_get` shows effective policy, provenance, durable revision,
+  and diagnostic version.
 - `gno_egress_check` explains an exact action/destination/caller/content-class
   decision without performing the action.
 - `gno_egress_policy_set` is write-enabled; relaxation requires the exact
-  current policy/version and explicit acknowledgement.
+  collection, current policy, durable revision, target policy, and explicit
+  acknowledgement. Stale and replayed confirmations fail closed.
 - `gno_egress_audit_list|show|status` inspect content-free local receipts;
   `gno_egress_audit_delete|purge` are write-enabled local cleanup controls.
 
@@ -1591,10 +1593,12 @@ GNO_VERBOSE=1 gno mcp
 - Pre-download models: `gno models pull --all`
   Collection boundary tools:
 
-- `gno_egress_policy_get` shows effective policy, provenance, and confirmation version.
+- `gno_egress_policy_get` shows effective policy, provenance, durable revision,
+  and diagnostic version.
 - `gno_egress_check` explains an exact action/destination/caller/content-class
   decision without performing the action.
 - `gno_egress_policy_set` is write-enabled; relaxation requires the exact
-  current policy/version and explicit acknowledgement.
+  collection, current policy, durable revision, target policy, and explicit
+  acknowledgement. Stale and replayed confirmations fail closed.
 - `gno_egress_audit_list|show|status` inspect content-free local receipts;
   `gno_egress_audit_delete|purge` are write-enabled local cleanup controls.

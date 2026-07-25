@@ -8,6 +8,7 @@ const state = {
   collection: "notes",
   configuredPolicy: null,
   effectivePolicy: "local_only",
+  revision: 0,
   source: "config_default",
   version: `egress-policy-v1:${HASH}`,
 } as const;
@@ -26,6 +27,7 @@ describe("collection egress management schemas", () => {
             ...state,
             configuredPolicy: "remote",
             effectivePolicy: "remote",
+            revision: 1,
             source: "explicit",
           },
           change: "relaxed",
@@ -89,6 +91,7 @@ describe("collection egress management schemas", () => {
   test("rejects stale shapes and unbound policy versions", async () => {
     const schema = await loadSchema("collection-egress-policy");
     expect(assertInvalid({ ...state, version: "latest" }, schema)).toBeTrue();
+    expect(assertInvalid({ ...state, revision: -1 }, schema)).toBeTrue();
     expect(
       assertInvalid({ ...state, source: "legacy_default" }, schema)
     ).toBeTrue();

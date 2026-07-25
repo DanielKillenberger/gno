@@ -265,9 +265,15 @@ export const appendExportManifest = (
         );
       }
       const aggregateLineage = mergeEgressLineages(sourceLineages);
-      if (aggregateLineage.digest !== manifest.egressLineage.digest) {
+      const historicalMembership = aggregateLineage.sources
+        .map(({ collection }) => collection)
+        .join("\0");
+      const manifestMembership = manifest.egressLineage.sources
+        .map(({ collection }) => collection)
+        .join("\0");
+      if (historicalMembership !== manifestMembership) {
         throw new RetrievalTraceConflictError(
-          "Export manifest policy lineage does not match trace membership"
+          "Export manifest collection lineage does not match trace membership"
         );
       }
       const egressLineageJson = canonicalTraceJson(manifest.egressLineage);

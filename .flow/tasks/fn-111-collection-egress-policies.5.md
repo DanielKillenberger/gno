@@ -39,6 +39,6 @@ Deliver expose policy configuration checks and denials across surfaces as one im
 ## Done summary
 Exposed collection egress policy management, checks, denials, and audit controls across CLI, REST, MCP, SDK, Web/Desktop, and closed output schemas. Policy relaxations require confirmation bound to the current policy/version; runtime authorization rebinds immutable lineage to current policy, records content-free audit receipts, and denies before trace export persistence. Resident policy changes rotate authorization epochs, invalidate HTTP MCP sessions/caches, and make queued work retry before execution. Local trace inspection, labeling, deletion, and purge remain independent of egress policy. Added deterministic policy state/check/set contracts, atomic config/store projection, audit show/status/delete/purge with physical cleanup reporting, visible Web relaxation confirmation, and cross-surface regression coverage. Updated CLI/MCP/API/Web docs and retrieval eval callsites for explicit egress scope.
 ## Evidence
-- Commits: bcf2ca58
-- Tests: bun run lint:check, bun run typecheck, bun test (3432 pass, 2 skip, 0 fail), bun run docs:verify (13 pass, 2 cached-model skips, 0 fail), bun run verify:clipper-package, bun run test:package
+- Commits:
+- Tests:
 - PRs:

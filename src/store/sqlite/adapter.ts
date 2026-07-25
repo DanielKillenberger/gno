@@ -619,9 +619,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         const stmt = db.prepare(`
           INSERT INTO collections (
             name, path, pattern, include, exclude, update_cmd, language_hint,
-            egress_policy, egress_policy_source, synced_at
+            egress_policy, egress_policy_source, egress_policy_revision,
+            synced_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
           ON CONFLICT(name) DO UPDATE SET
             path = excluded.path,
             pattern = excluded.pattern,
@@ -641,6 +642,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
               THEN collections.egress_policy_source
               ELSE excluded.egress_policy_source
             END,
+            egress_policy_revision = CASE
+              WHEN excluded.egress_policy_source = 'config_default'
+                AND collections.egress_policy_source = 'legacy_default'
+              THEN collections.egress_policy_revision
+              ELSE excluded.egress_policy_revision
+            END,
             synced_at = datetime('now')
         `);
 
@@ -655,7 +662,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             c.updateCmd ?? null,
             c.languageHint ?? null,
             egress.policy,
-            egress.source
+            egress.source,
+            c.egressPolicyRevision ?? 0
           );
         }
       });
@@ -679,9 +687,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       const stmt = db.prepare(`
         INSERT INTO collections (
           name, path, pattern, include, exclude, update_cmd, language_hint,
-          egress_policy, egress_policy_source, synced_at
+          egress_policy, egress_policy_source, egress_policy_revision,
+          synced_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(name) DO UPDATE SET
           path = excluded.path,
           pattern = excluded.pattern,
@@ -701,6 +710,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             THEN collections.egress_policy_source
             ELSE excluded.egress_policy_source
           END,
+          egress_policy_revision = CASE
+            WHEN excluded.egress_policy_source = 'config_default'
+              AND collections.egress_policy_source = 'legacy_default'
+            THEN collections.egress_policy_revision
+            ELSE excluded.egress_policy_revision
+          END,
           synced_at = datetime('now')
         WHERE collections.path IS NOT excluded.path
           OR collections.pattern IS NOT excluded.pattern
@@ -716,6 +731,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             AND (
               collections.egress_policy IS NOT excluded.egress_policy
               OR collections.egress_policy_source IS NOT excluded.egress_policy_source
+              OR collections.egress_policy_revision IS NOT excluded.egress_policy_revision
             )
           )
       `);
@@ -735,7 +751,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
             collection.updateCmd ?? null,
             collection.languageHint ?? null,
             egress.policy,
-            egress.source
+            egress.source,
+            collection.egressPolicyRevision ?? 0
           );
         }
       });

@@ -2111,7 +2111,7 @@ function wireManagementCommands(program: Command): void {
 
   collectionPolicyCmd
     .command("get <name>")
-    .description("Show effective policy, source, and confirmation version")
+    .description("Show effective policy, source, and confirmation revision")
     .action(async (name: string) => {
       const { collectionPolicyGet } = await import("./commands/collection");
       await collectionPolicyGet(name, { configPath: getGlobals().config });
@@ -2121,8 +2121,8 @@ function wireManagementCommands(program: Command): void {
     .command("set <name> <policy>")
     .description("Set local_only, lan, or remote policy")
     .option(
-      "--confirm-relaxation <current-version>",
-      "confirm relaxation against the current policy version"
+      "--confirm-relaxation <current-revision>",
+      "confirm relaxation against the current policy revision"
     )
     .action(
       async (

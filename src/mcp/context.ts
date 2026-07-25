@@ -55,6 +55,7 @@ export interface ToolContextSnapshot {
   egress?: {
     destinationZone: EgressDestinationZone;
     caller: EgressCallerContext;
+    authorizationEpoch?: { value: string };
   };
 }
 
@@ -80,7 +81,11 @@ export interface ToolContext {
     sessionsInvalidated: number;
     staleWorkMustRetry: true;
   }>;
-  authorizeTraceExport?: (lineage: EgressLineage) => Promise<StoreResult<void>>;
+  authorizeTraceExport?: (
+    lineage: EgressLineage
+  ) => Promise<StoreResult<EgressLineage>>;
+  advanceRequestAuthorizationEpoch?: (epoch: string) => void;
+  getRequestAuthorizationEpoch?: () => string | undefined;
   getEgressContext?: () => ToolContextSnapshot["egress"];
   runWithEgressContext?<T>(
     egress: NonNullable<ToolContextSnapshot["egress"]>,
@@ -157,6 +162,12 @@ export function createToolContext(
     markIndexMutation: options.markIndexMutation,
     invalidateEgressPolicy: options.invalidateEgressPolicy,
     authorizeTraceExport: options.authorizeTraceExport,
+    advanceRequestAuthorizationEpoch: (epoch) => {
+      const reference = requestSnapshot.getStore()?.egress?.authorizationEpoch;
+      if (reference) reference.value = epoch;
+    },
+    getRequestAuthorizationEpoch: () =>
+      requestSnapshot.getStore()?.egress?.authorizationEpoch?.value,
     getEgressContext: () => requestSnapshot.getStore()?.egress,
     runWithEgressContext<T>(
       egress: NonNullable<ToolContextSnapshot["egress"]>,

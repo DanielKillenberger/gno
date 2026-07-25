@@ -388,8 +388,17 @@ You can:
 - keep the global preset unchanged for all other collections
 - tighten the data boundary immediately
 - relax it only after checking the visible confirmation; the confirmation is
-  bound to the policy version loaded by the dialog, so stale tabs cannot relax
-  a newer policy
+  bound to the collection, current policy, durable revision, and target loaded
+  by the dialog, so stale tabs and replayed confirmations cannot relax a newer
+  policy
+- explain a proposed action, destination, caller state, content class, and
+  partial-result mode without performing the action
+- inspect newest-first content-free local audit receipts, open exact receipt
+  details, and delete one or purge all only after visible confirmation
+
+Audit pagination cursors remain opaque. Delete and purge results show the exact
+deleted count, checkpointed frames, remaining WAL frames, and physical cleanup
+status.
 
 If you change the collection's **embed** model on an already-indexed collection, GNO warns that vector search quality will depend on running embeddings for that collection again.
 

@@ -89,7 +89,10 @@ export function handleRemoveCollection(
         if (!mutationResult.ok) {
           throw mapConfigError(mutationResult.code, mutationResult.error);
         }
-        await ctx.invalidateEgressPolicy?.();
+        const invalidation = await ctx.invalidateEgressPolicy?.();
+        if (invalidation) {
+          ctx.advanceRequestAuthorizationEpoch?.(invalidation.policyEpoch);
+        }
         ctx.markContentMutation?.();
         ctx.markIndexMutation?.();
 

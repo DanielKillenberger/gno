@@ -57,7 +57,9 @@ const DOCID_PATTERN = /^#[a-f0-9]{6,}$/;
 
 interface ManagementDeps {
   clock?: () => number;
-  authorizeExport?: (lineage: EgressLineage) => Promise<StoreResult<void>>;
+  authorizeExport?: (
+    lineage: EgressLineage
+  ) => Promise<StoreResult<EgressLineage>>;
 }
 
 export class RetrievalTraceManagementService {

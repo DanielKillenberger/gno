@@ -20,7 +20,7 @@
       "$ref": "collection-egress-policy.schema.json"
     },
     "change": {
-      "enum": ["tightened", "relaxed", "unchanged"]
+      "enum": ["tightened", "relaxed", "source_changed", "unchanged"]
     },
     "invalidation": {
       "oneOf": [

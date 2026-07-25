@@ -2371,7 +2371,7 @@ MCP Server Status
 Read tools:
 
 - `gno_egress_policy_get { collection }` returns configured/effective policy,
-  provenance source, and the current confirmation version.
+  provenance source, current monotonic revision, and diagnostic version.
 - `gno_egress_check` accepts exact collection scope, action, destination zone,
   caller authentication/authorization, content class, and partial mode. It
   performs no action and returns the canonical decision/explanation contract.
@@ -2381,7 +2381,9 @@ Read tools:
 Write-enabled tools:
 
 - `gno_egress_policy_set` requires confirmation
-  `{ currentPolicy, currentVersion, acknowledged: true }` for relaxation.
+  `{ collection, currentPolicy, currentRevision, targetPolicy, acknowledged: true }`
+  for relaxation. The revision is durable and one-use; replayed, stale,
+  cross-collection, and cross-target confirmations fail closed.
 - `gno_egress_audit_delete` deletes exactly one receipt.
 - `gno_egress_audit_purge { confirm: true }` deletes only audit receipts.
 
@@ -2390,6 +2392,12 @@ inspection remains available when outbound content is denied. Retrieval-trace
 export resolves exact trace lineage and checks policy before creating or
 reusing an export receipt; missing traces return `NOT_FOUND` before policy
 evaluation.
+
+Active resident requests retain their admission authorization epoch. A policy
+mutation may advance its own request to the new epoch, but older REST and MCP
+responses are replaced by a content-free `EGRESS_POLICY_CHANGED` retry
+response/event before protected bytes are emitted, including streaming
+responses.
 
 Schemas: `collection-egress-policy.schema.json`,
 `collection-egress-policy-set.schema.json`,

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { ToolContext } from "../server";
 
+import { projectCollectionEgressPolicy } from "../../core/collection-egress-policy-projection";
 import { CollectionEgressPolicyService } from "../../core/collection-egress-policy-service";
 import { applyConfigChange } from "../../core/config-mutation";
 import { EgressAuditService } from "../../core/egress-audit";
@@ -20,8 +21,10 @@ export const egressPolicySetInputSchema = z.object({
   policy,
   confirmation: z
     .object({
+      collection: z.string().min(1).max(64),
       currentPolicy: policy,
-      currentVersion: z.string().min(1).max(128),
+      currentRevision: z.number().int().nonnegative(),
+      targetPolicy: policy,
       acknowledged: z.literal(true),
     })
     .strict()
@@ -101,8 +104,8 @@ export const handleEgressPolicyGet = (
       const state = new CollectionEgressPolicyService({
         getConfig: () => ctx.config,
       }).get(args.collection);
-      if (!state) throw new Error("NOT_FOUND: Collection not found");
-      return state;
+      if (!state.ok) throw new Error(`${state.code}: ${state.error}`);
+      return state.value;
     },
     json
   );
@@ -126,6 +129,8 @@ export const handleEgressPolicySet = (
               onConfigUpdated: (config) => {
                 ctx.config = config;
               },
+              projectStore: (store, config) =>
+                projectCollectionEgressPolicy(store, config, args.collection),
             },
             mutate
           ),
@@ -139,6 +144,8 @@ export const handleEgressPolicySet = (
       });
       const result = await service.set(args);
       if (!result.ok) throw new Error(`${result.code}: ${result.error}`);
+      const epoch = result.value.invalidation?.policyEpoch;
+      if (epoch) ctx.advanceRequestAuthorizationEpoch?.(epoch);
       return result.value;
     },
     json
@@ -151,10 +158,13 @@ export const handleEgressCheck = (
   runTool(
     ctx,
     "gno_egress_check",
-    async () =>
-      new CollectionEgressPolicyService({
+    async () => {
+      const result = new CollectionEgressPolicyService({
         getConfig: () => ctx.config,
-      }).explain(args),
+      }).explain(args);
+      if (!result.ok) throw new Error(`${result.code}: ${result.error}`);
+      return result.value;
+    },
     json
   );
 

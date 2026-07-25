@@ -50,11 +50,13 @@ import {
   normalizeContentTypes,
 } from "../../config";
 import { type PublicCaptureInput } from "../../core/capture";
+import { projectCollectionEgressPolicy } from "../../core/collection-egress-policy-projection";
 import {
   CollectionEgressPolicyService,
-  type CollectionEgressCheckInput,
+  type CollectionEgressPolicyState,
   type EgressRelaxationConfirmation,
 } from "../../core/collection-egress-policy-service";
+import { parsePolicySetBody } from "../../core/collection-egress-policy-validation";
 import {
   type ConnectorVerificationCode,
   getConnectorVerificationRemediation,
@@ -151,6 +153,7 @@ import {
   executeResidentCapturePlan,
   planResidentCapture,
 } from "../capture-service";
+import { parseClosedJson } from "../closed-json";
 import { applyConfigChange, applyConfigChangeTyped } from "../config-sync";
 import {
   getConnectorStatuses,
@@ -405,7 +408,7 @@ export interface CollectionResponse {
     gen: "override" | "preset" | "default";
   };
   activePresetId: string;
-  egressPolicy: ReturnType<CollectionEgressPolicyService["get"]>;
+  egressPolicy: CollectionEgressPolicyState | null;
 }
 
 function serializeCollection(
@@ -425,9 +428,12 @@ function serializeCollection(
     effectiveModels: getCollectionEffectiveModels(config, collection.name),
     modelSources: getCollectionModelSources(config, collection.name),
     activePresetId: modelConfig.activePreset,
-    egressPolicy: new CollectionEgressPolicyService({
-      getConfig: () => config,
-    }).get(collection.name),
+    egressPolicy: (() => {
+      const result = new CollectionEgressPolicyService({
+        getConfig: () => config,
+      }).get(collection.name);
+      return result.ok ? result.value : null;
+    })(),
   };
 }
 
@@ -1025,12 +1031,22 @@ export async function handleCollections(config: Config): Promise<Response> {
 
 const collectionPolicyService = (
   ctxHolder: ContextHolder,
-  store: SqliteAdapter
+  store: SqliteAdapter,
+  collection: string
 ): CollectionEgressPolicyService =>
   new CollectionEgressPolicyService({
     getConfig: () => ctxHolder.config,
     mutateConfig: (mutate) =>
-      applyConfigChangeTyped(ctxHolder, store, (config) => mutate(config)),
+      applyConfigChangeTyped(
+        ctxHolder,
+        store,
+        (config) => mutate(config),
+        undefined,
+        {
+          projectStore: (targetStore, config) =>
+            projectCollectionEgressPolicy(targetStore, config, collection),
+        }
+      ),
     onPolicyChanged: async () =>
       (await ctxHolder.invalidateEgressPolicy?.()) ?? {
         policyEpoch: "egress-epoch-standalone",
@@ -1047,9 +1063,12 @@ export function handleCollectionEgressPolicy(
   const state = new CollectionEgressPolicyService({
     getConfig: () => ctxHolder.config,
   }).get(name);
-  return state
-    ? jsonResponse(state)
-    : errorResponse("NOT_FOUND", `Collection not found: ${name}`, 404);
+  if (state.ok) return jsonResponse(state.value);
+  return errorResponse(
+    state.code === "NOT_FOUND" ? "NOT_FOUND" : "VALIDATION",
+    state.error,
+    state.code === "NOT_FOUND" ? 404 : 400
+  );
 }
 
 export async function handleUpdateCollectionEgressPolicy(
@@ -1058,23 +1077,13 @@ export async function handleUpdateCollectionEgressPolicy(
   name: string,
   req: Request
 ): Promise<Response> {
-  let body: UpdateCollectionEgressPolicyRequestBody;
-  try {
-    body = (await req.json()) as UpdateCollectionEgressPolicyRequestBody;
-  } catch {
-    return errorResponse("VALIDATION", "Invalid JSON body");
-  }
-  if (!["local_only", "lan", "remote"].includes(body.policy)) {
-    return errorResponse(
-      "VALIDATION",
-      "policy must be local_only, lan, or remote"
-    );
-  }
-  const result = await collectionPolicyService(ctxHolder, store).set({
-    collection: name,
-    policy: body.policy,
-    confirmation: body.confirmation,
-  });
+  const parsed = await parseClosedJson(req);
+  if (!parsed.ok) return errorResponse("VALIDATION", parsed.error, 400);
+  const input = parsePolicySetBody(parsed.value, name);
+  if (!input.ok) return errorResponse("VALIDATION", input.error, 400);
+  const result = await collectionPolicyService(ctxHolder, store, name).set(
+    input.value
+  );
   if (!result.ok) {
     const status =
       result.code === "NOT_FOUND"
@@ -1091,23 +1100,14 @@ export async function handleCollectionEgressCheck(
   ctxHolder: ContextHolder,
   req: Request
 ): Promise<Response> {
-  let body: CollectionEgressCheckInput;
-  try {
-    body = (await req.json()) as CollectionEgressCheckInput;
-  } catch {
-    return errorResponse("VALIDATION", "Invalid JSON body");
-  }
-  try {
-    const result = new CollectionEgressPolicyService({
-      getConfig: () => ctxHolder.config,
-    }).check(body);
-    return jsonResponse(result);
-  } catch {
-    return errorResponse(
-      "VALIDATION",
-      "Invalid egress action, destination, caller, content class, or collection scope"
-    );
-  }
+  const parsed = await parseClosedJson(req);
+  if (!parsed.ok) return errorResponse("VALIDATION", parsed.error, 400);
+  const result = new CollectionEgressPolicyService({
+    getConfig: () => ctxHolder.config,
+  }).check(parsed.value);
+  return result.ok
+    ? jsonResponse(result.value)
+    : errorResponse("VALIDATION", result.error, 400);
 }
 
 export async function handleEgressAuditList(

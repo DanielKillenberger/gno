@@ -30,7 +30,7 @@ const config = (): Config =>
   }) as unknown as Config;
 
 describe("collection egress policy management", () => {
-  test("requires a relaxation confirmation bound to current policy and version", async () => {
+  test("requires a one-use relaxation confirmation bound to collection, revision, and target", async () => {
     let current = config();
     const invalidations: string[] = [];
     const service = new CollectionEgressPolicyService({
@@ -53,9 +53,11 @@ describe("collection egress policy management", () => {
       },
     });
     const before = service.get("notes");
-    expect(before).not.toBeNull();
-    expect(before?.effectivePolicy).toBe("local_only");
-    expect(before?.source).toBe("config_default");
+    expect(before.ok).toBeTrue();
+    if (!before.ok) throw new Error(before.error);
+    expect(before.value.effectivePolicy).toBe("local_only");
+    expect(before.value.source).toBe("config_default");
+    expect(before.value.revision).toBe(0);
 
     const unconfirmed = await service.set({
       collection: "notes",
@@ -69,19 +71,38 @@ describe("collection egress policy management", () => {
       collection: "notes",
       policy: "remote",
       confirmation: {
+        collection: "public",
         currentPolicy: "local_only",
-        currentVersion: "stale",
+        currentRevision: 0,
+        targetPolicy: "remote",
         acknowledged: true,
       },
     });
     expect(stale.ok).toBeFalse();
+    const wrongTarget = await service.set({
+      collection: "notes",
+      policy: "remote",
+      confirmation: {
+        collection: "notes",
+        currentPolicy: "local_only",
+        currentRevision: 0,
+        targetPolicy: "lan",
+        acknowledged: true,
+      },
+    });
+    expect(wrongTarget).toMatchObject({
+      ok: false,
+      code: "EGRESS_RELAXATION_CONFIRMATION_REQUIRED",
+    });
 
     const changed = await service.set({
       collection: "notes",
       policy: "remote",
       confirmation: {
+        collection: "notes",
         currentPolicy: "local_only",
-        currentVersion: before?.version ?? "",
+        currentRevision: before.value.revision,
+        targetPolicy: "remote",
         acknowledged: true,
       },
     });
@@ -89,7 +110,11 @@ describe("collection egress policy management", () => {
       ok: true,
       value: {
         change: "relaxed",
-        current: { effectivePolicy: "remote", source: "explicit" },
+        current: {
+          effectivePolicy: "remote",
+          revision: 1,
+          source: "explicit",
+        },
         invalidation: {
           queuedJobsInvalidated: 2,
           sessionsInvalidated: 1,
@@ -98,7 +123,72 @@ describe("collection egress policy management", () => {
       },
     });
     expect(invalidations).toHaveLength(1);
-    expect(current.collections[1]?.egressPolicy).toBe("remote");
+    expect(current.collections[0]?.egressPolicy).toBe("remote");
+    expect(current.collections[0]?.egressPolicyRevision).toBe(1);
+
+    const tightened = await service.set({
+      collection: "notes",
+      policy: "local_only",
+    });
+    expect(tightened).toMatchObject({
+      ok: true,
+      value: { change: "tightened", current: { revision: 2 } },
+    });
+    const replayed = await service.set({
+      collection: "notes",
+      policy: "remote",
+      confirmation: {
+        collection: "notes",
+        currentPolicy: "local_only",
+        currentRevision: before.value.revision,
+        targetPolicy: "remote",
+        acknowledged: true,
+      },
+    });
+    expect(replayed).toMatchObject({
+      ok: false,
+      code: "EGRESS_RELAXATION_CONFIRMATION_REQUIRED",
+    });
+  });
+
+  test("allows only one of two concurrent uses of the same relaxation confirmation", async () => {
+    let current = config();
+    let mutationQueue = Promise.resolve();
+    const service = new CollectionEgressPolicyService({
+      getConfig: () => current,
+      mutateConfig: (mutate) => {
+        const mutation = mutationQueue.then(() => {
+          const result = mutate(current);
+          if (!result.ok) return result;
+          current = result.config;
+          return { ok: true as const, config: current, value: result.value };
+        });
+        mutationQueue = mutation.then(() => undefined);
+        return mutation;
+      },
+    });
+    const confirmation = {
+      collection: "notes",
+      currentPolicy: "local_only",
+      currentRevision: 0,
+      targetPolicy: "remote",
+      acknowledged: true,
+    } as const;
+
+    const results = await Promise.all([
+      service.set({ collection: "notes", policy: "remote", confirmation }),
+      service.set({ collection: "notes", policy: "remote", confirmation }),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(
+      results.filter(
+        (result) =>
+          !result.ok &&
+          result.code === "EGRESS_RELAXATION_CONFIRMATION_REQUIRED"
+      )
+    ).toHaveLength(1);
+    expect(current.collections[0]?.egressPolicyRevision).toBe(1);
   });
 
   test("returns one content-free check/explain contract with partial disclosure", () => {
@@ -113,9 +203,12 @@ describe("collection egress policy management", () => {
       contentClass: "retrieval_trace",
     });
     expect(denied).toMatchObject({
-      mode: "denied",
-      decision: { allowed: false, reason: "POLICY_LOCAL_ONLY" },
-      remediation: { code: "POLICY_LOCAL_ONLY" },
+      ok: true,
+      value: {
+        mode: "denied",
+        decision: { allowed: false, reason: "POLICY_LOCAL_ONLY" },
+        remediation: { code: "POLICY_LOCAL_ONLY" },
+      },
     });
     expect(JSON.stringify(denied)).not.toContain("/tmp/");
 
@@ -128,15 +221,75 @@ describe("collection egress policy management", () => {
       partialResults: "explicit",
     });
     expect(partial).toMatchObject({
-      mode: "partial",
-      allowedCollections: ["public"],
-      omittedCollections: [
-        { collection: "notes", reason: "POLICY_LOCAL_ONLY" },
-      ],
-      disclosure: {
-        code: "EGRESS_PARTIAL_RESULT",
-        omittedCount: 1,
+      ok: true,
+      value: {
+        mode: "partial",
+        allowedCollections: ["public"],
+        omittedCollections: [
+          { collection: "notes", reason: "POLICY_LOCAL_ONLY" },
+        ],
+        disclosure: {
+          code: "EGRESS_PARTIAL_RESULT",
+          omittedCount: 1,
+        },
       },
     });
+  });
+
+  test("rejects hostile and malformed service inputs before mutation or invalidation", async () => {
+    let mutations = 0;
+    let invalidations = 0;
+    const service = new CollectionEgressPolicyService({
+      getConfig: config,
+      mutateConfig: async () => {
+        mutations += 1;
+        throw new Error("must not mutate");
+      },
+      onPolicyChanged: () => {
+        invalidations += 1;
+        throw new Error("must not invalidate");
+      },
+    });
+    const getter = {};
+    Object.defineProperty(getter, "policy", {
+      get() {
+        throw new Error("secret");
+      },
+    });
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const invalidInputs = [
+      null,
+      [],
+      { collection: "notes", policy: "future" },
+      { collection: "notes", policy: "remote", extra: true },
+      getter,
+      revoked.proxy,
+    ];
+    for (const input of invalidInputs) {
+      expect(await service.set(input)).toMatchObject({
+        ok: false,
+        code: "VALIDATION",
+      });
+    }
+    expect(
+      service.check({
+        action: "export",
+        caller: { authenticated: "yes", operationAuthorized: true },
+        contentClass: "retrieval_trace",
+        destinationZone: "remote",
+      })
+    ).toMatchObject({ ok: false, code: "VALIDATION" });
+    expect(
+      service.check({
+        action: "export",
+        caller: { authenticated: true, operationAuthorized: true },
+        collections: Array.from({ length: 65 }, () => "notes"),
+        contentClass: "retrieval_trace",
+        destinationZone: "remote",
+      })
+    ).toMatchObject({ ok: false, code: "VALIDATION" });
+    expect(mutations).toBe(0);
+    expect(invalidations).toBe(0);
   });
 });

@@ -24,7 +24,7 @@ export const authorizeCurrentEgress = async (input: {
   destinationZone: EgressDestinationZone;
   caller: EgressCallerContext;
   contentClass: EgressContentClass;
-}): Promise<StoreResult<void>> => {
+}): Promise<StoreResult<EgressLineage>> => {
   const currentLineage = resolveEgressLineage(
     currentEgressSources(
       input.config,
@@ -45,6 +45,6 @@ export const authorizeCurrentEgress = async (input: {
   });
   if (!recorded.ok) return recorded;
   return decision.allowed
-    ? ok(undefined)
+    ? ok(currentLineage)
     : err("EGRESS_DENIED", "Operation blocked by collection egress policy");
 };

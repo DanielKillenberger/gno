@@ -106,6 +106,16 @@ function createMockStore() {
       collections.push(...cols);
       return Promise.resolve({ ok: true as const, value: undefined });
     },
+    upsertCollections(cols: Array<{ name: string; path: string }>) {
+      for (const collection of cols) {
+        const index = collections.findIndex(
+          ({ name }) => name === collection.name
+        );
+        if (index >= 0) collections[index] = collection;
+        else collections.push(collection);
+      }
+      return Promise.resolve({ ok: true as const, value: undefined });
+    },
     syncContexts() {
       return Promise.resolve({ ok: true as const, value: undefined });
     },
@@ -261,7 +271,11 @@ describe("collection egress policy API", () => {
       const current = (await handleCollectionEgressPolicy(
         ctxHolder,
         "docs"
-      ).json()) as { effectivePolicy: "local_only"; version: string };
+      ).json()) as {
+        collection: "docs";
+        effectivePolicy: "local_only";
+        revision: number;
+      };
       const unconfirmed = await handleUpdateCollectionEgressPolicy(
         ctxHolder,
         createMockStore() as never,
@@ -281,8 +295,10 @@ describe("collection egress policy API", () => {
           body: JSON.stringify({
             policy: "remote",
             confirmation: {
+              collection: current.collection,
               currentPolicy: current.effectivePolicy,
-              currentVersion: current.version,
+              currentRevision: current.revision,
+              targetPolicy: "remote",
               acknowledged: true,
             },
           }),
@@ -296,6 +312,82 @@ describe("collection egress policy API", () => {
       expect(invalidated).toBe(1);
     } finally {
       await safeRm(tmpDir);
+    }
+  });
+
+  test("returns stable validation for malformed and non-object policy bodies without side effects", async () => {
+    const collection = {
+      name: "docs",
+      path: "/tmp/docs",
+      pattern: "**/*.md",
+      include: [],
+      exclude: [],
+    };
+    await writeConfig({ collections: [collection] });
+    const ctxHolder = createMockContextHolder({ collections: [collection] });
+    let invalidated = 0;
+    ctxHolder.invalidateEgressPolicy = () => {
+      invalidated += 1;
+      throw new Error("must not invalidate");
+    };
+    for (const body of [
+      "{",
+      "null",
+      "[]",
+      '"remote"',
+      '{"policy":1}',
+      '{"policy":"remote","extra":true}',
+      '{"policy":"remote","confirmation":[]}',
+      JSON.stringify({ policy: "remote", padding: "x".repeat(17 * 1024) }),
+    ]) {
+      const response = await handleUpdateCollectionEgressPolicy(
+        ctxHolder,
+        createMockStore() as never,
+        "docs",
+        new Request("http://localhost/api/collections/docs/egress-policy", {
+          method: "PUT",
+          body,
+        })
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "VALIDATION" },
+      });
+    }
+    expect(invalidated).toBe(0);
+    expect(ctxHolder.config.collections[0]?.egressPolicy).toBeUndefined();
+  });
+
+  test("returns stable validation for malformed check bodies without audit or content echo", async () => {
+    const ctxHolder = createMockContextHolder({
+      collections: [
+        {
+          name: "docs",
+          path: "/private/secret",
+          pattern: "**/*.md",
+          include: [],
+          exclude: [],
+        },
+      ],
+    });
+    for (const body of [
+      "{",
+      "null",
+      "[]",
+      '{"action":"export"}',
+      '{"action":"export","destinationZone":"remote","caller":{"authenticated":true,"operationAuthorized":true},"contentClass":"retrieval_trace","extra":true}',
+    ]) {
+      const response = await handleCollectionEgressCheck(
+        ctxHolder,
+        new Request("http://localhost/api/egress/check", {
+          method: "POST",
+          body,
+        })
+      );
+      expect(response.status).toBe(400);
+      const serialized = JSON.stringify(await response.json());
+      expect(serialized).toContain("VALIDATION");
+      expect(serialized).not.toContain("/private/secret");
     }
   });
 });

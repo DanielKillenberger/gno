@@ -721,7 +721,7 @@ GET /api/collections
 
 `effectiveModels` and `modelSources` exist so clients can show inherited-vs-overridden collection model state without re-implementing preset resolution logic.
 Each item also includes `egressPolicy`: configured/effective policy, provenance
-source, and the version required for an explicit relaxation confirmation.
+source, durable monotonic `revision`, and a diagnostic version fingerprint.
 
 ---
 
@@ -739,19 +739,25 @@ requires:
 ```json
 {
   "confirmation": {
+    "collection": "private-notes",
     "currentPolicy": "local_only",
-    "currentVersion": "egress-policy-v1:…",
+    "currentRevision": 7,
+    "targetPolicy": "remote",
     "acknowledged": true
   }
 }
 ```
 
-The confirmation must match the current locked config state. Successful policy
-changes sync config and DB projection, rotate the authorization epoch, close
-resident MCP sessions, and invalidate queued work. `POST /api/egress/check`
-accepts exact `collections`, `action`, `destinationZone`, `caller`, and
-`contentClass`; optional `partialResults: "explicit"` returns allowed and
-omitted collections with disclosure. It performs no protected action.
+The durable revision and all confirmation fields must match the current locked
+config state. A confirmation cannot be replayed or reused for another
+collection or target. Successful policy changes sync config and DB projection,
+rotate the authorization epoch, close resident MCP sessions, and invalidate
+queued work. Older active responses fail with a content-free
+`EGRESS_POLICY_CHANGED` retry result before protected bytes are emitted.
+`POST /api/egress/check` accepts exact `collections`, `action`,
+`destinationZone`, `caller`, and `contentClass`; optional
+`partialResults: "explicit"` returns allowed and omitted collections with
+disclosure. It performs no protected action.
 
 Content-free local audit controls:
 

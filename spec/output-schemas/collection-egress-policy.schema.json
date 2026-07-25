@@ -10,6 +10,7 @@
     "configuredPolicy",
     "effectivePolicy",
     "source",
+    "revision",
     "version"
   ],
   "properties": {
@@ -27,6 +28,10 @@
     },
     "source": {
       "enum": ["explicit", "config_default"]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
     },
     "version": {
       "type": "string",

@@ -11,6 +11,7 @@ import type { ContextHolder } from "./routes/api";
 
 import {
   applyConfigChange as applyConfigChangeCore,
+  type ConfigMutationContext,
   type ApplyConfigResult,
   type MutationResult,
 } from "../core/config-mutation";
@@ -67,11 +68,13 @@ export async function applyConfigChangeTyped<T>(
   ctxHolder: ContextHolder,
   store: SqliteAdapter,
   mutate: (config: Config) => Promise<MutationResult<T>> | MutationResult<T>,
-  configPath?: string
+  configPath?: string,
+  options: Pick<ConfigMutationContext, "projectStore"> = {}
 ): Promise<ApplyConfigResult<T>> {
   const result = await applyConfigChangeCore(
     {
       store,
+      projectStore: options.projectStore,
       configPath: configPath ?? ctxHolder.actualConfigPath,
       onConfigUpdated: (config) => {
         ctxHolder.config = config;

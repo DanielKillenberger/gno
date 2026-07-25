@@ -132,6 +132,12 @@ export const CollectionSchema = z.object({
    */
   egressPolicy: EgressPolicySchema.optional(),
 
+  /**
+   * Durable monotonic token for egress policy/source changes. Legacy configs
+   * start at zero; guarded mutations advance it under the config write lock.
+   */
+  egressPolicyRevision: z.number().int().nonnegative().optional(),
+
   /** Optional per-collection model overrides */
   models: z
     .object({

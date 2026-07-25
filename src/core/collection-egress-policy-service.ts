@@ -12,6 +12,11 @@ import type {
 
 import { resolveConfiguredEgressPolicy } from "../config/types";
 import { hashTraceCanonical } from "../store/retrieval-trace-codec";
+import {
+  parseCollectionName,
+  parsePolicyCheckInput,
+  parsePolicySetInput,
+} from "./collection-egress-policy-validation";
 import { EgressDeniedError, planCollectionEgress } from "./egress-enforcement";
 import { evaluateEgressPolicy } from "./egress-policy";
 import { resolveEgressLineage } from "./egress-provenance";
@@ -28,12 +33,15 @@ export interface CollectionEgressPolicyState {
   configuredPolicy: EgressPolicy | null;
   effectivePolicy: EgressPolicy;
   source: Extract<EgressPolicySource, "explicit" | "config_default">;
+  revision: number;
   version: string;
 }
 
 export interface EgressRelaxationConfirmation {
+  collection: string;
   currentPolicy: EgressPolicy;
-  currentVersion: string;
+  currentRevision: number;
+  targetPolicy: EgressPolicy;
   acknowledged: true;
 }
 
@@ -41,7 +49,7 @@ export interface CollectionEgressPolicySetResult {
   schemaVersion: "1.0";
   previous: CollectionEgressPolicyState;
   current: CollectionEgressPolicyState;
-  change: "tightened" | "relaxed" | "unchanged";
+  change: "tightened" | "relaxed" | "source_changed" | "unchanged";
   invalidation: null | {
     policyEpoch: string;
     queuedJobsInvalidated: number;
@@ -92,15 +100,21 @@ export interface CollectionEgressPolicyServiceDeps {
     | NonNullable<CollectionEgressPolicySetResult["invalidation"]>;
 }
 
+export type CollectionEgressPolicyServiceResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; code: string; error: string };
+
 const stateVersion = (input: {
   collection: string;
   effectivePolicy: EgressPolicy;
   source: EgressPolicySource;
+  revision: number;
 }): string =>
   `egress-policy-v1:${hashTraceCanonical({
     collection: input.collection,
     effectivePolicy: input.effectivePolicy,
     source: input.source,
+    revision: input.revision,
   })}`;
 
 export const collectionEgressPolicyEpoch = (config: Config): string =>
@@ -112,6 +126,7 @@ export const collectionEgressPolicyEpoch = (config: Config): string =>
           collection: collection.name,
           policy: effective.policy,
           source: effective.source,
+          revision: collection.egressPolicyRevision ?? 0,
         };
       })
       .sort((left, right) => left.collection.localeCompare(right.collection))
@@ -154,10 +169,12 @@ const policyState = (
     configuredPolicy: collection.egressPolicy ?? null,
     effectivePolicy: effective.policy,
     source: effective.source,
+    revision: collection.egressPolicyRevision ?? 0,
     version: stateVersion({
       collection: collection.name,
       effectivePolicy: effective.policy,
       source: effective.source,
+      revision: collection.egressPolicyRevision ?? 0,
     }),
   };
 };
@@ -187,18 +204,28 @@ const remediationFor = (
 export class CollectionEgressPolicyService {
   constructor(private readonly deps: CollectionEgressPolicyServiceDeps) {}
 
-  get(name: string): CollectionEgressPolicyState | null {
-    return policyState(this.deps.getConfig(), name);
+  get(
+    name: unknown
+  ): CollectionEgressPolicyServiceResult<CollectionEgressPolicyState> {
+    const parsed = parseCollectionName(name);
+    if (!parsed.ok) return parsed;
+    const state = policyState(this.deps.getConfig(), parsed.value);
+    return state
+      ? { ok: true, value: state }
+      : {
+          ok: false,
+          code: "NOT_FOUND",
+          error: `Collection not found: ${parsed.value}`,
+        };
   }
 
-  async set(input: {
-    collection: string;
-    policy: EgressPolicy;
-    confirmation?: EgressRelaxationConfirmation;
-  }): Promise<
-    | { ok: true; value: CollectionEgressPolicySetResult }
-    | { ok: false; code: string; error: string }
+  async set(
+    input: unknown
+  ): Promise<
+    CollectionEgressPolicyServiceResult<CollectionEgressPolicySetResult>
   > {
+    const parsed = parsePolicySetInput(input);
+    if (!parsed.ok) return parsed;
     if (!this.deps.mutateConfig) {
       return {
         ok: false,
@@ -207,32 +234,64 @@ export class CollectionEgressPolicyService {
       };
     }
     const changed = await this.deps.mutateConfig((config) => {
-      const previous = policyState(config, input.collection);
+      const previous = policyState(config, parsed.value.collection);
       if (!previous) {
         return {
           ok: false,
           code: "NOT_FOUND",
-          error: `Collection not found: ${input.collection}`,
+          error: `Collection not found: ${parsed.value.collection}`,
         };
       }
       const orderDelta =
-        POLICY_ORDER[input.policy] - POLICY_ORDER[previous.effectivePolicy];
+        POLICY_ORDER[parsed.value.policy] -
+        POLICY_ORDER[previous.effectivePolicy];
+      const sourceChanged = previous.source !== "explicit";
+      const confirmation = parsed.value.confirmation;
+      const confirmationMatches =
+        confirmation?.acknowledged === true &&
+        confirmation.collection === previous.collection &&
+        confirmation.currentPolicy === previous.effectivePolicy &&
+        confirmation.currentRevision === previous.revision &&
+        confirmation.targetPolicy === parsed.value.policy;
       if (
-        orderDelta > 0 &&
-        (input.confirmation?.acknowledged !== true ||
-          input.confirmation.currentPolicy !== previous.effectivePolicy ||
-          input.confirmation.currentVersion !== previous.version)
+        (confirmation && !confirmationMatches) ||
+        (orderDelta > 0 && !confirmationMatches)
       ) {
         return {
           ok: false,
           code: "EGRESS_RELAXATION_CONFIRMATION_REQUIRED",
           error:
-            "Relaxing collection egress requires confirmation bound to the current policy version",
+            "Relaxing collection egress requires confirmation bound to the current policy revision",
+        };
+      }
+      if (orderDelta === 0 && !sourceChanged) {
+        return {
+          ok: true,
+          config,
+          skipSave: true,
+          value: {
+            schemaVersion: "1.0",
+            previous,
+            current: previous,
+            change: "unchanged",
+            invalidation: null,
+          },
+        };
+      }
+      if (previous.revision >= Number.MAX_SAFE_INTEGER) {
+        return {
+          ok: false,
+          code: "CONSTRAINT_VIOLATION",
+          error: "Collection egress policy revision is exhausted",
         };
       }
       const collections = config.collections.map((collection) =>
         collection.name === previous.collection
-          ? { ...collection, egressPolicy: input.policy }
+          ? {
+              ...collection,
+              egressPolicy: parsed.value.policy,
+              egressPolicyRevision: previous.revision + 1,
+            }
           : collection
       );
       const nextConfig = { ...config, collections };
@@ -241,7 +300,7 @@ export class CollectionEgressPolicyService {
         return {
           ok: false,
           code: "NOT_FOUND",
-          error: `Collection not found: ${input.collection}`,
+          error: `Collection not found: ${parsed.value.collection}`,
         };
       }
       return {
@@ -256,7 +315,7 @@ export class CollectionEgressPolicyService {
               ? "relaxed"
               : orderDelta < 0
                 ? "tightened"
-                : "unchanged",
+                : "source_changed",
           invalidation: null,
         },
       };
@@ -282,10 +341,14 @@ export class CollectionEgressPolicyService {
     return { ok: true, value };
   }
 
-  check(input: CollectionEgressCheckInput): CollectionEgressCheckResult {
+  check(
+    input: unknown
+  ): CollectionEgressPolicyServiceResult<CollectionEgressCheckResult> {
+    const parsed = parsePolicyCheckInput(input);
+    if (!parsed.ok) return parsed;
     const config = this.deps.getConfig();
     const names =
-      input.collections ??
+      parsed.value.collections ??
       config.collections
         .map(({ name }) => name)
         .sort((a, b) => a.localeCompare(b));
@@ -307,50 +370,58 @@ export class CollectionEgressPolicyService {
     const lineage = resolveEgressLineage(sources, names);
     const decision = evaluateEgressPolicy({
       collections: lineage.sources,
-      action: input.action,
-      destination: { zone: input.destinationZone },
-      caller: input.caller,
-      contentClass: input.contentClass,
+      action: parsed.value.action,
+      destination: { zone: parsed.value.destinationZone },
+      caller: parsed.value.caller,
+      contentClass: parsed.value.contentClass,
     });
     try {
       const plan = planCollectionEgress({
         collections: config.collections,
         collectionNames: names,
-        action: input.action,
-        destinationZone: input.destinationZone,
-        caller: input.caller,
-        contentClass: input.contentClass,
-        partialResults: input.partialResults,
+        action: parsed.value.action,
+        destinationZone: parsed.value.destinationZone,
+        caller: parsed.value.caller,
+        contentClass: parsed.value.contentClass,
+        partialResults: parsed.value.partialResults,
       });
       return {
-        schemaVersion: "1.0",
-        mode: plan.mode,
-        allowedCollections: plan.allowedCollections,
-        omittedCollections: plan.omittedCollections,
-        disclosure: plan.disclosure,
-        lineage,
-        decision,
-        remediation: remediationFor(decision),
+        ok: true,
+        value: {
+          schemaVersion: "1.0",
+          mode: plan.mode,
+          allowedCollections: plan.allowedCollections,
+          omittedCollections: plan.omittedCollections,
+          disclosure: plan.disclosure,
+          lineage,
+          decision,
+          remediation: remediationFor(decision),
+        },
       };
     } catch (error) {
       if (!(error instanceof EgressDeniedError)) throw error;
       return {
-        schemaVersion: "1.0",
-        mode: "denied",
-        allowedCollections: [],
-        omittedCollections: lineage.sources.map(({ collection }) => ({
-          collection,
-          reason: decision.reason,
-        })),
-        disclosure: null,
-        lineage,
-        decision,
-        remediation: remediationFor(decision),
+        ok: true,
+        value: {
+          schemaVersion: "1.0",
+          mode: "denied",
+          allowedCollections: [],
+          omittedCollections: lineage.sources.map(({ collection }) => ({
+            collection,
+            reason: decision.reason,
+          })),
+          disclosure: null,
+          lineage,
+          decision,
+          remediation: remediationFor(decision),
+        },
       };
     }
   }
 
-  explain(input: CollectionEgressCheckInput): CollectionEgressCheckResult {
+  explain(
+    input: unknown
+  ): CollectionEgressPolicyServiceResult<CollectionEgressCheckResult> {
     return this.check(input);
   }
 }

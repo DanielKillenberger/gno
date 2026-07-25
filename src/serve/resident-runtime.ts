@@ -80,8 +80,10 @@ export interface ResidentGeneration {
 }
 
 export interface ResidentRequestHandle {
+  authorizationEpoch?: string;
   id: string;
   signal: AbortSignal;
+  isAuthorizationEpochCurrent?(): boolean;
   finish(): void;
 }
 
@@ -103,6 +105,7 @@ export interface ResidentRuntime {
   readonly generations: ResidentGeneration;
   readonly activeRequests: number;
   readonly activeSessions: number;
+  readonly authorizationEpoch: string;
   readonly isShuttingDown: boolean;
   getStatus(): ResidentStatus;
   setListenerPort(port: number | null): void;
@@ -309,7 +312,8 @@ export async function startResidentRuntime(
     serverInstanceId,
     toolMutex,
   });
-  jobManager.setAuthorizationEpoch(collectionEgressPolicyEpoch(initialConfig));
+  let authorizationEpoch = collectionEgressPolicyEpoch(initialConfig);
+  jobManager.setAuthorizationEpoch(authorizationEpoch);
   ctxHolder.jobManager = jobManager;
   const admission = new AdmissionController();
   const readerGate = new ReaderGate(
@@ -415,10 +419,22 @@ export async function startResidentRuntime(
     get activeSessions() {
       return transportStatusProvider?.().activeSessions ?? 0;
     },
+    get authorizationEpoch() {
+      return authorizationEpoch;
+    },
     get isShuttingDown() {
       return disposed || !admission.accepting;
     },
-    admitRequest: (signal) => admission.admit(signal),
+    admitRequest: (signal) => {
+      const admitted = admission.admit(signal);
+      if (!admitted) return null;
+      const requestEpoch = authorizationEpoch;
+      return {
+        ...admitted,
+        authorizationEpoch: requestEpoch,
+        isAuthorizationEpochCurrent: () => requestEpoch === authorizationEpoch,
+      };
+    },
     async withModelLease<T>(operation: () => Promise<T>): Promise<T> {
       const lease = modelManager.acquireLease();
       try {
@@ -544,6 +560,7 @@ export async function startResidentRuntime(
   ctxHolder.invalidateEgressPolicy = async () => {
     const sessionsInvalidated = transportStatusProvider?.().activeSessions ?? 0;
     const policyEpoch = collectionEgressPolicyEpoch(ctxHolder.config);
+    authorizationEpoch = policyEpoch;
     const queuedJobsInvalidated = jobManager.setAuthorizationEpoch(policyEpoch);
     await policySessionInvalidator?.();
     return {

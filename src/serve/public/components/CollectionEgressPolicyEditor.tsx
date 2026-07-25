@@ -8,6 +8,7 @@ interface CollectionEgressPolicyEditorProps {
   onPolicyChange: (policy: CollectionEgressPolicy) => void;
   policy: CollectionEgressPolicy;
   relaxed: boolean;
+  revision: number;
   source: "explicit" | "config_default";
 }
 
@@ -17,6 +18,7 @@ export function CollectionEgressPolicyEditor({
   onPolicyChange,
   policy,
   relaxed,
+  revision,
   source,
 }: CollectionEgressPolicyEditorProps) {
   return (
@@ -50,7 +52,8 @@ export function CollectionEgressPolicyEditor({
           <option value="remote">Authenticated remote</option>
         </select>
         <p className="text-muted-foreground/45 text-xs">
-          Source: <span className="font-mono">{source}</span>
+          Source: <span className="font-mono">{source}</span> · revision{" "}
+          <span className="font-mono">{revision}</span>
         </p>
         {relaxed ? (
           <div className="rounded-md border border-secondary/25 bg-secondary/6 p-3">
@@ -63,7 +66,8 @@ export function CollectionEgressPolicyEditor({
               />
               <span>
                 I confirm this expands where collection content may travel. The
-                confirmation applies only to the current policy version.
+                confirmation applies only to revision {revision} and target{" "}
+                {policy}.
               </span>
             </label>
           </div>

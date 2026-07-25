@@ -61,7 +61,7 @@ export const exportRetrievalTraces = async <
   clock: () => number,
   input: ExportRetrievalTracesInput<Format>,
   deps: {
-    authorize?: (lineage: EgressLineage) => Promise<StoreResult<void>>;
+    authorize?: (lineage: EgressLineage) => Promise<StoreResult<EgressLineage>>;
   } = {}
 ): Promise<StoreResult<ExportRetrievalTracesResult<Format>>> => {
   const format = input.format ?? "agentic-receipt";
@@ -87,14 +87,18 @@ export const exportRetrievalTraces = async <
   if (!built.ok) return built;
   const authorized = await deps.authorize?.(built.value.egressLineage);
   if (authorized && !authorized.ok) return authorized;
-  const artifactHash = hashTraceCanonical(built.value);
+  const artifact = {
+    ...built.value,
+    egressLineage: authorized?.value ?? built.value.egressLineage,
+  } as RetrievalTraceArtifact;
+  const artifactHash = hashTraceCanonical(artifact);
   const exportId = `trace-export-${artifactHash.slice(0, 40)}`;
   const appended = await store.appendRetrievalTraceExportManifest({
     exportId,
     traceIds: traceIds.value,
     format,
     artifactHash,
-    egressLineage: built.value.egressLineage,
+    egressLineage: artifact.egressLineage,
     createdAtMs: clock(),
   });
   if (!appended.ok) return appended;
@@ -105,11 +109,13 @@ export const exportRetrievalTraces = async <
   }
   const reconstructed = buildArtifact(format, complete.value.traces);
   if (!reconstructed.ok) return reconstructed;
+  const reconstructedCurrent = {
+    ...reconstructed.value,
+    egressLineage: complete.value.manifest.egressLineage,
+  } as RetrievalTraceArtifact;
   if (
     complete.value.manifest.traceIds.join("\0") !== traceIds.value.join("\0") ||
-    reconstructed.value.egressLineage.digest !==
-      complete.value.manifest.egressLineage.digest ||
-    hashTraceCanonical(reconstructed.value) !==
+    hashTraceCanonical(reconstructedCurrent) !==
       complete.value.manifest.artifactHash
   ) {
     return err(
@@ -121,6 +127,6 @@ export const exportRetrievalTraces = async <
     schemaVersion: "1.0",
     result: appended.value,
     manifest: complete.value.manifest,
-    artifact: reconstructed.value,
+    artifact: reconstructedCurrent,
   } as ExportRetrievalTracesResult<Format>);
 };

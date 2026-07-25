@@ -8,6 +8,7 @@ import type {
 } from "../../../core/egress-policy";
 
 import { loadConfig } from "../../../config";
+import { projectCollectionEgressPolicy } from "../../../core/collection-egress-policy-projection";
 import { CollectionEgressPolicyService } from "../../../core/collection-egress-policy-service";
 import { applyConfigChange } from "../../../core/config-mutation";
 import { CliError } from "../../errors";
@@ -31,8 +32,8 @@ export const collectionPolicyGet = async (
   const state = new CollectionEgressPolicyService({
     getConfig: () => loaded.value,
   }).get(name);
-  if (!state) throw new CliError("VALIDATION", `Collection not found: ${name}`);
-  writeJson(state);
+  if (!state.ok) throw new CliError("VALIDATION", state.error);
+  writeJson(state.value);
 };
 
 export const collectionPolicySet = async (
@@ -47,7 +48,7 @@ export const collectionPolicySet = async (
   if (!initialized.ok) throw new CliError("RUNTIME", initialized.error);
   let config = initialized.config;
   try {
-    const current = new CollectionEgressPolicyService({
+    const currentResult = new CollectionEgressPolicyService({
       getConfig: () => config,
     }).get(name);
     const service = new CollectionEgressPolicyService({
@@ -60,6 +61,8 @@ export const collectionPolicySet = async (
             onConfigUpdated: (next) => {
               config = next;
             },
+            projectStore: (store, next) =>
+              projectCollectionEgressPolicy(store, next, name),
           },
           mutate
         );
@@ -70,10 +73,12 @@ export const collectionPolicySet = async (
       collection: name,
       policy,
       confirmation:
-        current && options.confirmRelaxation
+        currentResult.ok && options.confirmRelaxation
           ? {
-              currentPolicy: current.effectivePolicy,
-              currentVersion: options.confirmRelaxation,
+              collection: currentResult.value.collection,
+              currentPolicy: currentResult.value.effectivePolicy,
+              currentRevision: Number(options.confirmRelaxation),
+              targetPolicy: policy,
               acknowledged: true,
             }
           : undefined,
@@ -116,5 +121,6 @@ export const collectionPolicyCheck = async (
     contentClass: input.contentClass,
     partialResults: input.partial ? "explicit" : "deny",
   });
-  writeJson(result);
+  if (!result.ok) throw new CliError("VALIDATION", result.error);
+  writeJson(result.value);
 };

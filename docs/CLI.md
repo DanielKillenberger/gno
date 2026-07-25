@@ -691,7 +691,7 @@ Collection policy controls where source and derived content may travel:
 ```bash
 gno collection policy get notes
 gno collection policy set notes local_only
-gno collection policy set notes remote --confirm-relaxation 'egress-policy-v1:…'
+gno collection policy set notes remote --confirm-relaxation 7
 gno collection policy check --action export --destination remote \
   --content-class retrieval_trace --collection notes \
   --authenticated --authorized --explain-egress
@@ -699,8 +699,10 @@ gno collection policy check --action export --destination remote \
 
 Policies become less restrictive in the order `local_only` → `lan` → `remote`.
 Relaxation is never inferred: first run `get`, review the current value/source,
-then pass its exact version to `--confirm-relaxation`. Tightening invalidates
-resident sessions and queued work; stale jobs must be retried and rechecked.
+then pass its exact numeric `revision` to `--confirm-relaxation`. The revision
+is durable and one-use: stale, replayed, cross-collection, and cross-target
+confirmations fail closed. Tightening invalidates resident sessions and queued
+work; stale jobs must be retried and rechecked.
 
 Local content-free receipts:
 
