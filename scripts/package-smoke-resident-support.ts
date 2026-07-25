@@ -128,7 +128,8 @@ export function spawnResident(
 export async function waitForStatus(
   baseUrl: string,
   expectedMode: "serve" | "daemon",
-  residentProcess?: RunningProcess
+  residentProcess?: RunningProcess,
+  headers?: HeadersInit
 ): Promise<ResidentStatus> {
   const startedAt = performance.now();
   const deadline = Date.now() + START_TIMEOUT_MS;
@@ -144,7 +145,9 @@ export async function waitForStatus(
       );
     }
     try {
-      const response = await fetch(`${baseUrl}/api/resident/status`);
+      const response = await fetch(`${baseUrl}/api/resident/status`, {
+        headers,
+      });
       if (response.ok) {
         const value: unknown = await response.json();
         if (
@@ -279,9 +282,10 @@ export async function validateStatusSurfaces(
 export async function validateResidentStatusSurface(
   baseUrl: string,
   expectedMode: "serve" | "daemon",
-  forbiddenValues: string[]
+  forbiddenValues: string[],
+  headers?: HeadersInit
 ): Promise<ResidentStatus> {
-  const response = await fetch(`${baseUrl}/api/resident/status`);
+  const response = await fetch(`${baseUrl}/api/resident/status`, { headers });
   if (!response.ok) {
     throw new Error(
       `Packed resident status endpoint failed: ${response.status}`

@@ -249,13 +249,23 @@ async function proveNonLoopbackDaemon(
   const residentProcess = spawnResident(input, "daemon", securedArgs);
   const clients: Client[] = [];
   try {
-    await waitForStatus(baseUrl, "daemon", residentProcess);
-    await validateResidentStatusSurface(baseUrl, "daemon", [
-      input.cwd,
-      input.env.GNO_DATA_DIR ?? "",
-      firstToken,
-      secondToken,
-    ]);
+    const authenticatedHeaders = {
+      authorization: `Bearer ${firstToken}`,
+      host: allowedHost,
+      origin: allowedOrigin,
+    };
+    await waitForStatus(
+      baseUrl,
+      "daemon",
+      residentProcess,
+      authenticatedHeaders
+    );
+    await validateResidentStatusSurface(
+      baseUrl,
+      "daemon",
+      [input.cwd, input.env.GNO_DATA_DIR ?? "", firstToken, secondToken],
+      authenticatedHeaders
+    );
     const unsafeStatus = await fetch(`${baseUrl}/api/status`);
     if (unsafeStatus.status !== 404) {
       throw new Error(

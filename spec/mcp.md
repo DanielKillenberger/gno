@@ -98,6 +98,21 @@ HTTP MCP remains read-only unless `gateway.enableWrite: true` or
 authorize mutation. Unauthorized calls to write tools fail with HTTP 403 before
 SDK dispatch.
 
+Every `tools/call`, `resources/list`, `resources/templates/list`, and
+`resources/read` request is also checked against the current socket peer zone
+and the effective policy of every referenced collection before SDK dispatch.
+The check is per request, including batch members and requests that reuse an
+existing session; a session's original peer zone is never reused as authority.
+Non-loopback access therefore requires both a valid bearer token and a
+compatible collection policy. Policy denial returns HTTP 403 with stable
+`EGRESS_DENIED` data and a redacted evaluator audit. Write authorization remains
+an independent additional requirement.
+
+The MCP tool and resource registry is paired with the checked network-boundary
+inventory. Adding a content-bearing tool, resource, model transport, listener,
+direct fetch, or external-process adapter without an egress classification
+fails the enforcement contract tests.
+
 Boundary failures use the closed
 [`mcp-http-error`](./output-schemas/mcp-http-error.schema.json) body with stable,
 redacted statuses: 401 (authentication), 403 (peer/Host/Origin/write), 413

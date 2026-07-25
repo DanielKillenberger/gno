@@ -6,6 +6,11 @@ import type { ContextHolder } from "./api";
 
 import { prepareBrowserClip } from "../../core/browser-clip";
 import {
+  enforceCollectionEgress,
+  EGRESS_DENIED_MESSAGE,
+  EgressDeniedError,
+} from "../../core/egress-enforcement";
+import {
   planResidentCapture,
   type ResidentCapturePlanResult,
 } from "../capture-service";
@@ -81,6 +86,30 @@ const pollStatusCode = (result: ClipperPairPollResult): number => {
     return 410;
   }
   return 200;
+};
+
+const enforceClipWrite = (ctxHolder: ContextHolder, body: unknown): void => {
+  const record =
+    typeof body === "object" && body !== null
+      ? (body as Record<string, unknown>)
+      : null;
+  const destination =
+    typeof record?.destination === "object" && record.destination !== null
+      ? (record.destination as Record<string, unknown>)
+      : null;
+  const collection =
+    typeof destination?.collection === "string"
+      ? destination.collection
+      : undefined;
+  if (!collection) return;
+  enforceCollectionEgress({
+    collections: ctxHolder.config.collections,
+    collectionNames: [collection],
+    action: "clip_write",
+    destinationZone: "loopback",
+    caller: { authenticated: true, operationAuthorized: true },
+    contentClass: "source",
+  });
 };
 
 export function createClipperRouteGateway(
@@ -279,6 +308,7 @@ export function createClipperRouteGateway(
     if (!authenticated.ok) return authenticated.response;
     const { admission, grant } = authenticated.value;
     try {
+      enforceClipWrite(ctxHolder, admission.body);
       const prepared = prepareBrowserClip(admission.body);
       const planned = await planResidentCapture(
         ctxHolder,
@@ -303,6 +333,12 @@ export function createClipperRouteGateway(
         admission.origin
       );
     } catch (error) {
+      if (error instanceof EgressDeniedError) {
+        return withClipperCors(
+          clipperErrorResponse("EGRESS_DENIED", EGRESS_DENIED_MESSAGE, 403),
+          admission.origin
+        );
+      }
       return withClipperCors(
         clipperErrorResponse(
           "CLIPPER_INVALID_REQUEST",
@@ -321,6 +357,7 @@ export function createClipperRouteGateway(
     if (!authenticated.ok) return authenticated.response;
     const { admission, grant } = authenticated.value;
     try {
+      enforceClipWrite(ctxHolder, admission.body);
       return withClipperCors(
         await executeClipperCapture({
           request,
@@ -334,6 +371,12 @@ export function createClipperRouteGateway(
         admission.origin
       );
     } catch (error) {
+      if (error instanceof EgressDeniedError) {
+        return withClipperCors(
+          clipperErrorResponse("EGRESS_DENIED", EGRESS_DENIED_MESSAGE, 403),
+          admission.origin
+        );
+      }
       return withClipperCors(
         clipperErrorResponse(
           "CLIPPER_CAPTURE_FAILED",

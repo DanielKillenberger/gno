@@ -112,7 +112,9 @@ The full browser REST API is served by `gno serve`, which binds to
 it includes local index and configuration details. An explicit non-loopback
 daemon bind requires the MCP token file plus exact Host and Origin allowlists.
 The resident status projection never exposes tokens, paths, queries, content,
-or caller identities.
+or caller identities. On a non-loopback daemon listener, it also requires a
+compatible collection egress policy; authentication and policy remain
+independent gates.
 
 ### Browser Clipper Boundary
 

@@ -318,8 +318,9 @@ function actionAllowsDestination(
 ): boolean {
   switch (action) {
     case "publish":
-    case "remote_inference":
       return destination === "remote";
+    case "remote_inference":
+      return destination !== "local_process";
     case "serve":
       return destination !== "local_process";
     case "export":

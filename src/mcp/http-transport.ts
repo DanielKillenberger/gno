@@ -2,6 +2,7 @@
 
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
+import type { DestinationClassification } from "../core/destination-classifier";
 import type { ResidentRequestHandle } from "../serve/resident-runtime";
 import type {
   HttpMcpSession,
@@ -10,6 +11,11 @@ import type {
   PendingHttpMcpSession,
 } from "./http-session";
 
+import { EgressDeniedError } from "../core/egress-enforcement";
+import {
+  enforceHttpMcpEgress,
+  httpMcpEgressDeniedResponse,
+} from "./http-egress";
 import { HttpMcpSessionStore } from "./http-session";
 import { MCP_WRITE_TOOL_NAMES } from "./tools/index";
 
@@ -30,8 +36,10 @@ export interface HttpMcpTransportOptions extends HttpMcpSessionStoreOptions {
 }
 
 export interface HttpMcpRequestContext {
+  authenticated?: boolean;
   identity: string;
   parsedBody?: unknown;
+  peerClassification?: DestinationClassification;
 }
 
 export interface HttpMcpTransportStatus {
@@ -292,6 +300,26 @@ export class HttpMcpTransport {
         await pending?.discard();
         finish();
         return jsonRpcError(403, -32_000, "Forbidden");
+      }
+      try {
+        enforceHttpMcpEgress(
+          requestBody,
+          this.#runtime.mcpContext.collections,
+          {
+            authenticated: context.authenticated ?? false,
+            destinationZone:
+              context.peerClassification?.zone ??
+              (context.identity === "loopback" ? "loopback" : "remote"),
+            operationAuthorized: true,
+          }
+        );
+      } catch (error) {
+        if (error instanceof EgressDeniedError) {
+          await pending?.discard();
+          finish();
+          return httpMcpEgressDeniedResponse(error, requestBody);
+        }
+        throw error;
       }
       const response = await transport.handleRequest(
         request,

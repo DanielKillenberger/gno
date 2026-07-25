@@ -43,6 +43,8 @@ export interface CreatePortOptions {
   policy?: DownloadPolicy;
   /** Progress callback for downloads */
   onProgress?: ProgressCallback;
+  /** Explicit collection scope for outbound HTTP inference. Omit for all. */
+  egressCollections?: readonly string[];
 }
 
 /** Default policy: no auto-download (backwards compatible) */
@@ -79,7 +81,10 @@ export class LlmAdapter {
 
     // Use HTTP embedding for remote endpoints
     if (isHttpModelUri(uri)) {
-      const httpEmbed = new HttpEmbedding(uri);
+      const httpEmbed = new HttpEmbedding(uri, {
+        collections: this.config.collections,
+        collectionNames: options?.egressCollections,
+      });
       // Initialize to verify connection and get dimensions
       const initResult = await httpEmbed.init();
       if (!initResult.ok) {
@@ -119,7 +124,10 @@ export class LlmAdapter {
 
     // Use HTTP generation for remote endpoints
     if (isHttpGenUri(uri)) {
-      const httpGen = new HttpGeneration(uri);
+      const httpGen = new HttpGeneration(uri, {
+        collections: this.config.collections,
+        collectionNames: options?.egressCollections,
+      });
       return { ok: true, value: httpGen };
     }
 
@@ -152,7 +160,10 @@ export class LlmAdapter {
     const policy = options?.policy ?? DEFAULT_POLICY;
 
     if (isHttpGenUri(uri)) {
-      const httpGen = new HttpGeneration(uri);
+      const httpGen = new HttpGeneration(uri, {
+        collections: this.config.collections,
+        collectionNames: options?.egressCollections,
+      });
       return { ok: true, value: httpGen };
     }
 
@@ -187,7 +198,10 @@ export class LlmAdapter {
 
     // Use HTTP rerank for remote endpoints
     if (isHttpRerankUri(uri)) {
-      const httpRerank = new HttpRerank(uri);
+      const httpRerank = new HttpRerank(uri, {
+        collections: this.config.collections,
+        collectionNames: options?.egressCollections,
+      });
       return { ok: true, value: httpRerank };
     }
 

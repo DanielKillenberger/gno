@@ -113,8 +113,8 @@ describe("collection egress policy", () => {
         false,
         "ACTION_DESTINATION_MISMATCH",
       ],
-      ["remote_inference", "loopback", false, "ACTION_DESTINATION_MISMATCH"],
-      ["remote_inference", "lan", false, "ACTION_DESTINATION_MISMATCH"],
+      ["remote_inference", "loopback", true, "LOCAL_DESTINATION"],
+      ["remote_inference", "lan", true, "LAN_POLICY_AUTHENTICATED"],
       ["remote_inference", "remote", true, "REMOTE_POLICY_AUTHENTICATED"],
       ["export", "local_process", true, "LOCAL_DESTINATION"],
       ["export", "loopback", false, "ACTION_DESTINATION_MISMATCH"],
@@ -139,15 +139,13 @@ describe("collection egress policy", () => {
   });
 
   test("enforces action and destination compatibility", () => {
-    for (const action of ["publish", "remote_inference"] as const) {
-      const input = request(action);
-      input.destination.zone = "loopback";
-      expect(evaluateEgressPolicy(input)).toMatchObject({
-        allowed: false,
-        code: "EGRESS_DENIED",
-        reason: "ACTION_DESTINATION_MISMATCH",
-      });
-    }
+    const input = request("publish");
+    input.destination.zone = "loopback";
+    expect(evaluateEgressPolicy(input)).toMatchObject({
+      allowed: false,
+      code: "EGRESS_DENIED",
+      reason: "ACTION_DESTINATION_MISMATCH",
+    });
 
     const localExport = request("export");
     localExport.collections = [

@@ -52,8 +52,10 @@ export async function createMcpHttpGateway(
     // POST responses and GET streams may both be long-lived SSE responses.
     server.timeout(request, 0);
     return transport.handleRequest(authorization.value.request, {
+      authenticated: authorization.value.authenticated,
       identity: authorization.value.identity,
       parsedBody: authorization.value.parsedBody,
+      peerClassification: authorization.value.peerClassification,
     });
   };
 

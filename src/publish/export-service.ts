@@ -7,6 +7,7 @@
 import type { Collection } from "../config/types";
 import type { DocumentRow, StorePort, TagRow } from "../store/types";
 
+import { enforceCollectionEgress } from "../core/egress-enforcement";
 import { parseRef } from "../core/ref-parser";
 import { parseFrontmatter, stripFrontmatter } from "../ingestion/frontmatter";
 import { getContentBatch } from "../store/content-batch";
@@ -346,6 +347,13 @@ export async function exportPublishArtifact(input: {
   store: StorePort;
   target: string;
 }): Promise<ExportPublishArtifactResult> {
+  enforceCollectionEgress({
+    collections: input.collections,
+    action: "export",
+    destinationZone: "local_process",
+    caller: { authenticated: true, operationAuthorized: true },
+    contentClass: "source",
+  });
   const warnings: SanitizeWarning[] = [];
   const artifact =
     (await exportCollectionArtifact(

@@ -69,6 +69,12 @@ Local indexing, retrieval, and local models remain on the machine. Configured
 HTTP model endpoints are a separate explicit boundary. gno.sh receives the
 exported artifact only when you upload it.
 
+Building a publish artifact is a policy-checked local-process export. The local
+REST response does not upload it and is classified as loopback serving, not
+remote publication. Remote upload, private/invite agent access, and
+server-side decryption are not implemented; an upload or future agent route
+must add its own authentication gate and a separate `publish` policy decision.
+
 The design-partner validation pilot is separately opt-in and concierge-run. Its
 closed receipts contain only a generated high-entropy cohort key, pseudonymous
 participant key, consent receipt identifier, milestone event name, monotonic

@@ -8,6 +8,7 @@ import type { Config } from "../../src/config/types";
 import type { ToolContext } from "../../src/mcp/context";
 import type { HttpMcpTransportRuntime } from "../../src/mcp/http-transport";
 
+import { classifyDestination } from "../../src/core/destination-classifier";
 import { HttpMcpTransport } from "../../src/mcp/http-transport";
 import { createStandaloneResidentStatus } from "../../src/serve/resident-status";
 import { startServer } from "../../src/serve/server";
@@ -489,6 +490,59 @@ describe("stateful Web Standard MCP transport", () => {
         })
       ).status
     ).toBe(404);
+  });
+
+  test("re-evaluates peer-zone policy when one session is reused", async () => {
+    const runtime = createRuntime();
+    runtime.mcpContext.config.collections.push({
+      name: "notes",
+      path: "/notes",
+      pattern: "**/*",
+      include: [],
+      exclude: [],
+      egressPolicy: "local_only",
+    });
+    runtime.mcpContext.collections.push(
+      runtime.mcpContext.config.collections[0]!
+    );
+    const transport = new HttpMcpTransport(runtime);
+    openTransports.push(transport);
+    const identity = "principal-a";
+    const sessionId = await initialize(transport, 1, identity);
+    const call = postRequest(
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "gno_get",
+          arguments: { ref: "gno://notes/private.md" },
+        },
+      },
+      sessionId
+    );
+
+    const remote = await transport.handleRequest(call.clone(), {
+      authenticated: true,
+      identity,
+      peerClassification: classifyDestination({
+        kind: "network",
+        hostname: "203.0.113.1",
+      }),
+    });
+    expect(remote.status).toBe(403);
+    expect(await remote.text()).toContain("EGRESS_DENIED");
+
+    const loopback = await transport.handleRequest(call, {
+      authenticated: false,
+      identity,
+      peerClassification: classifyDestination({
+        kind: "network",
+        hostname: "127.0.0.1",
+      }),
+    });
+    expect(loopback.status).toBe(200);
+    await loopback.text();
   });
 
   test("rejects HTTP mutation calls unless separately authorized", async () => {

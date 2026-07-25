@@ -113,6 +113,10 @@ code, not stderr text.
 For a live daemon, JSON status best-effort includes the same redacted resident
 snapshot available at `GET /api/resident/status`; no paths, tokens, queries,
 document content, or caller identities enter that nested lifecycle object.
+For a non-loopback listener, the HTTP status route additionally requires the
+same exact Host/Origin checks and bearer authentication as `/mcp`, plus a
+compatible effective policy for every participating collection. Either control
+can deny access; neither overrides the other.
 
 ### `--json` Gating
 

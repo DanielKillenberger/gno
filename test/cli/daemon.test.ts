@@ -1,6 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { daemon, handleDaemonAppStatus } from "../../src/cli/commands/daemon";
+import {
+  authorizeDaemonStatus,
+  daemon,
+  handleDaemonAppStatus,
+} from "../../src/cli/commands/daemon";
+import { classifyDestination } from "../../src/core/destination-classifier";
 
 type StartBackgroundRuntimeFn =
   typeof import("../../src/serve/background-runtime").startBackgroundRuntime;
@@ -22,6 +27,48 @@ describe("daemon command", () => {
     const response = await handleDaemonAppStatus({} as never, "0.0.0.0");
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("");
+  });
+
+  test("intersects bearer authentication and collection policy for resident status", async () => {
+    const runtime = {
+      config: {
+        collections: [
+          {
+            name: "notes",
+            path: "/notes",
+            pattern: "**/*",
+            include: [],
+            exclude: [],
+            egressPolicy: "local_only",
+          },
+        ],
+      },
+      getStatus: () => ({ schemaVersion: "1.0" }),
+    };
+    const gateway = {
+      security: {
+        authorize: async () => ({
+          ok: true as const,
+          value: {
+            authenticated: true,
+            identity: "principal",
+            peerClassification: classifyDestination({
+              kind: "network",
+              hostname: "8.8.8.8",
+            }),
+            request: new Request("http://gno.example/api/resident/status"),
+          },
+        }),
+      },
+    };
+    const response = await authorizeDaemonStatus(
+      runtime as never,
+      gateway as never,
+      new Request("http://gno.example/api/resident/status"),
+      {} as never
+    );
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("EGRESS_DENIED");
   });
 
   test("returns startup errors from background runtime", async () => {

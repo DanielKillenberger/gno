@@ -59,6 +59,7 @@ export interface HttpGatewayOverrides {
 }
 
 export interface AuthorizedHttpMcpRequest {
+  authenticated: boolean;
   identity: string;
   peerClassification: DestinationClassification;
   parsedBody?: unknown;
@@ -399,6 +400,7 @@ export class HttpMcpSecurity {
       this.#config.tokenFile !== undefined;
     const tokenState = await this.#refreshTokenState();
     let identity = "loopback";
+    let authenticated = false;
     if (requiresAuth) {
       if (!tokenState) return { ok: false, response: securityError(503) };
       const authorization = request.headers.get("authorization");
@@ -408,6 +410,7 @@ export class HttpMcpSecurity {
       if (!constantTimeEqual(presentedDigest, tokenState.digest))
         return { ok: false, response: securityError(401) };
       identity = tokenState.digest;
+      authenticated = true;
     }
 
     let parsedBody: unknown;
@@ -438,6 +441,7 @@ export class HttpMcpSecurity {
     return {
       ok: true,
       value: {
+        authenticated,
         identity,
         peerClassification,
         parsedBody,

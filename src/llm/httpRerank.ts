@@ -5,9 +5,12 @@
  * @module src/llm/httpRerank
  */
 
+import type { HttpInferenceOptions } from "./http-inference";
 import type { LlmResult, RerankPort, RerankScore } from "./types";
 
-import { inferenceFailedError } from "./errors";
+import { EgressDeniedError } from "../core/egress-enforcement";
+import { egressDeniedInferenceError, inferenceFailedError } from "./errors";
+import { requestHttpInference } from "./http-inference";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -36,10 +39,12 @@ export class HttpRerank implements RerankPort {
   private readonly apiUrl: string;
   private readonly modelName: string;
   private readonly instruction: string;
+  private readonly requestOptions: HttpInferenceOptions;
   readonly modelUri: string;
 
-  constructor(modelUri: string) {
+  constructor(modelUri: string, requestOptions: HttpInferenceOptions = {}) {
     this.modelUri = modelUri;
+    this.requestOptions = requestOptions;
     // Parse URI: http://host:port/v1/completions#modelname
     const hashIndex = modelUri.indexOf("#");
     if (hashIndex > 0) {
@@ -109,19 +114,23 @@ export class HttpRerank implements RerankPort {
 
   private async scoreBatch(prompts: string[]): Promise<LlmResult<number[]>> {
     try {
-      const response = await fetch(this.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await requestHttpInference(
+        this.apiUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: this.modelName,
+            prompt: prompts, // Array of prompts for batching
+            max_tokens: 10, // Just need the score
+            temperature: 0, // Deterministic
+            stop: ["\n", "<"],
+          }),
         },
-        body: JSON.stringify({
-          model: this.modelName,
-          prompt: prompts, // Array of prompts for batching
-          max_tokens: 10, // Just need the score
-          temperature: 0, // Deterministic
-          stop: ["\n", "<"],
-        }),
-      });
+        this.requestOptions
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -154,10 +163,13 @@ export class HttpRerank implements RerankPort {
     } catch (e) {
       return {
         ok: false,
-        error: inferenceFailedError(
-          this.modelUri,
-          e instanceof Error ? e : new Error(String(e))
-        ),
+        error:
+          e instanceof EgressDeniedError
+            ? egressDeniedInferenceError(e)
+            : inferenceFailedError(
+                this.modelUri,
+                e instanceof Error ? e : new Error(String(e))
+              ),
       };
     }
   }

@@ -732,6 +732,15 @@ document chunks for embedding/reranking, generated expansion input for
 access controls outside a trusted network; remote inference is not part of the
 local privacy boundary.
 
+Before DNS resolution or request-body transfer, GNO intersects the endpoint
+zone with every participating collection's egress policy. `local_only` permits
+loopback model servers, `lan` permits authenticated local/LAN servers, and
+`remote` permits pinned HTTPS public providers. DNS answers are pinned and
+rechecked before connection. Redirects must remain on the same origin and are
+re-evaluated at every hop; credentials and request bodies are never forwarded
+cross-origin. An unscoped public endpoint probe fails with `EGRESS_DENIED`
+without resolving or contacting the endpoint.
+
 ```yaml
 models:
   activePreset: remote

@@ -4,6 +4,11 @@ import type { BackgroundRuntimeResult } from "../../serve/background-runtime";
 import type { ResidentRuntime } from "../../serve/resident-runtime";
 
 import {
+  enforceCollectionEgress,
+  EGRESS_DENIED_MESSAGE,
+  EgressDeniedError,
+} from "../../core/egress-enforcement";
+import {
   DEFAULT_HTTP_GATEWAY_PORT,
   isHttpGatewayLoopbackBind,
   resolveHttpGatewayConfig,
@@ -41,6 +46,40 @@ type DaemonDeps = {
 function formatCollectionSyncSummary(result: CollectionSyncResult): string {
   return `${result.collection}: ${result.filesAdded} added, ${result.filesUpdated} updated, ${result.filesUnchanged} unchanged, ${result.filesErrored} errors`;
 }
+
+export const authorizeDaemonStatus = async (
+  runtime: ResidentRuntime,
+  gateway: Awaited<ReturnType<typeof createMcpHttpGateway>>,
+  request: Request,
+  server: Parameters<typeof gateway.route>[1]
+): Promise<Response> => {
+  const authorization = await gateway.security.authorize(request, server);
+  if (!authorization.ok) return authorization.response;
+  try {
+    enforceCollectionEgress({
+      collections: runtime.config.collections,
+      action: "serve",
+      destinationZone: authorization.value.peerClassification.zone,
+      caller: {
+        authenticated: authorization.value.authenticated,
+        operationAuthorized: true,
+      },
+      contentClass: "metadata",
+    });
+    return handleResidentStatus(() => runtime.getStatus());
+  } catch (error) {
+    if (!(error instanceof EgressDeniedError)) throw error;
+    return Response.json(
+      {
+        error: "EGRESS_DENIED",
+        message: EGRESS_DENIED_MESSAGE,
+        reason: error.decision.reason,
+        audit: error.decision.audit,
+      },
+      { status: 403 }
+    );
+  }
+};
 
 export function handleDaemonAppStatus(
   runtime: ResidentRuntime,
@@ -161,9 +200,12 @@ export async function daemon(
             ),
         },
         "/api/resident/status": {
-          GET: () =>
-            handleResidentStatus(() =>
-              (runtime as ResidentRuntime).getStatus()
+          GET: (request, peerServer) =>
+            authorizeDaemonStatus(
+              runtime as ResidentRuntime,
+              gateway as Awaited<ReturnType<typeof createMcpHttpGateway>>,
+              request,
+              peerServer
             ),
         },
       },

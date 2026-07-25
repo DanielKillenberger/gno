@@ -23,6 +23,7 @@ import {
   createVectorIndexPort,
   createVectorStatsPort,
 } from "../../store/vector";
+import { enforceSyncCommandEgress } from "../sync-egress";
 import { runTool, type ToolResult } from "./index";
 
 interface IndexInput {
@@ -107,6 +108,11 @@ export function handleIndex(
           },
           ctx.config
         );
+        enforceSyncCommandEgress(ctx, {
+          collectionNames: collections,
+          gitPull: options.gitPull,
+          runUpdateCmd: options.runUpdateCmd,
+        });
 
         const modelUri = resolveModelUri(
           ctx.config,
@@ -144,6 +150,7 @@ export function handleIndex(
               // Phase 2: Embed
               const llm = new LlmAdapter(ctx.config);
               const embedResult = await llm.createEmbeddingPort(modelUri, {
+                egressCollections: collections,
                 policy: { offline: true, allowDownload: false },
               });
 

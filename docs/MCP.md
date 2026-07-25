@@ -239,6 +239,14 @@ Authentication does not authorize writes. Set `gateway.enableWrite: true` or
 pass `--mcp-enable-write` separately. Without that opt-in, HTTP calls to write
 tools return a redacted HTTP 403 before SDK dispatch.
 
+Collection policy is checked separately on every tool and resource request,
+using the current socket peer even when a client reuses an existing session.
+`local_only` content can leave only through loopback; `lan` content additionally
+permits an authenticated private-network peer; `remote` is required for an
+authenticated public peer. A bearer token never overrides policy, and
+`--mcp-enable-write` never overrides either control. Policy failures return a
+redacted `EGRESS_DENIED` response before a tool/resource reads indexed content.
+
 Requests and sessions are bounded. Boundary responses are stable and contain no
 peer, allowlist, path, token, Authorization header, query, or document content:
 401 unauthenticated, 403 forbidden, 413 oversized body, 429 pressure, and 503
@@ -249,6 +257,8 @@ shutdown/credential/runtime unavailability. See
 the Web/Desktop Health Center, `gno_status`, and detached process status:
 mode, uptime, listener port, admission/shutdown state, session/request/queue
 counts, model lease/load counters, job counts, and content/index generations.
+On a non-loopback daemon listener it passes through the same Host, Origin,
+bearer, socket-peer, and collection-policy checks as `/mcp`.
 
 ### Resident client example
 
