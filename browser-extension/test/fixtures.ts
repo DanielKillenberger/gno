@@ -98,7 +98,7 @@ export const source = {
 
 export const egressLineage: EgressLineage = {
   effectivePolicy: "local_only",
-  digest: "5".repeat(64),
+  digest: "5411913ed073bc9d18a0cc00c578923231d28586aca7016a062873813805d974",
   sources: [
     {
       collection: "notes",
