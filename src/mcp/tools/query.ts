@@ -279,6 +279,9 @@ export function handleQuery(
         if (!traceStart.ok) throw new Error(traceStart.error.message);
         traceSession = traceStart.value ?? undefined;
         const llm = new LlmAdapter(ctx.config);
+        const egressCollections = args.collection
+          ? [args.collection]
+          : ("all" as const);
 
         // Resolve download policy from env (MCP has no CLI flags)
         const policy = resolveDownloadPolicy(process.env, {});
@@ -288,6 +291,7 @@ export function handleQuery(
 
         // Create embedding port (for vector search) - optional
         const embedResult = await llm.createEmbeddingPort(embedUri, {
+          egressCollections,
           policy,
           onProgress: (progress) => downloadProgress("embed", progress),
         });
@@ -298,6 +302,7 @@ export function handleQuery(
         // Create expansion port - optional
         if (expandUri) {
           const genResult = await llm.createExpansionPort(expandUri, {
+            egressCollections,
             policy,
             onProgress: (progress) => downloadProgress("expand", progress),
           });
@@ -309,6 +314,7 @@ export function handleQuery(
         // Create rerank port - optional
         if (rerankUri) {
           const rerankResult = await llm.createRerankPort(rerankUri, {
+            egressCollections,
             policy,
             onProgress: (progress) => downloadProgress("rerank", progress),
           });
@@ -425,6 +431,7 @@ export function handleQueryDiagnose(
       const llm = new LlmAdapter(ctx.config);
       const policy = resolveDownloadPolicy(process.env, {});
       const downloadProgress = createNonTtyProgressRenderer();
+      const egressCollections = collection ? [collection] : ("all" as const);
 
       let embedPort: EmbeddingPort | null = null;
       let expandPort: GenerationPort | null = null;
@@ -456,6 +463,7 @@ export function handleQueryDiagnose(
 
         if (!args.fast) {
           const embedResult = await llm.createEmbeddingPort(embedUri, {
+            egressCollections,
             policy,
             onProgress: (progress) => downloadProgress("embed", progress),
           });
@@ -468,6 +476,7 @@ export function handleQueryDiagnose(
           const genResult = await llm.createExpansionPort(
             resolveModelUri(ctx.config, "expand", undefined, collection),
             {
+              egressCollections,
               policy,
               onProgress: (progress) => downloadProgress("expand", progress),
             }
@@ -481,6 +490,7 @@ export function handleQueryDiagnose(
           const rerankResult = await llm.createRerankPort(
             resolveModelUri(ctx.config, "rerank", undefined, collection),
             {
+              egressCollections,
               policy,
               onProgress: (progress) => downloadProgress("rerank", progress),
             }

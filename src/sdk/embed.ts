@@ -283,6 +283,7 @@ export async function runEmbed(
   }
 
   const embedResult = await runtime.llm.createEmbeddingPort(modelUri, {
+    egressCollections: options.collection ? [options.collection] : "all",
     policy: runtime.downloadPolicy,
   });
   if (!embedResult.ok) {

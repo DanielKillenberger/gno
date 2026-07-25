@@ -71,6 +71,14 @@ export type HttpDestinationPolicyResult =
   | { ok: true; reason: "DESTINATION_ALLOWED"; value: HttpDestinationPin }
   | HttpDestinationPolicyDenial;
 
+export type HttpDestinationClassificationResult =
+  | {
+      ok: true;
+      reason: "DESTINATION_ALLOWED";
+      classification: DestinationClassification;
+    }
+  | HttpDestinationPolicyDenial;
+
 const ZONE_ORDER: Record<HttpDestinationMaximumZone, number> = {
   loopback: 0,
   lan: 1,
@@ -491,5 +499,39 @@ export async function prepareHttpDestination(
     ok: true,
     reason: "DESTINATION_ALLOWED",
     value: new HttpDestinationPin(prepared, resolvedOptions, redirectCount),
+  };
+}
+
+/**
+ * Resolve and classify an HTTP destination without opening a socket or
+ * transferring request headers/body. This bounded DNS-only phase lets the
+ * collection policy evaluate a hostname's proven zone before transport setup.
+ */
+export async function classifyHttpDestination(
+  rawUrl: string,
+  options: Pick<HttpDestinationPolicyOptions, "resolver">
+): Promise<HttpDestinationClassificationResult> {
+  const url = parseHttpUrl(rawUrl);
+  const invalid = invalidClassification();
+  if (!url) return denial("INVALID_DESTINATION", invalid, null, 0);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return denial("UNSUPPORTED_PROTOCOL", invalid, url, 0);
+  }
+  if (url.username || url.password) {
+    return denial("CREDENTIALS_IN_URL", invalid, url, 0);
+  }
+  const resolved = await resolveAddresses(
+    url,
+    options.resolver ?? defaultResolver
+  );
+  if (!resolved.ok) return denial(resolved.reason, invalid, url, 0);
+  return {
+    ok: true,
+    reason: "DESTINATION_ALLOWED",
+    classification: classifyDestination({
+      kind: "network",
+      hostname: resolved.hostname,
+      addresses: resolved.addresses,
+    }),
   };
 }

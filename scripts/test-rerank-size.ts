@@ -12,7 +12,9 @@ if (!init.ok) {
 const preset = getActivePreset(init.config);
 const llm = new LlmAdapter(init.config);
 
-const rerankResult = await llm.createRerankPort(preset.rerank);
+const rerankResult = await llm.createRerankPort(preset.rerank, {
+  egressCollections: "all",
+});
 if (!rerankResult.ok) {
   console.error("No rerank port");
   process.exit(1);

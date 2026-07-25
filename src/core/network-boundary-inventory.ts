@@ -1,160 +1,260 @@
-/** Checked inventory of current network-capable and process boundaries. */
+/** Checked callsite-level inventory of shipped network/process boundaries. */
 
 import type { EgressAction } from "./egress-policy";
 
-export type NetworkBoundaryMarker =
+export type NetworkBoundaryPrimitive =
+  | "bun_connect"
+  | "bun_dns_lookup"
   | "bun_serve"
-  | "external_process"
+  | "child_process"
+  | "event_source"
   | "fetch"
   | "http_inference"
-  | "mcp_method"
-  | "mcp_tool"
-  | "structural_exception";
+  | "web_socket";
 
 export interface NetworkBoundaryInventoryEntry {
   id: string;
+  key: string;
   path: string;
-  marker: NetworkBoundaryMarker;
+  primitive: NetworkBoundaryPrimitive | "logical";
   action: EgressAction | null;
   enforcement:
     | "collection_policy"
-    | "loopback_only"
+    | "client_transport"
+    | "disabled"
     | "local_process_only"
-    | "no_collection_data"
-    | "disabled";
+    | "loopback_only"
+    | "no_collection_data";
+  serverBoundary?: string;
 }
 
 export const NETWORK_BOUNDARY_INVENTORY = [
   {
     id: "daemon-listener",
+    key: "src/cli/commands/daemon.ts::bun_serve#1",
     path: "src/cli/commands/daemon.ts",
-    marker: "bun_serve",
+    primitive: "bun_serve",
     action: "serve",
     enforcement: "collection_policy",
   },
   {
-    id: "serve-listener",
-    path: "src/serve/server.ts",
-    marker: "bun_serve",
-    action: "serve",
-    enforcement: "loopback_only",
-  },
-  {
-    id: "serve-route-types",
-    path: "src/serve/routes/api.ts",
-    marker: "bun_serve",
-    action: null,
-    enforcement: "no_collection_data",
-  },
-  {
-    id: "browser-api-client",
-    path: "src/serve/public/hooks/use-api.ts",
-    marker: "fetch",
-    action: "serve",
-    enforcement: "loopback_only",
-  },
-  {
-    id: "detached-runtime-health",
-    path: "src/cli/detach.ts",
-    marker: "fetch",
+    id: "semantic-setup-process",
+    key: "src/cli/commands/setup-semantic.ts::child_process#1",
+    path: "src/cli/commands/setup-semantic.ts",
+    primitive: "child_process",
     action: null,
     enforcement: "no_collection_data",
   },
   {
     id: "detached-runtime-process",
+    key: "src/cli/detach.ts::child_process#1",
     path: "src/cli/detach.ts",
-    marker: "external_process",
+    primitive: "child_process",
     action: null,
     enforcement: "no_collection_data",
   },
   {
-    id: "semantic-setup-process",
-    path: "src/cli/commands/setup-semantic.ts",
-    marker: "external_process",
+    id: "detached-runtime-health",
+    key: "src/cli/detach.ts::fetch#1",
+    path: "src/cli/detach.ts",
+    primitive: "fetch",
     action: null,
     enforcement: "no_collection_data",
   },
   {
     id: "terminal-pager",
+    key: "src/cli/pager.ts::child_process#1",
     path: "src/cli/pager.ts",
-    marker: "external_process",
+    primitive: "child_process",
     action: null,
     enforcement: "local_process_only",
   },
   {
     id: "file-lock-process-probe",
+    key: "src/core/file-lock.ts::child_process#1",
     path: "src/core/file-lock.ts",
-    marker: "external_process",
+    primitive: "child_process",
     action: null,
     enforcement: "no_collection_data",
   },
   {
     id: "local-file-operations",
+    key: "src/core/file-ops.ts::child_process#1",
     path: "src/core/file-ops.ts",
-    marker: "external_process",
+    primitive: "child_process",
     action: null,
     enforcement: "local_process_only",
   },
   {
-    id: "sync-update-and-git",
+    id: "sync-update-command",
+    key: "src/ingestion/sync.ts::child_process#1",
     path: "src/ingestion/sync.ts",
-    marker: "external_process",
+    primitive: "child_process",
     action: "export",
     enforcement: "collection_policy",
   },
   {
-    id: "http-embedding",
+    id: "sync-git-repository-check",
+    key: "src/ingestion/sync.ts::child_process#2",
+    path: "src/ingestion/sync.ts",
+    primitive: "child_process",
+    action: null,
+    enforcement: "local_process_only",
+  },
+  {
+    id: "sync-git-pull",
+    key: "src/ingestion/sync.ts::child_process#3",
+    path: "src/ingestion/sync.ts",
+    primitive: "child_process",
+    action: "export",
+    enforcement: "collection_policy",
+  },
+  {
+    id: "inference-dns-classification",
+    key: "src/llm/http-policy.ts::bun_dns_lookup#1",
+    path: "src/llm/http-policy.ts",
+    primitive: "bun_dns_lookup",
+    action: "remote_inference",
+    enforcement: "collection_policy",
+  },
+  {
+    id: "http-embedding-single",
+    key: "src/llm/httpEmbedding.ts::http_inference#1",
     path: "src/llm/httpEmbedding.ts",
-    marker: "http_inference",
+    primitive: "http_inference",
+    action: "remote_inference",
+    enforcement: "collection_policy",
+  },
+  {
+    id: "http-embedding-batch",
+    key: "src/llm/httpEmbedding.ts::http_inference#2",
+    path: "src/llm/httpEmbedding.ts",
+    primitive: "http_inference",
     action: "remote_inference",
     enforcement: "collection_policy",
   },
   {
     id: "http-generation",
+    key: "src/llm/httpGeneration.ts::http_inference#1",
     path: "src/llm/httpGeneration.ts",
-    marker: "http_inference",
+    primitive: "http_inference",
     action: "remote_inference",
     enforcement: "collection_policy",
   },
   {
     id: "http-rerank",
+    key: "src/llm/httpRerank.ts::http_inference#1",
     path: "src/llm/httpRerank.ts",
-    marker: "http_inference",
+    primitive: "http_inference",
     action: "remote_inference",
     enforcement: "collection_policy",
   },
   {
+    id: "pinned-http-fetch",
+    key: "src/llm/pinned-http-connection.ts::fetch#1",
+    path: "src/llm/pinned-http-connection.ts",
+    primitive: "fetch",
+    action: "remote_inference",
+    enforcement: "collection_policy",
+  },
+  {
+    id: "browser-blob-read",
+    key: "src/serve/public/components/ai-elements/prompt-input.tsx::fetch#1",
+    path: "src/serve/public/components/ai-elements/prompt-input.tsx",
+    primitive: "fetch",
+    action: null,
+    enforcement: "local_process_only",
+  },
+  {
+    id: "browser-api-hook",
+    key: "src/serve/public/hooks/use-api.ts::fetch#1",
+    path: "src/serve/public/hooks/use-api.ts",
+    primitive: "fetch",
+    action: "serve",
+    enforcement: "client_transport",
+    serverBoundary: "src/serve/server.ts",
+  },
+  {
+    id: "browser-api-helper",
+    key: "src/serve/public/hooks/use-api.ts::fetch#2",
+    path: "src/serve/public/hooks/use-api.ts",
+    primitive: "fetch",
+    action: "serve",
+    enforcement: "client_transport",
+    serverBoundary: "src/serve/server.ts",
+  },
+  {
+    id: "browser-document-events",
+    key: "src/serve/public/hooks/use-doc-events.ts::event_source#1",
+    path: "src/serve/public/hooks/use-doc-events.ts",
+    primitive: "event_source",
+    action: "serve",
+    enforcement: "client_transport",
+    serverBoundary: "src/serve/server.ts",
+  },
+  {
+    id: "clipper-pair-csrf",
+    key: "src/serve/public/lib/clipper-approval.ts::fetch#1",
+    path: "src/serve/public/lib/clipper-approval.ts",
+    primitive: "fetch",
+    action: "clip_write",
+    enforcement: "client_transport",
+    serverBoundary: "src/serve/routes/clipper.ts",
+  },
+  {
+    id: "clipper-pair-approval",
+    key: "src/serve/public/lib/clipper-approval.ts::fetch#2",
+    path: "src/serve/public/lib/clipper-approval.ts",
+    primitive: "fetch",
+    action: "clip_write",
+    enforcement: "client_transport",
+    serverBoundary: "src/serve/routes/clipper.ts",
+  },
+  {
+    id: "serve-listener",
+    key: "src/serve/server.ts::bun_serve#1",
+    path: "src/serve/server.ts",
+    primitive: "bun_serve",
+    action: "serve",
+    enforcement: "loopback_only",
+  },
+  {
     id: "http-mcp-tools",
+    key: "logical::http-mcp-tools",
     path: "src/mcp/http-egress.ts",
-    marker: "mcp_tool",
+    primitive: "logical",
     action: "serve",
     enforcement: "collection_policy",
   },
   {
     id: "http-mcp-resources",
+    key: "logical::http-mcp-resources",
     path: "src/mcp/http-egress.ts",
-    marker: "mcp_method",
+    primitive: "logical",
     action: "serve",
     enforcement: "collection_policy",
   },
   {
     id: "local-publish-artifact",
+    key: "logical::local-publish-artifact",
     path: "src/publish/export-service.ts",
-    marker: "structural_exception",
+    primitive: "logical",
     action: "export",
     enforcement: "local_process_only",
   },
   {
     id: "remote-publish-upload",
+    key: "logical::remote-publish-upload",
     path: "src/publish/export-service.ts",
-    marker: "structural_exception",
+    primitive: "logical",
     action: null,
     enforcement: "disabled",
   },
   {
     id: "private-agent-access",
+    key: "logical::private-agent-access",
     path: "src/publish/encrypted-export.ts",
-    marker: "structural_exception",
+    primitive: "logical",
     action: null,
     enforcement: "disabled",
   },

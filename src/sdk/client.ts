@@ -331,6 +331,9 @@ class GnoClientImpl implements GnoClient {
     rerankModel?: string;
   }): Promise<RuntimePorts> {
     this.assertOpen();
+    const egressCollections = options.collection
+      ? [options.collection]
+      : ("all" as const);
 
     let embedPort: EmbeddingPort | null = null;
     let expandPort: GenerationPort | null = null;
@@ -347,6 +350,7 @@ class GnoClientImpl implements GnoClient {
           options.collection
         ),
         {
+          egressCollections,
           policy: this.downloadPolicy,
         }
       );
@@ -391,6 +395,7 @@ class GnoClientImpl implements GnoClient {
           options.collection
         ),
         {
+          egressCollections,
           policy: this.downloadPolicy,
         }
       );
@@ -415,6 +420,7 @@ class GnoClientImpl implements GnoClient {
           options.collection
         ),
         {
+          egressCollections,
           policy: this.downloadPolicy,
         }
       );
@@ -442,6 +448,7 @@ class GnoClientImpl implements GnoClient {
           options.collection
         ),
         {
+          egressCollections,
           policy: this.downloadPolicy,
         }
       );

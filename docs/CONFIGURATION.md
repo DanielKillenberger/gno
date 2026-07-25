@@ -732,14 +732,18 @@ document chunks for embedding/reranking, generated expansion input for
 access controls outside a trusted network; remote inference is not part of the
 local privacy boundary.
 
-Before DNS resolution or request-body transfer, GNO intersects the endpoint
-zone with every participating collection's egress policy. `local_only` permits
-loopback model servers, `lan` permits authenticated local/LAN servers, and
-`remote` permits pinned HTTPS public providers. DNS answers are pinned and
-rechecked before connection. Redirects must remain on the same origin and are
-re-evaluated at every hop; credentials and request bodies are never forwarded
-cross-origin. An unscoped public endpoint probe fails with `EGRESS_DENIED`
-without resolving or contacting the endpoint.
+Every inference port requires an explicit participating-collection scope;
+corpus-wide use is represented explicitly rather than inferred from an omitted
+filter. An empty or unknown scope fails before DNS. For a valid scope, GNO first
+performs bounded DNS-only classification without sending HTTP headers, request
+bodies, credentials, or model metadata, then intersects the proven endpoint
+zone with every participating collection's policy. `local_only` permits
+loopback model servers, `lan` permits private-address literals and hostnames
+whose complete DNS answer is homogeneously private, and `remote` permits pinned
+HTTPS public providers. DNS answers are pinned and rechecked before connection.
+Mixed, public-for-LAN, special-use, or rebound answers fail before request
+transfer. Redirects must remain on the same origin and are re-evaluated at every
+hop; credentials and request bodies are never forwarded cross-origin.
 
 ```yaml
 models:

@@ -149,7 +149,11 @@ export const contextBuild = async (
       const progress = showProgress
         ? createThrottledProgressRenderer(createProgressRenderer())
         : undefined;
+      const egressCollections = options.collections?.length
+        ? options.collections
+        : ("all" as const);
       const embedResult = await llm.createEmbeddingPort(embedUri, {
+        egressCollections,
         policy,
         onProgress: progress ? (value) => progress("embed", value) : undefined,
       });
@@ -165,6 +169,7 @@ export const contextBuild = async (
         }
       }
       const rerankResult = await llm.createRerankPort(rerankUri, {
+        egressCollections,
         policy,
         onProgress: progress ? (value) => progress("rerank", value) : undefined,
       });

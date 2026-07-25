@@ -41,7 +41,7 @@ export class HttpEmbedding implements EmbeddingPort {
   private dims: number | null = null;
   readonly modelUri: string;
 
-  constructor(modelUri: string, requestOptions: HttpInferenceOptions = {}) {
+  constructor(modelUri: string, requestOptions: HttpInferenceOptions) {
     this.modelUri = modelUri;
     this.requestOptions = requestOptions;
     // Parse URI: http://host:port/v1/embeddings#modelname or just http://host:port

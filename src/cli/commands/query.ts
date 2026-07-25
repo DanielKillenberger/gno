@@ -195,6 +195,9 @@ export async function query(
     }
     traceSession = traceStart.value ?? undefined;
     const llm = new LlmAdapter(config);
+    const egressCollections = options.collection
+      ? [options.collection]
+      : ("all" as const);
 
     // Resolve download policy from env/flags
     const globals = getGlobals();
@@ -210,6 +213,7 @@ export async function query(
 
     // Create embedding port (for vector search)
     const embedResult = await llm.createEmbeddingPort(embedUri, {
+      egressCollections,
       policy,
       onProgress: downloadProgress
         ? (progress) => downloadProgress("embed", progress)
@@ -223,6 +227,7 @@ export async function query(
     // Skip when structured query modes are provided.
     if (expandUri) {
       const genResult = await llm.createExpansionPort(expandUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("expand", progress)
@@ -236,6 +241,7 @@ export async function query(
     // Create rerank port - optional
     if (rerankUri) {
       const rerankResult = await llm.createRerankPort(rerankUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("rerank", progress)
@@ -354,12 +360,16 @@ export async function queryDiagnose(
     const shouldCreateAnyModel =
       shouldCreateEmbeddingPort || !options.noExpand || !options.noRerank;
     const llm = shouldCreateAnyModel ? new LlmAdapter(config) : null;
+    const egressCollections = options.collection
+      ? [options.collection]
+      : ("all" as const);
 
     const embedUri = shouldCreateEmbeddingPort
       ? resolveModelUri(config, "embed", options.embedModel, options.collection)
       : null;
     if (embedUri && llm) {
       const embedResult = await llm.createEmbeddingPort(embedUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("embed", progress)
@@ -378,6 +388,7 @@ export async function queryDiagnose(
         options.collection
       );
       const genResult = await llm.createExpansionPort(expandUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("expand", progress)
@@ -396,6 +407,7 @@ export async function queryDiagnose(
         options.collection
       );
       const rerankResult = await llm.createRerankPort(rerankUri, {
+        egressCollections,
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("rerank", progress)

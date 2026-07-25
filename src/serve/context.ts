@@ -115,6 +115,7 @@ export async function createServerContext(
 
     // Progress callback updates downloadState for WebUI polling
     const createPortOptions = (type: ModelType): CreatePortOptions => ({
+      egressCollections: "all",
       policy,
       onProgress: (progress) => {
         downloadState.active = true;

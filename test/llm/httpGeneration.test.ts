@@ -6,7 +6,25 @@
 
 import { afterAll, describe, expect, it, mock } from "bun:test";
 
+import type { HttpInferenceOptions } from "../../src/llm/http-inference";
+
 import { HttpGeneration, isHttpGenUri } from "../../src/llm/httpGeneration";
+
+const HTTP_TEST_OPTIONS = {
+  collections: [
+    {
+      name: "http-test",
+      path: "/http-test",
+      pattern: "**/*",
+      include: [],
+      exclude: [],
+      egressPolicy: "local_only",
+    },
+  ],
+  collectionNames: ["http-test"],
+  env: {},
+  resolver: { lookup: async () => ["127.0.0.1"] },
+} as const satisfies HttpInferenceOptions;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // isHttpGenUri Tests
@@ -52,7 +70,8 @@ describe("HttpGeneration", () => {
   describe("constructor", () => {
     it("parses URL with model hash", () => {
       const gen = new HttpGeneration(
-        "http://192.168.0.48:8083/v1/chat/completions#qwen3-4b"
+        "http://192.168.0.48:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       expect(gen.modelUri).toBe(
         "http://192.168.0.48:8083/v1/chat/completions#qwen3-4b"
@@ -61,7 +80,8 @@ describe("HttpGeneration", () => {
 
     it("parses URL without model hash", () => {
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions"
+        "http://localhost:8083/v1/chat/completions",
+        HTTP_TEST_OPTIONS
       );
       expect(gen.modelUri).toBe("http://localhost:8083/v1/chat/completions");
     });
@@ -113,7 +133,8 @@ describe("HttpGeneration", () => {
       );
 
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       const result = await gen.generate("Hello");
 
@@ -129,7 +150,8 @@ describe("HttpGeneration", () => {
       );
       globalThis.fetch = fetchMock as unknown as typeof fetch;
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       const result = await gen.generate("Hello", {
         jsonSchema: { type: "object", properties: {} },
@@ -171,7 +193,8 @@ describe("HttpGeneration", () => {
       );
 
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       const result = await gen.generate("Hello");
 
@@ -192,7 +215,8 @@ describe("HttpGeneration", () => {
       );
 
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       const result = await gen.generate("Hello");
 
@@ -207,7 +231,8 @@ describe("HttpGeneration", () => {
       mockFetch(() => Promise.reject(new Error("Network error")));
 
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       const result = await gen.generate("Hello");
 
@@ -248,7 +273,8 @@ describe("HttpGeneration", () => {
       });
 
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       await gen.generate("Hello", {
         temperature: 0.7,
@@ -296,7 +322,8 @@ describe("HttpGeneration", () => {
       });
 
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       await gen.generate("Hello");
 
@@ -309,7 +336,8 @@ describe("HttpGeneration", () => {
   describe("dispose", () => {
     it("completes without error", async () => {
       const gen = new HttpGeneration(
-        "http://localhost:8083/v1/chat/completions#qwen3-4b"
+        "http://localhost:8083/v1/chat/completions#qwen3-4b",
+        HTTP_TEST_OPTIONS
       );
       // dispose() returns Promise<void> - just verify it doesn't throw
       await gen.dispose();

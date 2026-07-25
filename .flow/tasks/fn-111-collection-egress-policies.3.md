@@ -50,6 +50,6 @@ Implemented fail-closed enforcement at every currently enumerated network-capabl
 - Kept remote publish upload, private agent access, and server-side encrypted-space decryption structurally unavailable.
 - Updated CLI/MCP schemas, public docs, integration/package smoke coverage, and adversarial policy/DNS/session tests.
 ## Evidence
-- Commits: 281dd274
-- Tests: bun test — 3393 pass, 2 skip, 0 fail across 423 files, bun test test/egress/enforcement.test.ts — 14 pass, 0 fail, bun run lint:check — 0 warnings, 0 errors, formatting clean, bun run docs:verify — 13 pass, 2 semantic-model-cache skips, 0 fail, bun run test:package — packed install/resident gateway smoke passed, .flow/bin/flowctl validate --spec fn-111-collection-egress-policies --json — valid
+- Commits:
+- Tests:
 - PRs:

@@ -108,10 +108,15 @@ compatible collection policy. Policy denial returns HTTP 403 with stable
 `EGRESS_DENIED` data and a redacted evaluator audit. Write authorization remains
 an independent additional requirement.
 
-The MCP tool and resource registry is paired with the checked network-boundary
-inventory. Adding a content-bearing tool, resource, model transport, listener,
-direct fetch, or external-process adapter without an egress classification
-fails the enforcement contract tests.
+The MCP tool and resource registry is paired with a callsite-level
+network-boundary inventory. A TypeScript AST scan covers shipped TS, TSX, JS,
+and JSX and recognizes direct, qualified, bracketed, imported, and aliased
+fetch, EventSource, WebSocket, Bun listener/DNS/socket, HTTP inference, and
+external-process primitives. Every detected invocation has its own stable
+inventory key, so adding a second call in an already-listed file still fails
+the contract test. Browser same-origin calls are classified as client
+transport and name the server route that performs the actual egress check; the
+client scan itself is not treated as content authorization.
 
 Boundary failures use the closed
 [`mcp-http-error`](./output-schemas/mcp-http-error.schema.json) body with stable,

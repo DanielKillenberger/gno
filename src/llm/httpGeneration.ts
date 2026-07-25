@@ -52,7 +52,7 @@ export class HttpGeneration implements GenerationPort {
   readonly modelUri: string;
   readonly structuredOutput = "none" as const;
 
-  constructor(modelUri: string, requestOptions: HttpInferenceOptions = {}) {
+  constructor(modelUri: string, requestOptions: HttpInferenceOptions) {
     this.modelUri = modelUri;
     this.requestOptions = requestOptions;
     // Parse URI: http://host:port/v1/chat/completions#modelname

@@ -17,7 +17,9 @@ const queries = [
 ];
 
 const llm = new LlmAdapter(createDefaultConfig());
-const genResult = await llm.createGenerationPort(`file:${modelPath}`);
+const genResult = await llm.createGenerationPort(`file:${modelPath}`, {
+  egressCollections: "all",
+});
 if (!genResult.ok) {
   throw new Error(genResult.error.message);
 }

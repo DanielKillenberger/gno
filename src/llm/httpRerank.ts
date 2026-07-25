@@ -42,7 +42,7 @@ export class HttpRerank implements RerankPort {
   private readonly requestOptions: HttpInferenceOptions;
   readonly modelUri: string;
 
-  constructor(modelUri: string, requestOptions: HttpInferenceOptions = {}) {
+  constructor(modelUri: string, requestOptions: HttpInferenceOptions) {
     this.modelUri = modelUri;
     this.requestOptions = requestOptions;
     // Parse URI: http://host:port/v1/completions#modelname

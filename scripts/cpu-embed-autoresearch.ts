@@ -255,6 +255,7 @@ async function createRealEmbeddingPort(args: Args) {
         });
   const adapter = new LlmAdapter(config);
   const portResult = await adapter.createEmbeddingPort(args.model, {
+    egressCollections: "all",
     policy: {
       allowDownload: args.allowDownload,
       offline: !args.allowDownload,

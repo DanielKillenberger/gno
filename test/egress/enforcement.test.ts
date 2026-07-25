@@ -2,41 +2,21 @@ import { describe, expect, test } from "bun:test";
 
 import type { Collection } from "../../src/config/types";
 
+import {
+  scanNetworkBoundarySource,
+  scanShippedNetworkBoundaries,
+} from "../../scripts/network-boundary-scan";
+import { createDefaultConfig } from "../../src/config/defaults";
 import { EgressDeniedError } from "../../src/core/egress-enforcement";
 import { NETWORK_BOUNDARY_INVENTORY } from "../../src/core/network-boundary-inventory";
 import { requestHttpInference } from "../../src/llm/http-inference";
+import { LlmAdapter } from "../../src/llm/nodeLlamaCpp/adapter";
 import {
   enforceHttpMcpEgress,
   httpMcpEgressDeniedResponse,
   MCP_HTTP_EGRESS_TOOLS,
 } from "../../src/mcp/http-egress";
 import { enforceSyncCommandEgress } from "../../src/mcp/sync-egress";
-
-const sourceFiles = async (): Promise<string[]> => {
-  const files: string[] = [];
-  for await (const path of new Bun.Glob("src/**/*.ts").scan(".")) {
-    files.push(path);
-  }
-  return files.sort();
-};
-
-const pathsMatching = async (pattern: RegExp): Promise<string[]> => {
-  const matches: string[] = [];
-  for (const path of await sourceFiles()) {
-    if (pattern.test(await Bun.file(path).text())) matches.push(path);
-    pattern.lastIndex = 0;
-  }
-  return matches;
-};
-
-const inventoryPaths = (marker: string): string[] =>
-  [
-    ...new Set(
-      NETWORK_BOUNDARY_INVENTORY.filter((entry) => entry.marker === marker).map(
-        (entry) => entry.path
-      )
-    ),
-  ].sort();
 
 const collection = (
   name: string,
@@ -51,29 +31,67 @@ const collection = (
 });
 
 describe("network boundary enforcement inventory", () => {
-  test("registers every direct fetch callsite", async () => {
-    expect(await pathsMatching(/\bfetch\s*\(/u)).toEqual(
-      inventoryPaths("fetch")
-    );
+  test("matches every shipped structural network callsite exactly", async () => {
+    const actual = (await scanShippedNetworkBoundaries()).map(({ key }) => key);
+    const expected = NETWORK_BOUNDARY_INVENTORY.filter(
+      ({ primitive }) => primitive !== "logical"
+    )
+      .map(({ key }) => key)
+      .sort();
+    expect(actual).toEqual(expected);
   });
 
-  test("registers every Bun listener callsite", async () => {
-    expect(await pathsMatching(/Bun\.serve/u)).toEqual(
-      inventoryPaths("bun_serve")
+  test("detects qualified, bracketed, imported, and aliased evasions", () => {
+    const callsites = scanNetworkBoundarySource(
+      "src/evasion.tsx",
+      `
+        import { spawn as launch } from "node:child_process";
+        import * as childProcess from "node:child_process";
+        const request = globalThis["fetch"];
+        const { serve: start } = Bun;
+        const Socket = globalThis.WebSocket;
+        const run = launch;
+        request("/api");
+        start({ fetch: () => new Response() });
+        new Socket("ws://localhost");
+        new EventSource("/events");
+        run("helper");
+        Bun["connect"]({});
+        childProcess["execFile"]("helper");
+        Bun["dns"]["lookup"]("internal");
+      `
     );
+    expect(callsites.map(({ primitive }) => primitive)).toEqual([
+      "fetch",
+      "bun_serve",
+      "web_socket",
+      "event_source",
+      "child_process",
+      "bun_connect",
+      "child_process",
+      "bun_dns_lookup",
+    ]);
   });
 
-  test("registers every direct external-process callsite", async () => {
+  test("assigns a distinct key to a new call in an already registered file", () => {
     expect(
-      await pathsMatching(/\bspawn\s*\(|\bexecFile\s*\(|Bun\.\$/u)
-    ).toEqual(inventoryPaths("external_process"));
+      scanNetworkBoundarySource(
+        "src/existing.ts",
+        `fetch("/one"); globalThis.fetch("/two");`
+      ).map(({ key }) => key)
+    ).toEqual(["src/existing.ts::fetch#1", "src/existing.ts::fetch#2"]);
   });
 
-  test("registers every HTTP inference adapter", async () => {
-    const paths = (await pathsMatching(/\brequestHttpInference\s*\(/u)).filter(
-      (path) => path !== "src/llm/http-inference.ts"
+  test("ties browser client transports to an explicit server boundary", () => {
+    const clients = NETWORK_BOUNDARY_INVENTORY.filter(
+      ({ enforcement }) => enforcement === "client_transport"
     );
-    expect(paths).toEqual(inventoryPaths("http_inference"));
+    expect(clients.length).toBeGreaterThan(0);
+    expect(
+      clients.every(
+        (entry) => "serverBoundary" in entry && Boolean(entry.serverBoundary)
+      )
+    ).toBe(true);
   });
 
   test("requires every registered MCP tool to have an egress content class", async () => {
@@ -196,6 +214,8 @@ describe("network boundary policy enforcement", () => {
         "https://provider.example/v1/chat/completions",
         { method: "POST", body: "secret-body" },
         {
+          collections: [],
+          collectionNames: [],
           env: {},
           resolver: {
             lookup: async () => {
@@ -217,14 +237,22 @@ describe("network boundary policy enforcement", () => {
     expect(fetchCalls).toBe(0);
   });
 
-  test("supports policy-matched LAN inference through a pinned literal", async () => {
+  test("supports policy-matched LAN inference through a DNS-pinned hostname", async () => {
+    let resolverCalls = 0;
     let requestUrl = "";
     const response = await requestHttpInference(
-      "http://192.168.1.20:8080/v1/embeddings",
+      "http://model.internal:8080/v1/embeddings",
       { method: "POST", body: "bounded-input" },
       {
         collections: [collection("notes", "lan")],
+        collectionNames: ["notes"],
         env: {},
+        resolver: {
+          lookup: async () => {
+            resolverCalls += 1;
+            return ["192.168.1.20"];
+          },
+        },
         fetchFn: async (input) => {
           requestUrl =
             typeof input === "string"
@@ -237,13 +265,53 @@ describe("network boundary policy enforcement", () => {
       }
     );
     expect(response.ok).toBe(true);
+    expect(resolverCalls).toBe(3);
     expect(requestUrl).toStartWith("http://192.168.1.20:8080/");
+  });
+
+  test("denies mixed, public, and special-use DNS answers before inference fetch", async () => {
+    for (const addresses of [
+      ["192.168.1.20", "93.184.216.34"],
+      ["93.184.216.34"],
+      ["169.254.169.254"],
+    ]) {
+      let resolverCalls = 0;
+      let fetchCalls = 0;
+      let denied: unknown;
+      try {
+        await requestHttpInference(
+          "http://model.internal:8080/v1/embeddings",
+          { method: "POST", body: "private-content" },
+          {
+            collections: [collection("notes", "lan")],
+            collectionNames: ["notes"],
+            env: {},
+            resolver: {
+              lookup: async () => {
+                resolverCalls += 1;
+                return addresses;
+              },
+            },
+            fetchFn: async () => {
+              fetchCalls += 1;
+              return new Response("{}");
+            },
+          }
+        );
+      } catch (error) {
+        denied = error;
+      }
+      expect(denied).toBeInstanceOf(EgressDeniedError);
+      expect(resolverCalls).toBe(1);
+      expect(fetchCalls).toBe(0);
+    }
   });
 
   test("pins remote inference and refuses cross-origin credential/body forwarding", async () => {
     let fetchCalls = 0;
     const options = {
       collections: [collection("notes", "remote")],
+      collectionNames: ["notes"],
       env: {},
       resolver: {
         lookup: async () => ["93.184.216.34"],
@@ -274,6 +342,98 @@ describe("network boundary policy enforcement", () => {
     expect(fetchCalls).toBe(1);
   });
 
+  test("uses only explicit participating collections for mixed-policy inference", async () => {
+    const collections = [
+      collection("approved", "remote"),
+      collection("private", "local_only"),
+    ];
+    let allowedFetches = 0;
+    const allowed = await requestHttpInference(
+      "https://provider.example/v1/embeddings",
+      { method: "POST", body: "approved-content" },
+      {
+        collections,
+        collectionNames: ["approved"],
+        env: {},
+        resolver: { lookup: async () => ["93.184.216.34"] },
+        fetchFn: async () => {
+          allowedFetches += 1;
+          return new Response("{}");
+        },
+      }
+    );
+    expect(allowed.ok).toBe(true);
+    expect(allowedFetches).toBe(1);
+
+    let deniedFetches = 0;
+    let denied: unknown;
+    try {
+      await requestHttpInference(
+        "https://provider.example/v1/embeddings",
+        { method: "POST", body: "mixed-content" },
+        {
+          collections,
+          collectionNames: ["approved", "private"],
+          env: {},
+          resolver: { lookup: async () => ["93.184.216.34"] },
+          fetchFn: async () => {
+            deniedFetches += 1;
+            return new Response("{}");
+          },
+        }
+      );
+    } catch (error) {
+      denied = error;
+    }
+    expect(denied).toBeInstanceOf(EgressDeniedError);
+    expect(deniedFetches).toBe(0);
+  });
+
+  test("requires the adapter caller to choose selected or corpus-wide scope", async () => {
+    const collections = [
+      collection("approved", "remote"),
+      collection("private", "local_only"),
+    ];
+    const adapter = new LlmAdapter({
+      ...createDefaultConfig(),
+      collections,
+    });
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return Response.json({ data: [{ embedding: [0.1, 0.2] }] });
+    }) as unknown as typeof fetch;
+    try {
+      const selected = await adapter.createEmbeddingPort(
+        "https://93.184.216.34/v1/embeddings#test",
+        {
+          egressCollections: ["approved"],
+          policy: { offline: true, allowDownload: false },
+        }
+      );
+      expect(selected.ok).toBe(true);
+      expect(fetchCalls).toBe(1);
+      if (selected.ok) await selected.value.dispose();
+
+      const corpusWide = await adapter.createEmbeddingPort(
+        "https://93.184.216.34/v1/embeddings#test",
+        {
+          egressCollections: "all",
+          policy: { offline: true, allowDownload: false },
+        }
+      );
+      expect(corpusWide).toMatchObject({
+        ok: false,
+        error: { code: "EGRESS_DENIED" },
+      });
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await adapter.dispose();
+    }
+  });
+
   test("fails closed on DNS rebinding before inference bytes are sent", async () => {
     let resolverCalls = 0;
     let fetchCalls = 0;
@@ -284,13 +444,12 @@ describe("network boundary policy enforcement", () => {
         { method: "POST", body: "private-content" },
         {
           collections: [collection("notes", "remote")],
+          collectionNames: ["notes"],
           env: {},
           resolver: {
             lookup: async () => {
               resolverCalls += 1;
-              return resolverCalls === 1
-                ? ["93.184.216.34"]
-                : ["93.184.216.35"];
+              return resolverCalls < 3 ? ["93.184.216.34"] : ["93.184.216.35"];
             },
           },
           fetchFn: async () => {
@@ -303,7 +462,7 @@ describe("network boundary policy enforcement", () => {
       denied = error;
     }
     expect(denied).toBeInstanceOf(EgressDeniedError);
-    expect(resolverCalls).toBe(2);
+    expect(resolverCalls).toBe(3);
     expect(fetchCalls).toBe(0);
   });
 

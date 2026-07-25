@@ -128,7 +128,9 @@ export async function vsearch(
 
     // Create LLM adapter for embeddings
     const llm = new LlmAdapter(config);
-    const embedResult = await llm.createEmbeddingPort(modelUri);
+    const embedResult = await llm.createEmbeddingPort(modelUri, {
+      egressCollections: options.collection ? [options.collection] : "all",
+    });
     if (!embedResult.ok) {
       await traceSession?.finish("failed");
       return { success: false, error: embedResult.error.message };

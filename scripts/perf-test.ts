@@ -49,7 +49,9 @@ console.log(
 mark("ports_start");
 
 mark("embed_load");
-const embedResult = await llm.createEmbeddingPort(preset.embed);
+const embedResult = await llm.createEmbeddingPort(preset.embed, {
+  egressCollections: "all",
+});
 if (!embedResult.ok) {
   console.error("Failed to create embed port");
   process.exit(1);
@@ -59,7 +61,7 @@ console.log(`  Embed port: ${since("embed_load")}s`);
 
 mark("rerank_load");
 const rerankResult = preset.rerank
-  ? await llm.createRerankPort(preset.rerank)
+  ? await llm.createRerankPort(preset.rerank, { egressCollections: "all" })
   : {
       ok: false as const,
       error: { code: "NO_MODEL" as const, message: "no rerank model" },
@@ -71,7 +73,7 @@ console.log(
 
 mark("gen_load");
 const genResult = preset.gen
-  ? await llm.createGenerationPort(preset.gen)
+  ? await llm.createGenerationPort(preset.gen, { egressCollections: "all" })
   : {
       ok: false as const,
       error: { code: "NO_MODEL" as const, message: "no gen model" },
