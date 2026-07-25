@@ -174,6 +174,29 @@ describe("browser clipper controller", () => {
     expect(opened).toEqual([]);
   });
 
+  test("accepts and exposes server-owned preview egress lineage", async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    await writeClipperState(
+      {
+        gatewayOrigin: "http://127.0.0.1:3000",
+        grant: { ...grant, expiresAt: "2099-08-24T08:00:00.000Z" },
+        pending: null,
+      },
+      local
+    );
+    const controller = makeController(local, session, (() =>
+      Promise.resolve(
+        jsonResponse(previewResponse)
+      )) as unknown as typeof fetch);
+
+    const preview = await controller.preview(payload);
+
+    expect(preview.preview.egressLineage).toEqual(
+      previewResponse.preview.egressLineage
+    );
+  });
+
   test("persists one pending write across restart and reuses its key offline", async () => {
     const local = new MemoryStorage();
     const session = new MemoryStorage();

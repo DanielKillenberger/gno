@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   captureReceiptSchema,
   clipperErrorSchema,
+  egressLineageSchema,
   pairStartSchema,
   pairStatusSchema,
   previewSchema,
@@ -48,6 +49,9 @@ describe("closed browser clipper response contracts", () => {
     const receipt = captureReceiptSchema.parse(receiptResponse);
     expect(preview.preview.digest).toBe("4".repeat(64));
     expect(preview.preview.body).toContain("Exact café selection");
+    expect(preview.preview.egressLineage).toEqual(
+      previewResponse.preview.egressLineage
+    );
     expect(receipt.contentHash).toBe("2".repeat(64));
     expect(
       previewSchema.safeParse({ ...previewResponse, localHash: "bad" }).success
@@ -56,6 +60,34 @@ describe("closed browser clipper response contracts", () => {
       captureReceiptSchema.safeParse({
         ...receiptResponse,
         schemaVersion: "9.0",
+      }).success
+    ).toBeFalse();
+  });
+
+  test("keeps browser preview egress lineage closed and structurally valid", () => {
+    expect(
+      egressLineageSchema.safeParse(previewResponse.preview.egressLineage)
+        .success
+    ).toBeTrue();
+    expect(
+      egressLineageSchema.safeParse({
+        ...previewResponse.preview.egressLineage,
+        effectivePolicy: "internet",
+      }).success
+    ).toBeFalse();
+    expect(
+      egressLineageSchema.safeParse({
+        ...previewResponse.preview.egressLineage,
+        unexpected: "field",
+      }).success
+    ).toBeFalse();
+    expect(
+      egressLineageSchema.safeParse({
+        ...previewResponse.preview.egressLineage,
+        sources: [
+          previewResponse.preview.egressLineage.sources[0],
+          previewResponse.preview.egressLineage.sources[0],
+        ],
       }).success
     ).toBeFalse();
   });

@@ -15,6 +15,44 @@ const httpUrl = z
   .url()
   .refine((value) => /^https?:\/\//iu.test(value));
 const extensionOrigin = z.string().regex(/^chrome-extension:\/\/[a-p]{32}$/u);
+const collectionName = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
+
+const egressPolicy = z.enum(["local_only", "lan", "remote"]);
+const egressPolicySource = z.enum([
+  "explicit",
+  "config_default",
+  "legacy_default",
+]);
+
+export const egressLineageSchema = z
+  .object({
+    effectivePolicy: egressPolicy,
+    digest: hex64,
+    sources: z
+      .array(
+        z
+          .object({
+            collection: collectionName,
+            policy: egressPolicy,
+            source: egressPolicySource,
+          })
+          .strict()
+      )
+      .min(1),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const sourceKeys = value.sources.map(
+      ({ collection, policy, source }) => `${collection}\0${policy}\0${source}`
+    );
+    if (new Set(sourceKeys).size !== sourceKeys.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Egress lineage sources must be unique",
+        path: ["sources"],
+      });
+    }
+  });
 
 const destination = z
   .object({
@@ -168,6 +206,7 @@ export const previewSchema = z
         digest: hex64,
         source,
         destination,
+        egressLineage: egressLineageSchema.optional(),
         tags: z.array(z.string()),
       })
       .strict(),

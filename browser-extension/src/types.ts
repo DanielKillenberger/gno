@@ -106,12 +106,30 @@ export type PairStatus =
       status: "consumed" | "expired" | "not_found" | "origin_mismatch";
     };
 
+export type EgressPolicy = "local_only" | "lan" | "remote";
+
+export type EgressPolicySource =
+  | "explicit"
+  | "config_default"
+  | "legacy_default";
+
+export interface EgressLineage {
+  effectivePolicy: EgressPolicy;
+  digest: string;
+  sources: Array<{
+    collection: string;
+    policy: EgressPolicy;
+    source: EgressPolicySource;
+  }>;
+}
+
 export interface BrowserClipPreview {
   preview: {
     body: string;
     digest: string;
     source: Record<string, unknown>;
     destination: Destination;
+    egressLineage?: EgressLineage;
     tags: string[];
   };
   provenance: Record<string, unknown>;
