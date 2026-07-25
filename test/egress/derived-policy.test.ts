@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { Collection } from "../../src/config/types";
+import type { EgressLineageInput } from "../../src/core/egress-provenance";
 import type { SearchResult } from "../../src/pipeline/types";
 import type { StorePort } from "../../src/store/types";
 
@@ -20,6 +21,40 @@ const sources = [
   { collection: "local", policy: "local_only", source: "legacy_default" },
   { collection: "lan", policy: "lan", source: "explicit" },
 ] as const;
+
+const makeCollection = (
+  name: string,
+  egressPolicy: Collection["egressPolicy"]
+): Collection => ({
+  name,
+  path: `/${name}`,
+  pattern: "**/*",
+  include: [],
+  exclude: [],
+  egressPolicy,
+});
+
+const expectInvalidLineage = (run: () => unknown): void => {
+  try {
+    run();
+    throw new Error("Expected invalid egress lineage");
+  } catch (error) {
+    expect(error).toBeInstanceOf(EgressProvenanceError);
+    expect((error as EgressProvenanceError).code).toBe(
+      "INVALID_EGRESS_LINEAGE"
+    );
+  }
+};
+
+const planRemotePublish = (collections: readonly Collection[]) =>
+  planCollectionEgress({
+    collections,
+    collectionNames: ["a"],
+    action: "publish",
+    destinationZone: "remote",
+    caller: { authenticated: true, operationAuthorized: true },
+    contentClass: "capsule",
+  });
 
 describe("derived egress policy lineage", () => {
   test("sorts immutable membership and preserves the most restrictive policy", () => {
@@ -57,6 +92,87 @@ describe("derived egress policy lineage", () => {
         { collection: "remote", policy: "remote", source: "config_default" },
       ])
     ).toThrow("invalid collection or policy");
+  });
+
+  test("validates duplicate raw lineage before selecting requested scope", () => {
+    const local: EgressLineageInput = {
+      collection: "a",
+      policy: "local_only",
+      source: "explicit",
+    };
+    const remote: EgressLineageInput = {
+      collection: "a",
+      policy: "remote",
+      source: "explicit",
+    };
+    for (const inputs of [
+      [remote, remote],
+      [local, remote],
+      [remote, local],
+    ]) {
+      expectInvalidLineage(() => resolveEgressLineage(inputs, ["a"]));
+    }
+  });
+
+  test("fails closed for hostile, sparse, and oversized resolver inputs", () => {
+    const hostileGetter: EgressLineageInput = {
+      get collection(): string {
+        throw new Error("hostile collection getter");
+      },
+      policy: "remote",
+      source: "explicit",
+    };
+    const sparse = Array<EgressLineageInput>(1);
+    const oversized = Array.from({ length: 129 }, (_, index) => ({
+      collection: `c${index}`,
+      policy: "remote" as const,
+      source: "explicit" as const,
+    }));
+    const revoked = Proxy.revocable<EgressLineageInput[]>([sources[0]], {});
+    revoked.revoke();
+
+    for (const inputs of [[hostileGetter], sparse, oversized, revoked.proxy]) {
+      expectInvalidLineage(() => resolveEgressLineage(inputs, ["remote"]));
+    }
+  });
+
+  test("planner rejects duplicate keys before selecting an allowed policy", () => {
+    const local = makeCollection("a", "local_only");
+    const remote = makeCollection("a", "remote");
+    for (const collections of [
+      [remote, remote],
+      [local, remote],
+      [remote, local],
+    ]) {
+      expectInvalidLineage(() => planRemotePublish(collections));
+    }
+  });
+
+  test("planner normalizes hostile, sparse, and oversized inputs to provenance errors", () => {
+    const hostileGetter = {
+      ...makeCollection("a", "remote"),
+      get name(): string {
+        throw new Error("hostile collection getter");
+      },
+    };
+    const sparse = Array<Collection>(1);
+    const oversized = Array.from({ length: 129 }, (_, index) =>
+      makeCollection(`c${index}`, "remote")
+    );
+    const revoked = Proxy.revocable<Collection[]>(
+      [makeCollection("a", "remote")],
+      {}
+    );
+    revoked.revoke();
+
+    for (const collections of [
+      [hostileGetter],
+      sparse,
+      oversized,
+      revoked.proxy,
+    ]) {
+      expectInvalidLineage(() => planRemotePublish(collections));
+    }
   });
 
   test("denies mixed transfer by default and discloses explicit partial output", () => {

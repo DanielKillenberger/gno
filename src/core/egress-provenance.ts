@@ -25,6 +25,7 @@ export type EgressLineageInput = Readonly<{
 }>;
 
 const COLLECTION_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const MAX_EGRESS_LINEAGE_SOURCES = 128;
 const POLICY_RESTRICTIVENESS: Readonly<Record<EgressPolicy, number>> = {
   local_only: 0,
   lan: 1,
@@ -64,21 +65,71 @@ const canonicalJson = (value: unknown): string =>
 const sha256Text = (value: string): string =>
   new Bun.CryptoHasher("sha256").update(value).digest("hex");
 
+const invalidLineageInput = (): EgressProvenanceError =>
+  new EgressProvenanceError(
+    "INVALID_EGRESS_LINEAGE",
+    `Source policy lineage must be a readable dense array with at most ${MAX_EGRESS_LINEAGE_SOURCES} entries`
+  );
+
+const snapshotInputs = (
+  inputs: readonly EgressLineageInput[]
+): readonly EgressLineageInput[] => {
+  try {
+    if (!Array.isArray(inputs)) throw invalidLineageInput();
+    const { length } = inputs;
+    if (!Number.isSafeInteger(length) || length > MAX_EGRESS_LINEAGE_SOURCES) {
+      throw invalidLineageInput();
+    }
+    if (length === 0) {
+      throw new EgressProvenanceError(
+        "EMPTY_EGRESS_LINEAGE",
+        "Source policy lineage must contain at least one collection"
+      );
+    }
+
+    const snapshots: EgressLineageInput[] = [];
+    for (let index = 0; index < length; index += 1) {
+      if (!(index in inputs)) throw invalidLineageInput();
+      const input: unknown = inputs[index];
+      if (input === null || typeof input !== "object") {
+        throw invalidLineageInput();
+      }
+      const candidate = input as Partial<EgressLineageInput>;
+      snapshots.push({
+        collection: candidate.collection as string,
+        policy: candidate.policy as EgressPolicy,
+        source: candidate.source as EgressPolicySource,
+      });
+    }
+    return snapshots;
+  } catch (error) {
+    if (error instanceof EgressProvenanceError) throw error;
+    throw invalidLineageInput();
+  }
+};
+
 const canonicalSources = (
   inputs: readonly EgressLineageInput[]
 ): readonly EgressLineageSource[] => {
-  if (inputs.length === 0) {
-    throw new EgressProvenanceError(
-      "EMPTY_EGRESS_LINEAGE",
-      "Source policy lineage must contain at least one collection"
-    );
-  }
+  const snapshots = snapshotInputs(inputs);
   const byCollection = new Map<string, EgressLineageSource>();
-  for (const input of inputs) {
+  for (const input of snapshots) {
     const collectionInput = input.collection;
+    const policyInput = input.policy;
+    const sourceInput = input.source;
+    if (
+      typeof collectionInput !== "string" ||
+      typeof policyInput !== "string" ||
+      typeof sourceInput !== "string"
+    ) {
+      throw new EgressProvenanceError(
+        "INVALID_EGRESS_LINEAGE",
+        "Source policy lineage contains an invalid collection or policy"
+      );
+    }
     const collection = collectionInput.trim().toLowerCase();
-    const policy = EgressPolicySchema.safeParse(input.policy);
-    const source = EgressPolicySourceSchema.safeParse(input.source);
+    const policy = EgressPolicySchema.safeParse(policyInput);
+    const source = EgressPolicySourceSchema.safeParse(sourceInput);
     if (
       collectionInput !== collection ||
       !COLLECTION_PATTERN.test(collection) ||
@@ -174,18 +225,39 @@ export const resolveEgressLineage = (
   inputs: readonly EgressLineageInput[],
   requestedNames?: readonly string[]
 ): EgressLineage => {
-  if (requestedNames === undefined) return createEgressLineage(inputs);
-  if (
-    requestedNames.some(
-      (name) => name.length === 0 || name !== name.trim().toLowerCase()
-    )
-  ) {
+  const canonical = canonicalSources(inputs);
+  if (requestedNames === undefined) return createEgressLineage(canonical);
+  let requested: string[];
+  try {
+    if (!Array.isArray(requestedNames)) throw invalidLineageInput();
+    const { length } = requestedNames;
+    if (!Number.isSafeInteger(length) || length > MAX_EGRESS_LINEAGE_SOURCES) {
+      throw invalidLineageInput();
+    }
+    const names: string[] = [];
+    for (let index = 0; index < length; index += 1) {
+      if (!(index in requestedNames)) throw invalidLineageInput();
+      const name: unknown = requestedNames[index];
+      if (
+        typeof name !== "string" ||
+        name !== name.trim().toLowerCase() ||
+        !COLLECTION_PATTERN.test(name)
+      ) {
+        throw new EgressProvenanceError(
+          "INVALID_EGRESS_LINEAGE",
+          "Requested policy scope contains an invalid collection"
+        );
+      }
+      names.push(name);
+    }
+    requested = [...new Set(names)].sort();
+  } catch (error) {
+    if (error instanceof EgressProvenanceError) throw error;
     throw new EgressProvenanceError(
       "INVALID_EGRESS_LINEAGE",
-      "Requested policy scope contains an invalid collection"
+      "Requested policy scope must be a readable dense bounded array"
     );
   }
-  const requested = [...new Set(requestedNames)].sort();
   if (requested.length === 0) {
     throw new EgressProvenanceError(
       "EMPTY_EGRESS_LINEAGE",
@@ -193,7 +265,7 @@ export const resolveEgressLineage = (
     );
   }
   const byCollection = new Map(
-    inputs.map((input) => [input.collection.trim().toLowerCase(), input])
+    canonical.map((input) => [input.collection, input])
   );
   const missing = requested.filter((name) => !byCollection.has(name));
   if (missing.length > 0) {
@@ -235,7 +307,10 @@ export const egressLineageSchema = z
   .object({
     effectivePolicy: EgressPolicySchema,
     digest: z.string().regex(/^[a-f0-9]{64}$/),
-    sources: z.array(egressLineageSourceSchema).min(1).max(128),
+    sources: z
+      .array(egressLineageSourceSchema)
+      .min(1)
+      .max(MAX_EGRESS_LINEAGE_SOURCES),
   })
   .strict()
   .superRefine((value, context) => {

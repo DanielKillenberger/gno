@@ -9,12 +9,15 @@ import type {
   EgressDecision,
   EgressDestinationZone,
 } from "./egress-policy";
-import type { EgressLineage } from "./egress-provenance";
+import type { EgressLineage, EgressLineageInput } from "./egress-provenance";
 
 import { resolveConfiguredEgressPolicy } from "../config/types";
 import { EgressAuditService } from "./egress-audit";
 import { evaluateEgressPolicy } from "./egress-policy";
-import { resolveEgressLineage } from "./egress-provenance";
+import {
+  EgressProvenanceError,
+  resolveEgressLineage,
+} from "./egress-provenance";
 
 export const EGRESS_DENIED_MESSAGE =
   "Operation blocked by collection egress policy";
@@ -45,21 +48,69 @@ export class EgressDeniedError extends Error {
   }
 }
 
+const collectionLineageInputs = (
+  collections: readonly Collection[]
+): readonly EgressLineageInput[] => {
+  try {
+    if (!Array.isArray(collections)) {
+      throw new EgressProvenanceError(
+        "INVALID_EGRESS_LINEAGE",
+        "Collection policy scope must be a readable dense bounded array"
+      );
+    }
+    const { length } = collections;
+    if (!Number.isSafeInteger(length) || length > 128) {
+      throw new EgressProvenanceError(
+        "INVALID_EGRESS_LINEAGE",
+        "Collection policy scope must be a readable dense bounded array"
+      );
+    }
+    const inputs: EgressLineageInput[] = [];
+    for (let index = 0; index < length; index += 1) {
+      if (!(index in collections)) {
+        throw new EgressProvenanceError(
+          "INVALID_EGRESS_LINEAGE",
+          "Collection policy scope must be a readable dense bounded array"
+        );
+      }
+      const collection: unknown = collections[index];
+      if (collection === null || typeof collection !== "object") {
+        throw new EgressProvenanceError(
+          "INVALID_EGRESS_LINEAGE",
+          "Collection policy scope contains an invalid collection"
+        );
+      }
+      const candidate = collection as Partial<Collection>;
+      const name = candidate.name;
+      const egressPolicy = candidate.egressPolicy;
+      const effective = resolveConfiguredEgressPolicy({ egressPolicy });
+      inputs.push({
+        collection: name as string,
+        policy: effective.policy,
+        source: effective.source,
+      });
+    }
+    return inputs;
+  } catch (error) {
+    if (error instanceof EgressProvenanceError) throw error;
+    throw new EgressProvenanceError(
+      "INVALID_EGRESS_LINEAGE",
+      "Collection policy scope could not be validated"
+    );
+  }
+};
+
+const resolveCollectionEgressLineage = (
+  collections: readonly Collection[],
+  names?: readonly string[]
+): EgressLineage =>
+  resolveEgressLineage(collectionLineageInputs(collections), names);
+
 export const collectionEgressStates = (
   collections: readonly Collection[],
   names?: readonly string[]
 ) => {
-  return resolveEgressLineage(
-    collections.map((collection) => {
-      const effective = resolveConfiguredEgressPolicy(collection);
-      return {
-        collection: collection.name,
-        policy: effective.policy,
-        source: effective.source,
-      };
-    }),
-    names
-  ).sources;
+  return resolveCollectionEgressLineage(collections, names).sources;
 };
 
 export interface EnforceCollectionEgressInput {
@@ -95,15 +146,8 @@ export const planCollectionEgress = (
     partialResults?: "deny" | "explicit";
   }
 ): MixedCollectionEgressPlan => {
-  const sourceLineage = resolveEgressLineage(
-    input.collections.map((collection) => {
-      const effective = resolveConfiguredEgressPolicy(collection);
-      return {
-        collection: collection.name,
-        policy: effective.policy,
-        source: effective.source,
-      };
-    }),
+  const sourceLineage = resolveCollectionEgressLineage(
+    input.collections,
     input.collectionNames
   );
   const aggregate = evaluateEgressPolicy({
@@ -184,15 +228,8 @@ export const enforceCollectionEgress = (
 export const enforceCollectionEgressWithAudit = async (
   input: EnforceCollectionEgressInput & { store: StorePort }
 ): Promise<{ decision: EgressDecision; lineage: EgressLineage }> => {
-  const lineage = resolveEgressLineage(
-    input.collections.map((collection) => {
-      const effective = resolveConfiguredEgressPolicy(collection);
-      return {
-        collection: collection.name,
-        policy: effective.policy,
-        source: effective.source,
-      };
-    }),
+  const lineage = resolveCollectionEgressLineage(
+    input.collections,
     input.collectionNames
   );
   let decision: EgressDecision;
