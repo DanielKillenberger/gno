@@ -10,6 +10,7 @@ import type {
 import type {
   ChunkerPort,
   FileSyncResult,
+  RecordImportItemReceipt,
   SyncOptions,
   WalkEntry,
 } from "./types";
@@ -23,7 +24,7 @@ import { normalizeTag, validateTag } from "../core/tags";
 import { runRecordAdapter } from "./record-adapter";
 import { recordVirtualPath } from "./record-path";
 import { reconcileRecordSnapshot, type RecordSyncPlan } from "./record-sync";
-import { DEFAULT_CHUNK_PARAMS } from "./types";
+import { DEFAULT_CHUNK_PARAMS, MAX_RECORD_IMPORT_RECEIPT_ITEMS } from "./types";
 
 interface RecordDocumentMetadata {
   contentType?: string;
@@ -61,6 +62,7 @@ interface AppliedRecordReconciliation {
   changed: boolean;
   hadSourceDocument: boolean;
   plan: RecordSyncPlan;
+  priorByKey: Map<string, DocumentRow>;
   priorDocumentCount: number;
 }
 
@@ -518,6 +520,7 @@ export async function processRecordContainer(
       changed,
       hadSourceDocument: sourceDocument !== null,
       plan,
+      priorByKey,
       priorDocumentCount: priorDocuments.length,
     };
   };
@@ -531,6 +534,58 @@ export async function processRecordContainer(
     type: (typeof applied.plan.actions)[number]["type"]
   ): number =>
     applied.plan.actions.filter((action) => action.type === type).length;
+  const receiptItems = applied.plan.actions
+    .map((action): RecordImportItemReceipt => {
+      const record = "record" in action ? action.record : undefined;
+      const previous =
+        "previous" in action
+          ? applied.priorByKey.get(action.previous.recordKey)
+          : undefined;
+      const recordKey =
+        record?.recordKey ??
+        ("previous" in action ? action.previous.recordKey : "");
+      return {
+        outcome:
+          action.type === "add"
+            ? "added"
+            : action.type === "update"
+              ? "updated"
+              : action.type === "reactivate"
+                ? "reactivated"
+                : action.type === "deactivate"
+                  ? "deactivated"
+                  : action.type === "preserve"
+                    ? "preserved"
+                    : action.type,
+        recordKey,
+        sourceLocator:
+          record?.sourceLocator ??
+          previous?.recordSourceLocator ??
+          `record:${recordKey}`,
+        sourceHash: record?.sourceHash ?? previous?.sourceHash ?? "",
+        ...(record?.mirrorHash || previous?.mirrorHash
+          ? { mirrorHash: record?.mirrorHash ?? previous?.mirrorHash ?? "" }
+          : {}),
+        adapterFingerprint:
+          record?.adapterFingerprint ??
+          previous?.recordAdapterFingerprint ??
+          snapshot.adapterFingerprint,
+        attachments: (
+          record?.metadata?.attachments ??
+          previous?.recordMetadata?.attachments ??
+          []
+        ).map((attachment) => ({ ...attachment })),
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.recordKey.localeCompare(right.recordKey) ||
+        left.outcome.localeCompare(right.outcome)
+    );
+  const boundedReceiptItems = receiptItems.slice(
+    0,
+    MAX_RECORD_IMPORT_RECEIPT_ITEMS
+  );
   const recordImport: NonNullable<FileSyncResult["recordImport"]> = {
     adapterId: snapshot.adapterId,
     adapterVersion: snapshot.adapterVersion,
@@ -549,6 +604,19 @@ export async function processRecordContainer(
       preserved: actionCount("preserve"),
       failed: snapshot.failures.length,
     },
+    items: boundedReceiptItems,
+    itemsTruncated: receiptItems.length - boundedReceiptItems.length,
+    warnings:
+      snapshot.snapshotState === "partial" && snapshot.failures.length === 0
+        ? [
+            {
+              code: "PARTIAL_SNAPSHOT",
+              message:
+                "Adapter reported a partial snapshot; unseen records were preserved.",
+              retryable: true,
+            },
+          ]
+        : [],
     failures: snapshot.failures,
   };
 

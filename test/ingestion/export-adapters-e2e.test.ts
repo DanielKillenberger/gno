@@ -4,8 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Config } from "../../src/config/types";
+import type { RecordAdapter } from "../../src/converters/types";
 
+import { formatSyncResultLines } from "../../src/cli/commands/shared";
 import { CONFIG_VERSION } from "../../src/config/types";
+import { ConversionPipeline } from "../../src/converters/pipeline";
+import { ConverterRegistry } from "../../src/converters/registry";
 import { sha256Text } from "../../src/core/context-capsule-validation";
 import {
   materializeContextEvidenceCandidates,
@@ -96,6 +100,18 @@ describe("file/export adapter ingestion", () => {
       projectTypedEdges: false,
     });
     expect(first.filesAdded).toBe(1);
+    const firstItems = first.files?.[0]?.recordImport?.items ?? [];
+    expect(firstItems).toHaveLength(2);
+    expect(firstItems.every((item) => item.outcome === "added")).toBe(true);
+    expect(
+      firstItems.every(
+        (item) =>
+          /^[a-f0-9]{64}$/.test(item.recordKey) &&
+          /^[a-f0-9]{64}$/.test(item.sourceHash) &&
+          /^[a-f0-9]{64}$/.test(item.adapterFingerprint) &&
+          item.sourceLocator.startsWith("line:")
+      )
+    ).toBe(true);
 
     let documents = await store.listDocuments("exports");
     expect(documents.ok).toBe(true);
@@ -130,6 +146,10 @@ describe("file/export adapter ingestion", () => {
         },
       ],
     });
+    expect(
+      partial.files?.[0]?.recordImport?.items.map((item) => item.outcome).sort()
+    ).toEqual(["preserved", "updated"]);
+    expect(partial.files?.[0]?.recordImport?.warnings).toEqual([]);
     const storedErrors = await store.getRecentErrors();
     expect(storedErrors.ok && storedErrors.value[0]?.detailsJson).toContain(
       '"sourceLocator":"line:2"'
@@ -142,9 +162,14 @@ describe("file/export adapter ingestion", () => {
     );
 
     await Bun.write(exportPath, `${JSON.stringify(changed)}\n`);
-    await sync.syncCollection(config.collections[0]!, store, {
+    const complete = await sync.syncCollection(config.collections[0]!, store, {
       projectTypedEdges: false,
     });
+    expect(
+      complete.files?.[0]?.recordImport?.items
+        .map((item) => item.outcome)
+        .sort()
+    ).toEqual(["deactivated", "unchanged"]);
     documents = await store.listDocuments("exports");
     expect(documents.ok).toBe(true);
     if (!documents.ok) return;
@@ -205,6 +230,90 @@ describe("file/export adapter ingestion", () => {
     expect(evidence.record?.threadId).toBe("decision-7");
     expect(evidence.record?.anchors).toEqual([{ kind: "line", value: "1" }]);
     expect(evidence.record?.adapter.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  test("reports a partial snapshot with no adapter failures and retains attachment provenance", async () => {
+    const adapter: RecordAdapter = {
+      id: "adapter/partial-receipt",
+      version: "1.0.0",
+      canHandle: (_mime, ext) => ext === ".vtt",
+      records: async function* () {
+        yield {
+          type: "record",
+          record: {
+            stableId: "record-1",
+            sourceLocator: "item:1",
+            markdown: "Retained partial evidence",
+            metadata: {
+              attachments: [
+                {
+                  name: "agenda.pdf",
+                  mime: "application/pdf",
+                  bytes: 42,
+                  disposition: "attachment",
+                },
+              ],
+            },
+          },
+        };
+        yield { type: "snapshot", state: "partial" };
+      },
+    };
+    const registry = new ConverterRegistry();
+    registry.registerRecordAdapter(adapter);
+    const sync = new SyncService(
+      undefined,
+      undefined,
+      undefined,
+      new ConversionPipeline(registry)
+    );
+    await Bun.write(join(root, "receipt.vtt"), "source");
+
+    const result = await sync.syncCollection(config.collections[0]!, store, {
+      projectTypedEdges: false,
+    });
+    const receipt = result.files?.find(
+      (file) => file.relPath === "receipt.vtt"
+    )?.recordImport;
+    expect(receipt?.failures).toEqual([]);
+    expect(receipt?.warnings).toEqual([
+      {
+        code: "PARTIAL_SNAPSHOT",
+        message:
+          "Adapter reported a partial snapshot; unseen records were preserved.",
+        retryable: true,
+      },
+    ]);
+    expect(receipt?.items).toMatchObject([
+      {
+        outcome: "added",
+        sourceLocator: "item:1",
+        attachments: [
+          {
+            name: "agenda.pdf",
+            mime: "application/pdf",
+            bytes: 42,
+            disposition: "attachment",
+          },
+        ],
+      },
+    ]);
+    expect(
+      formatSyncResultLines(
+        {
+          collections: [result],
+          totalDurationMs: result.durationMs,
+          totalFilesProcessed: result.filesProcessed,
+          totalFilesAdded: result.filesAdded,
+          totalFilesUpdated: result.filesUpdated,
+          totalFilesErrored: result.filesErrored,
+          totalFilesSkipped: result.filesSkipped,
+        },
+        { verbose: true }
+      ).join("\n")
+    ).toContain(
+      "receipt.vtt: 1 record warning (partial snapshot)\n    [PARTIAL_SNAPSHOT]"
+    );
   });
 
   test("routes every supported export family through the shared registry", async () => {

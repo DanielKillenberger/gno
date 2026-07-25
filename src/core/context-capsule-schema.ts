@@ -251,6 +251,7 @@ const recordAttachmentSchema = z
       .optional(),
     bytes: nonNegativeIntegerSchema.optional(),
     disposition: z.enum(["inline", "attachment"]).optional(),
+    sha256: sha256Schema.optional(),
   })
   .strict();
 
@@ -290,6 +291,16 @@ const recordEvidenceMetadataSchema = z
           });
         }
       })
+      .optional(),
+    messageId: textSchema
+      .max(RECORD_METADATA_LIMITS.maxIdentifierChars)
+      .optional(),
+    inReplyTo: textSchema
+      .max(RECORD_METADATA_LIMITS.maxIdentifierChars)
+      .optional(),
+    references: z
+      .array(nonEmptyTextSchema.max(RECORD_METADATA_LIMITS.maxIdentifierChars))
+      .max(RECORD_METADATA_LIMITS.maxItems)
       .optional(),
     threadId: textSchema
       .max(RECORD_METADATA_LIMITS.maxIdentifierChars)

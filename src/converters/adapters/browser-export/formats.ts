@@ -1,3 +1,8 @@
+import {
+  decodeHtmlEntitiesOnce,
+  htmlFragmentToText,
+} from "../shared/html-text";
+
 export type BrowserExportKind = "bookmark" | "history" | "reading-list";
 
 export interface BrowserExportRecord {
@@ -16,8 +21,6 @@ export interface BrowserExportParseResult {
   failures: string[];
 }
 
-const HTML_TAG_PATTERN = /<[^>]*>/g;
-const EXECUTABLE_HTML_PATTERN = /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
 const HTML_TOKEN_PATTERN =
   /<H3\b[^>]*>([\s\S]*?)<\/H3\s*>|<A\b([^>]*)>([\s\S]*?)<\/A\s*>|<DL\b[^>]*>|<\/DL\s*>/gi;
 const ATTRIBUTE_PATTERN = /([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
@@ -42,27 +45,16 @@ const SUPPORTED_JSON_KEYS = new Set([
 const BOOKMARK_EXPORT_DOCUMENT_PATTERN =
   /<!DOCTYPE\s+(?:NETSCAPE-Bookmark-file-1\b[^>]*|html\s*)>/i;
 
-const decodeEntities = (value: string): string =>
-  value
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'");
-
 const plainText = (value: string): string =>
-  decodeEntities(
-    value.replace(EXECUTABLE_HTML_PATTERN, " ").replace(HTML_TAG_PATTERN, " ")
-  )
-    .replace(/\s+/g, " ")
-    .trim();
+  htmlFragmentToText(value).replace(/\s+/g, " ").trim();
 
 const attributes = (value: string): Map<string, string> => {
   const result = new Map<string, string>();
   for (const match of value.matchAll(ATTRIBUTE_PATTERN)) {
     const key = match[1]?.toLowerCase();
     const item = match[2] ?? match[3] ?? match[4];
-    if (key && item !== undefined) result.set(key, decodeEntities(item));
+    if (key && item !== undefined)
+      result.set(key, decodeHtmlEntitiesOnce(item));
   }
   return result;
 };

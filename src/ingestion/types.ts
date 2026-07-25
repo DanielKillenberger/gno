@@ -7,7 +7,10 @@
 
 import type { NormalizedContentTypeRule } from "../config";
 import type { Collection } from "../config/types";
-import type { RecordAdapterFailure } from "../converters/types";
+import type {
+  RecordAdapterFailure,
+  RecordAttachmentInventoryItem,
+} from "../converters/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Walker Types
@@ -148,6 +151,34 @@ export type ContentTypeSource =
   | "path-ext"
   | "fallback";
 
+/** Maximum per-record actions retained in one sync receipt. */
+export const MAX_RECORD_IMPORT_RECEIPT_ITEMS = 1_000;
+
+export type RecordImportOutcome =
+  | "added"
+  | "updated"
+  | "reactivated"
+  | "unchanged"
+  | "deactivated"
+  | "preserved";
+
+/** Bounded, privacy-safe identity and provenance for one reconciled record. */
+export interface RecordImportItemReceipt {
+  outcome: RecordImportOutcome;
+  recordKey: string;
+  sourceLocator: string;
+  sourceHash: string;
+  mirrorHash?: string;
+  adapterFingerprint: string;
+  attachments: RecordAttachmentInventoryItem[];
+}
+
+export interface RecordImportWarning {
+  code: "PARTIAL_SNAPSHOT";
+  message: string;
+  retryable: boolean;
+}
+
 /** Per-file sync status */
 export type FileSyncStatus =
   | "added"
@@ -184,6 +215,9 @@ export interface FileSyncResult {
       preserved: number;
       failed: number;
     };
+    items: RecordImportItemReceipt[];
+    itemsTruncated: number;
+    warnings: RecordImportWarning[];
     failures: RecordAdapterFailure[];
   };
 }

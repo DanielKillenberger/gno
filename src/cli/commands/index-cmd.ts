@@ -32,6 +32,8 @@ export interface IndexOptions {
   yes?: boolean;
   /** Verbose output */
   verbose?: boolean;
+  /** Emit the complete structured index receipt. */
+  json?: boolean;
 }
 
 /**
@@ -124,6 +126,17 @@ export function formatIndex(
     return `Error: ${result.error}`;
   }
 
+  if (options.json) {
+    return JSON.stringify(
+      {
+        syncResult: result.syncResult,
+        embedSkipped: result.embedSkipped,
+        ...(result.embedResult ? { embedResult: result.embedResult } : {}),
+      },
+      null,
+      2
+    );
+  }
   const { syncResult, embedSkipped } = result;
   const lines: string[] = ["Indexing complete.", ""];
 

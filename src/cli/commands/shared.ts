@@ -170,11 +170,21 @@ export function formatSyncResultLines(
 
     for (const file of c.files ?? []) {
       const receipt = file.recordImport;
-      if (!receipt || receipt.failures.length === 0) continue;
+      if (
+        !receipt ||
+        (receipt.failures.length === 0 && receipt.warnings.length === 0)
+      )
+        continue;
+      const warningCount = receipt.failures.length + receipt.warnings.length;
       lines.push(
-        `  ${file.relPath}: ${receipt.failures.length} record warning${receipt.failures.length === 1 ? "" : "s"} (${receipt.snapshotState} snapshot)`
+        `  ${file.relPath}: ${warningCount} record warning${warningCount === 1 ? "" : "s"} (${receipt.snapshotState} snapshot)`
       );
       if (options.verbose) {
+        for (const warning of receipt.warnings) {
+          lines.push(
+            `    [${warning.code}]: ${warning.message} (retryable=${warning.retryable ? "yes" : "no"})`
+          );
+        }
         for (const failure of receipt.failures) {
           const locator = failure.sourceLocator
             ? ` at ${failure.sourceLocator}`

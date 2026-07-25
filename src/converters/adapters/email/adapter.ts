@@ -5,6 +5,7 @@ import type {
   RecordAdapterRecord,
 } from "../../types";
 
+import { RECORD_METADATA_LIMITS } from "../../types";
 import {
   MailParseError,
   type ParsedAttachment,
@@ -253,11 +254,26 @@ const markdownInline = (value: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
-const safeBodyMarkdown = (value: string): string =>
-  value
-    .replaceAll("\\", "\\\\")
-    .replace(/([`*_[\]<>])/g, "\\$1")
-    .replace(/\r/g, "");
+const BODY_MARKDOWN_ESCAPE_CHARS = new Set([
+  "\\",
+  "`",
+  "*",
+  "_",
+  "[",
+  "]",
+  "<",
+  ">",
+]);
+
+const safeBodyMarkdown = (value: string): string => {
+  const output: string[] = [];
+  for (const character of value) {
+    if (character === "\r") continue;
+    if (BODY_MARKDOWN_ESCAPE_CHARS.has(character)) output.push("\\");
+    output.push(character);
+  }
+  return output.join("");
+};
 
 const renderAttachments = (attachments: ParsedAttachment[]): string => {
   if (attachments.length === 0) return "";
@@ -304,14 +320,8 @@ const recordFor = (
 ): RecordAdapterRecord => {
   const canonicalRaw = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const sourceHash = hashText(`gno-email-source-v1\0${canonicalRaw}`);
-  const stableHeaders = [
-    parsed.messageId,
-    parsed.sentAt ?? "",
-    parsed.author ?? "",
-    parsed.subject ?? "",
-  ].join("\0");
   const identity = parsed.messageId
-    ? `message:${hashText(parsed.messageId)}:variant:${hashText(stableHeaders)}`
+    ? `message:${hashText(parsed.messageId)}:variant:${sourceHash}`
     : `missing:${sourceHash}`;
   return {
     stableId: identity,
@@ -323,7 +333,9 @@ const recordFor = (
     anchors: [
       {
         kind: "message",
-        value: parsed.messageId ?? `message:${index}`,
+        value:
+          parsed.messageId?.slice(0, RECORD_METADATA_LIMITS.maxAnchorChars) ??
+          `message:${index}`,
       },
     ],
   };

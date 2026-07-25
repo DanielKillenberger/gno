@@ -133,6 +133,24 @@ describe("explicit browser export adapter", () => {
     expect(result.authoritative).toBe(false);
   });
 
+  test("decodes bookmark entities once and strips malformed executable blocks", async () => {
+    const source = `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p>
+      <DT><A HREF="https://safe.example/?q=&amp;lt;x&amp;gt;"><script>private</script\t
+      ignored>Safe &amp;lt;b&amp;gt;</A>
+      <DT><A HREF="&amp;#x6a;avascript:alert(1)">Nested scheme</A>
+    </DL><p>`;
+    const result = await runRecordAdapter(
+      browserExportAdapter,
+      input(source, { mime: "text/x-gno-browser-bookmarks+html" })
+    );
+
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]?.markdown).not.toContain("private");
+    expect(result.records[0]?.markdown).toContain("Safe &amp;lt;b&amp;gt;");
+    expect(result.records[0]?.markdown).not.toContain("<b>");
+    expect(result.failures).toHaveLength(1);
+  });
+
   test("denies live profiles and browser databases before reading", async () => {
     let opened = false;
     const result = await runRecordAdapter(browserExportAdapter, {

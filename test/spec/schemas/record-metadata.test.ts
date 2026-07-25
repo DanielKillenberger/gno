@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
+import {
+  projectRecordEvidenceMetadata,
+  type RecordEvidenceMetadata,
+} from "../../../src/core/record-metadata";
 import { assertInvalid, assertValid, loadSchema } from "./validator";
 
 type JsonObject = Record<string, unknown>;
@@ -27,7 +31,7 @@ const recordSchemaPaths = {
   "search-results": ["$defs", "searchResult", "properties", "record"],
 } as const;
 
-const fullRecord = {
+const fullRecord: RecordEvidenceMetadata = {
   recordKey: "a".repeat(64),
   sourceLocator: "message:abc@example.test",
   anchors: [
@@ -46,6 +50,9 @@ const fullRecord = {
   participants: ["Ada", "Grace"],
   categories: ["decision"],
   dateFields: { created: "2026-07-22T12:00:00.000Z" },
+  messageId: "message@example.test",
+  inReplyTo: "parent@example.test",
+  references: ["root@example.test", "parent@example.test"],
   threadId: "thread-1",
   eventId: "event-1",
   sessionId: "session-1",
@@ -55,6 +62,7 @@ const fullRecord = {
       mime: "text/plain",
       bytes: 42,
       disposition: "attachment",
+      sha256: "c".repeat(64),
     },
   ],
 };
@@ -145,6 +153,42 @@ describe("logical record metadata schema parity", () => {
           schema
         )
       ).toBe(true);
+      expect(
+        assertInvalid({ ...fullRecord, references: ["x".repeat(2049)] }, schema)
+      ).toBe(true);
+      expect(
+        assertInvalid(
+          {
+            ...fullRecord,
+            attachments: [{ name: "agenda.txt", sha256: "not-a-sha256" }],
+          },
+          schema
+        )
+      ).toBe(true);
     });
   }
+
+  test("projection retains the structured mail chain and attachment digest", () => {
+    const projected = projectRecordEvidenceMetadata({
+      recordKey: fullRecord.recordKey,
+      recordSourceLocator: fullRecord.sourceLocator,
+      recordMetadata: {
+        messageId: fullRecord.messageId,
+        inReplyTo: fullRecord.inReplyTo,
+        references: fullRecord.references,
+        attachments: fullRecord.attachments,
+      },
+      recordAnchors: fullRecord.anchors,
+      converterId: fullRecord.adapter.id,
+      converterVersion: fullRecord.adapter.version,
+      recordAdapterFingerprint: fullRecord.adapter.fingerprint,
+    });
+
+    expect(projected?.messageId).toBe(fullRecord.messageId);
+    expect(projected?.inReplyTo).toBe(fullRecord.inReplyTo);
+    expect(projected?.references).toEqual(fullRecord.references);
+    expect(projected?.attachments?.[0]?.sha256).toBe(
+      fullRecord.attachments?.[0]?.sha256
+    );
+  });
 });

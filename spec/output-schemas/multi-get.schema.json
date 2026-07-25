@@ -127,6 +127,17 @@
                   "maxLength": 256
                 }
               },
+              "messageId": { "type": "string", "maxLength": 2048 },
+              "inReplyTo": { "type": "string", "maxLength": 2048 },
+              "references": {
+                "type": "array",
+                "maxItems": 256,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                }
+              },
               "threadId": { "type": "string", "maxLength": 2048 },
               "eventId": { "type": "string", "maxLength": 2048 },
               "sessionId": { "type": "string", "maxLength": 2048 },
@@ -153,7 +164,11 @@
                       "minimum": 0,
                       "maximum": 9007199254740991
                     },
-                    "disposition": { "enum": ["inline", "attachment"] }
+                    "disposition": { "enum": ["inline", "attachment"] },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
                   }
                 }
               }

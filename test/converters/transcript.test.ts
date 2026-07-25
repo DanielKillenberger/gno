@@ -5,10 +5,12 @@ import type {
   RecordAdapterLimits,
 } from "../../src/converters/types";
 
+import { htmlFragmentToText } from "../../src/converters/adapters/shared/html-text";
 import {
   createTranscriptAdapter,
   transcriptAdapter,
 } from "../../src/converters/adapters/transcript/adapter";
+import { cleanTranscriptText } from "../../src/converters/adapters/transcript/model";
 import { runRecordAdapter } from "../../src/ingestion/record-adapter";
 
 const LIMITS: RecordAdapterLimits = {
@@ -266,5 +268,36 @@ describe("transcript record adapter", () => {
     expect(result.authoritative).toBe(true);
     expect(result.records[0]?.markdown).not.toContain("![remote]");
     expect(result.records[0]?.markdown).toContain("\\!\\[remote\\]");
+  });
+
+  test("uses linear HTML and voice parsing for adversarial transcript text", () => {
+    const malformedClosingTag =
+      "<v.person Ada><script>private</script\t\n ignored>Visible<br>line<style>hidden</style extra>";
+    const cleaned = cleanTranscriptText(malformedClosingTag);
+    expect(cleaned.speaker).toBe("Ada");
+    expect(cleaned.text).toContain("Visible\nline");
+    expect(cleaned.text).not.toContain("private");
+    expect(cleaned.text).not.toContain("hidden");
+
+    const nestedEntity = cleanTranscriptText(
+      "&amp;lt;script&amp;gt;still text&amp;lt;/script&amp;gt;"
+    );
+    expect(nestedEntity.text).toBe("&lt;script&gt;still text&lt;/script&gt;");
+    expect(nestedEntity.text).not.toContain("<script>");
+
+    const longVoice = `<v.${"!.".repeat(50_000)} Ada>bounded`;
+    expect(cleanTranscriptText(longVoice).text).toBe("bounded");
+  });
+
+  test("bounds malformed HTML tails at the maximum record size", () => {
+    const maxRecordChars = 2_000_000;
+    const startedAt = performance.now();
+    expect(htmlFragmentToText("&".repeat(maxRecordChars))).toHaveLength(
+      maxRecordChars
+    );
+    expect(htmlFragmentToText("<".repeat(maxRecordChars))).toHaveLength(
+      maxRecordChars
+    );
+    expect(performance.now() - startedAt).toBeLessThan(5_000);
   });
 });

@@ -161,6 +161,14 @@ const boundedText = (
   return normalized;
 };
 
+const normalizeSha256 = (value: string | undefined): string | undefined => {
+  if (value === undefined) return undefined;
+  if (!HASH_PATTERN.test(value)) {
+    throw new Error("record metadata out of bounds");
+  }
+  return value;
+};
+
 const normalizeFailureReference = (
   value: string | undefined
 ): string | undefined => {
@@ -228,6 +236,18 @@ const normalizeMetadata = (
       RECORD_METADATA_LIMITS.maxCategoryChars
     ),
     dateFields,
+    messageId: boundedText(
+      metadata.messageId,
+      RECORD_METADATA_LIMITS.maxIdentifierChars
+    ),
+    inReplyTo: boundedText(
+      metadata.inReplyTo,
+      RECORD_METADATA_LIMITS.maxIdentifierChars
+    ),
+    references: normalizeList(
+      metadata.references,
+      RECORD_METADATA_LIMITS.maxIdentifierChars
+    ),
     threadId: boundedText(
       metadata.threadId,
       RECORD_METADATA_LIMITS.maxIdentifierChars
@@ -265,6 +285,7 @@ const normalizeMetadata = (
         ),
         bytes: attachment.bytes,
         disposition: attachment.disposition,
+        sha256: normalizeSha256(attachment.sha256),
       };
     }),
   };

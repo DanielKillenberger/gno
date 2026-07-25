@@ -73,8 +73,8 @@ equivalent files fail closed as ambiguous.
 | collection list    | yes    | no      | no    | yes  | no    | terminal |
 | collection remove  | no     | no      | no    | no   | no    | terminal |
 | collection rename  | no     | no      | no    | no   | no    | terminal |
-| update             | no     | no      | no    | no   | no    | terminal |
-| index              | no     | no      | no    | no   | no    | terminal |
+| update             | yes    | no      | no    | no   | no    | terminal |
+| index              | yes    | no      | no    | no   | no    | terminal |
 | embed              | no     | no      | no    | no   | no    | terminal |
 | search             | yes    | yes     | yes   | yes  | yes   | terminal |
 | vsearch            | yes    | yes     | yes   | yes  | yes   | terminal |
@@ -772,13 +772,14 @@ Sync files from disk into the index (ingestion without embedding).
 **Synopsis:**
 
 ```bash
-gno update [--git-pull]
+gno update [--git-pull] [--json]
 ```
 
 **Options:**
 | Option | Type | Description |
 |--------|------|-------------|
 | `--git-pull` | boolean | Run `git pull` in git repositories before scanning |
+| `--json` | boolean | Emit the complete deterministic sync result on stdout |
 
 **Behavior:**
 
@@ -788,6 +789,13 @@ gno update [--git-pull]
 4. Chunk content for indexing
 5. Update FTS index
 6. Mark missing files as inactive
+
+**JSON output:** The top-level value is the complete sync result. Each entry in
+`collections[].files[]` may contain a `recordImport` receipt conforming to
+[`record-import@1.0`](./output-schemas/record-import.schema.json). Receipt items
+are sorted deterministically and capped at 1,000; `itemsTruncated` reports
+omitted actions. Partial snapshots expose `warnings[]` even when no individual
+record failure was reported. Human progress and diagnostics remain on stderr.
 
 **Exit Codes:**
 
@@ -803,7 +811,7 @@ Build or update the index end-to-end (update + embed).
 **Synopsis:**
 
 ```bash
-gno index [--collection <name>] [--no-embed] [--models-pull] [--git-pull] [--yes]
+gno index [collection] [--no-embed] [--models-pull] [--git-pull] [--json] [--yes]
 ```
 
 **Options:**
@@ -813,12 +821,20 @@ gno index [--collection <name>] [--no-embed] [--models-pull] [--git-pull] [--yes
 | `--no-embed` | boolean | Run ingestion only, skip embedding |
 | `--models-pull` | boolean | Download models if missing (prompts unless `--yes`) |
 | `--git-pull` | boolean | Run `git pull` in git repositories |
+| `--json` | boolean | Emit the complete deterministic sync and embedding result on stdout |
 | `--yes` | boolean | Accept defaults, no prompts |
 
 **Behavior:**
 
 - Runs `update` then `embed` by default
 - With `--no-embed`, runs `update` only
+
+**JSON output:** Emits `{ syncResult, embedSkipped, embedResult? }`.
+`syncResult.collections[].files[].recordImport`, when present, conforms to
+[`record-import@1.0`](./output-schemas/record-import.schema.json) with the same
+deterministic ordering, bounds, truncation disclosure, and partial-snapshot
+warnings as `gno update --json`. Human progress and diagnostics remain on
+stderr.
 
 **Exit Codes:**
 
@@ -1046,10 +1062,13 @@ File/export adapter iteration has a 60-second deadline in addition to the byte,
 record, metadata, and total-character caps. A partial import that retains valid
 siblings exits successfully but is never silent: terminal output includes the
 file, bounded warning count, and snapshot state; `--verbose` adds stable failure
-codes, bounded source locators, retryability, and redacted messages. Internal
-and SDK-facing sync results include a `recordImport` receipt with adapter
+codes, bounded source locators, retryability, and redacted messages.
+`gno update --json`, `gno index --json`, and internal and SDK-facing sync
+results include a `recordImport` receipt conforming to
+[`record-import@1.0`](./output-schemas/record-import.schema.json), with adapter
 identity, configuration fingerprint, snapshot authority, cap state, bytes read,
-per-action counts, and bounded failures. `.gno/records/` is a reserved virtual
+per-action identity/provenance/attachment receipts, truncation disclosure,
+warnings, and bounded failures. `.gno/records/` is a reserved virtual
 namespace and is never walked as physical collection content.
 
 **Exit Codes:**

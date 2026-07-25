@@ -3,6 +3,7 @@ import type {
   RecordMetadata,
 } from "../../types";
 
+import { RECORD_METADATA_LIMITS } from "../../types";
 import { sanitizeHtmlToText } from "./html";
 import { parseParameterizedHeader } from "./parameters";
 
@@ -319,14 +320,22 @@ const normalizeMessageId = (value: string | undefined): string | undefined => {
     .normalize("NFC")
     .replace(CONTROL_CHAR_PATTERN, "")
     .trim();
-  return normalized ? normalized.slice(0, 500) : undefined;
+  return normalized
+    ? normalized.slice(0, RECORD_METADATA_LIMITS.maxIdentifierChars)
+    : undefined;
 };
 
 const extractMessageIds = (value: string | undefined): string[] => {
   if (!value) return [];
   const ids: string[] = [];
   for (const match of value.matchAll(MESSAGE_ID_PATTERN)) {
-    if (match[1]) ids.push(match[1].normalize("NFC").slice(0, 500));
+    if (match[1]) {
+      ids.push(
+        match[1]
+          .normalize("NFC")
+          .slice(0, RECORD_METADATA_LIMITS.maxIdentifierChars)
+      );
+    }
   }
   return ids;
 };
@@ -418,10 +427,11 @@ export const parseEmail = (
     participants,
     categories: ["email"],
     dateFields: sentAt ? { sentAt } : undefined,
+    messageId,
+    inReplyTo,
+    references,
     threadId,
-    attachments: state.attachments.map(
-      ({ sha256: _sha256, ...attachment }) => attachment
-    ),
+    attachments: state.attachments,
   };
   if (JSON.stringify(metadata).length > limits.maxMetadataChars) {
     throw new MailParseError(

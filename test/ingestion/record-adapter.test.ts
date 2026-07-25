@@ -570,7 +570,7 @@ describe("streaming record adapter contract", () => {
     );
   });
 
-  test("rejects custom adapter enum and numeric values outside the output schemas", async () => {
+  test("rejects custom adapter enum, numeric, and digest values outside the output schemas", async () => {
     const result = await runRecordAdapter(
       adapter([
         {
@@ -614,6 +614,22 @@ describe("streaming record adapter contract", () => {
             },
           },
         },
+        {
+          type: "record",
+          record: {
+            stableId: "invalid-attachment-digest",
+            sourceLocator: "line:4",
+            markdown: "bounded body",
+            metadata: {
+              attachments: [
+                {
+                  name: "attachment.bin",
+                  sha256: "not-a-sha256",
+                },
+              ],
+            },
+          },
+        },
         complete,
       ]),
       input({ limits: { ...limits, maxMetadataChars: 100_000 } })
@@ -622,7 +638,7 @@ describe("streaming record adapter contract", () => {
     expect(result.records).toEqual([]);
     expect(
       result.failures.filter(({ code }) => code === "RECORD_TOO_LARGE")
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   test("removes every terminal control from accepted metadata", async () => {

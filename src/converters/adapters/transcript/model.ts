@@ -1,4 +1,8 @@
 import {
+  decodeHtmlEntitiesOnce,
+  htmlFragmentToText,
+} from "../shared/html-text";
+import {
   safeInlineText,
   safeMarkdownText,
   scalarText,
@@ -37,11 +41,6 @@ export type TranscriptParseEvent =
     };
 
 const TIMESTAMP_PATTERN = /^(?:(\d{1,}):)?([0-5]?\d):([0-5]\d)[,.](\d{3})$/;
-const SCRIPT_BLOCK_PATTERN = /<script\b[^>]*>[\s\S]*?<\/script\s*>/giu;
-const STYLE_BLOCK_PATTERN = /<style\b[^>]*>[\s\S]*?<\/style\s*>/giu;
-const HTML_TAG_PATTERN = /<[^>]*>/gu;
-const SPEAKER_PREFIX_PATTERN = /^([^:\n]{1,80}):\s+(.+)$/su;
-const VTT_VOICE_PATTERN = /^<v(?:\.[^ >]+)*\s+([^>]{1,80})>/iu;
 
 export const parseTranscriptTimestamp = (
   value: unknown
@@ -100,31 +99,73 @@ export const parseTranscriptAdapterOptions = (
   return { format };
 };
 
-const decodeEntities = (value: string): string =>
-  value
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'");
+const vttVoiceSpeaker = (value: string): string | undefined => {
+  const source = value.trimStart();
+  if (
+    source.length < 3 ||
+    source[0] !== "<" ||
+    source[1]?.toLowerCase() !== "v"
+  )
+    return undefined;
+  const end = source.indexOf(">", 2);
+  if (end < 0) return undefined;
+  let cursor = 2;
+  if (source[cursor] === ".") {
+    while (
+      cursor < end &&
+      source[cursor] !== " " &&
+      source[cursor] !== "\t" &&
+      source[cursor] !== "\n" &&
+      source[cursor] !== "\r"
+    )
+      cursor += 1;
+  }
+  if (
+    source[cursor] !== " " &&
+    source[cursor] !== "\t" &&
+    source[cursor] !== "\n" &&
+    source[cursor] !== "\r"
+  )
+    return undefined;
+  while (
+    cursor < end &&
+    (source[cursor] === " " ||
+      source[cursor] === "\t" ||
+      source[cursor] === "\n" ||
+      source[cursor] === "\r")
+  )
+    cursor += 1;
+  const speaker = source.slice(cursor, end).trim();
+  if (!speaker || speaker.length > 80) return undefined;
+  return safeInlineText(decodeHtmlEntitiesOnce(speaker));
+};
+
+const speakerPrefix = (
+  value: string
+): { speaker: string; text: string } | undefined => {
+  const separator = value.indexOf(":");
+  if (separator <= 0 || separator > 80) return undefined;
+  const speaker = value.slice(0, separator);
+  if (speaker.includes("\n")) return undefined;
+  const remainder = value.slice(separator + 1);
+  if (
+    remainder.length === 0 ||
+    (remainder[0] !== " " &&
+      remainder[0] !== "\t" &&
+      remainder[0] !== "\n" &&
+      remainder[0] !== "\r")
+  )
+    return undefined;
+  const text = remainder.trim();
+  if (!text) return undefined;
+  return { speaker: safeInlineText(speaker), text };
+};
 
 export const cleanTranscriptText = (
   value: string
 ): { text: string; speaker?: string } => {
-  let speaker: string | undefined;
-  const voice = VTT_VOICE_PATTERN.exec(value.trimStart());
-  if (voice?.[1]) speaker = safeInlineText(voice[1]);
-  const withoutUnsafeBlocks = value
-    .replace(SCRIPT_BLOCK_PATTERN, "")
-    .replace(STYLE_BLOCK_PATTERN, "")
-    .replaceAll(/<br\s*\/?>/giu, "\n")
-    .replace(HTML_TAG_PATTERN, "");
-  const cleaned = safeMarkdownText(decodeEntities(withoutUnsafeBlocks)).trim();
+  const speaker = vttVoiceSpeaker(value);
+  const cleaned = safeMarkdownText(htmlFragmentToText(value)).trim();
   if (speaker) return { text: cleaned, speaker };
-  const prefixed = SPEAKER_PREFIX_PATTERN.exec(cleaned);
-  if (!prefixed?.[1] || !prefixed[2]) return { text: cleaned };
-  return {
-    speaker: safeInlineText(prefixed[1]),
-    text: prefixed[2].trim(),
-  };
+  return speakerPrefix(cleaned) ?? { text: cleaned };
 };

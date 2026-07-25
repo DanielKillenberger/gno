@@ -81,12 +81,20 @@ describe("email export adapter", () => {
       "2026-07-21T12:30:00.000Z"
     );
     expect(message?.metadata?.threadId).toBe("root@example.com");
+    expect(message?.metadata?.messageId).toBe("quarterly-1@example.com");
+    expect(message?.metadata?.inReplyTo).toBe("planning@example.com");
+    expect(message?.metadata?.references).toEqual([
+      "root@example.com",
+      "planning@example.com",
+    ]);
     expect(message?.metadata?.attachments).toEqual([
       {
         name: "invoice.pdf",
         mime: "application/pdf",
         bytes: 17,
         disposition: "attachment",
+        sha256:
+          "6f4d87618e1531fc5af3e140c56105e655c88ab36b8e5f62c81a370b03cd5555",
       },
     ]);
     expect(message?.markdown).toContain("Der Gründungsbericht ist fertig.");
@@ -143,6 +151,28 @@ describe("email export adapter", () => {
     expect(markdown).not.toContain("![track](");
   });
 
+  test("escapes repeated backslashes before every Markdown control character", async () => {
+    const eml = [
+      "From: Sender <sender@example.com>",
+      "Message-ID: <markdown-backslashes@example.com>",
+      "Subject: Markdown backslashes",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      String.raw`\\[label](javascript:alert(1)) \\<script>`,
+    ].join("\r\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(eml), ".eml")
+    );
+    const markdown = result.records[0]?.markdown ?? "";
+
+    expect(markdown).toContain(
+      String.raw`\\\\\[label\](javascript:alert(1)) \\\\\<script\>`
+    );
+    expect(markdown).not.toContain("[label](javascript:");
+    expect(markdown).not.toContain("<script>");
+  });
+
   test("streams MBOX siblings while preserving repeated and missing identities", async () => {
     const input = await fixtureInput("mixed.mbox", ".mbox", 5);
     const first = await runRecordAdapter(emailRecordAdapter, input);
@@ -183,6 +213,48 @@ describe("email export adapter", () => {
     ).toBe(true);
     expect(second.records).toEqual(first.records);
     expect(second.failures).toEqual(first.failures);
+  });
+
+  test("keeps same-header Message-ID body variants as distinct deterministic records", async () => {
+    const message = (body: string): string =>
+      [
+        "From sender@example.com Tue Jul 21 14:30:00 2026",
+        "From: Sender <sender@example.com>",
+        "Date: Tue, 21 Jul 2026 14:30:00 +0200",
+        "Message-ID: <same-header@example.com>",
+        "Subject: Same header",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        body,
+      ].join("\n");
+    const first = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(
+        encode(`${message("first body")}\n${message("second body")}`),
+        ".mbox",
+        {},
+        3
+      )
+    );
+    const reordered = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(
+        encode(`${message("second body")}\n${message("first body")}`),
+        ".mbox",
+        {},
+        17
+      )
+    );
+
+    expect(first.authoritative).toBe(true);
+    expect(first.records).toHaveLength(2);
+    expect(new Set(first.records.map((record) => record.recordKey)).size).toBe(
+      2
+    );
+    expect(first.failures).toEqual([]);
+    expect(new Set(first.records.map((record) => record.recordKey))).toEqual(
+      new Set(reordered.records.map((record) => record.recordKey))
+    );
   });
 
   test("does not split body prose on a From prefix and unescapes mboxrd body lines", async () => {
@@ -290,7 +362,7 @@ describe("email export adapter", () => {
     expect(result.failures[0]?.code).toBe("MALFORMED_RECORD");
   });
 
-  test("keeps repeated Message-ID record keys stable across reorder, removal, and body edits", async () => {
+  test("keeps repeated Message-ID variants stable across reorder and changes identity on body edits", async () => {
     const message = (subject: string, minute: string, body: string): string =>
       [
         `From sender@example.com Tue Jul 21 14:${minute}:00 2026`,
@@ -328,7 +400,7 @@ describe("email export adapter", () => {
       new Map(records.map((record) => [record.title ?? "", record.recordKey]));
 
     expect(keys(reordered.records)).toEqual(keys(first.records));
-    expect(keys(edited.records).get("Alpha")).toBe(
+    expect(keys(edited.records).get("Alpha")).not.toBe(
       keys(first.records).get("Alpha")
     );
   });
@@ -389,6 +461,31 @@ describe("email export adapter", () => {
     expect(markdown).toContain("Visible evidence.");
     expect(markdown).not.toContain("evil.example");
     expect(markdown).not.toContain("hidden payload");
+  });
+
+  test("drops overlapping and entity-encoded dangerous HTML without exposing payloads", async () => {
+    const eml = [
+      "From: Sender <sender@example.com>",
+      "Message-ID: <overlapping-script@example.com>",
+      "Subject: Overlapping script",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      "<p>Visible before.</p>",
+      "<scr<script>ipt>hidden overlap</scr</script>ipt>",
+      "&#60;script&#62;hidden encoded&#60;/script&#62;",
+      "<!-- unclosed comment <script>hidden comment</script>",
+    ].join("\r\n");
+    const result = await runRecordAdapter(
+      emailRecordAdapter,
+      bytesInput(encode(eml), ".eml")
+    );
+    const markdown = result.records[0]?.markdown ?? "";
+
+    expect(markdown).toContain("Visible before.");
+    expect(markdown).not.toContain("hidden overlap");
+    expect(markdown).not.toContain("hidden encoded");
+    expect(markdown).not.toContain("hidden comment");
+    expect(markdown.toLowerCase()).not.toContain("<script");
   });
 
   test("handles a near-limit physical line delivered as one-byte chunks", async () => {

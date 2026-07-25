@@ -135,6 +135,7 @@ export interface RecordAttachmentInventoryItem {
   mime?: string;
   bytes?: number;
   disposition?: "inline" | "attachment";
+  sha256?: string;
 }
 
 /** Closed per-field limits shared by ingestion and versioned output schemas. */
@@ -160,6 +161,9 @@ export interface RecordMetadata {
   participants?: string[];
   categories?: string[];
   dateFields?: Record<string, string>;
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
   threadId?: string;
   eventId?: string;
   sessionId?: string;
