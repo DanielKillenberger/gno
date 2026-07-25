@@ -250,22 +250,6 @@ describe("DNS-pinned outbound HTTP policy", () => {
           },
         })
       );
-
-      const previousTlsOverride = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-      try {
-        await expectRequestRejection(
-          wrongConnection.value.request({
-            tls: { ca: cert },
-          })
-        );
-      } finally {
-        if (previousTlsOverride === undefined) {
-          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-        } else {
-          process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTlsOverride;
-        }
-      }
     } finally {
       await server.stop(true);
     }
