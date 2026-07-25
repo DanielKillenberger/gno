@@ -142,7 +142,7 @@ describe("conservative destination classification", () => {
     const decision = classifyDestination({
       kind: "network",
       hostname: "provider.secret.example",
-      addresses: ["203.0.113.9"],
+      addresses: ["93.184.216.34"],
       remoteProvider: true,
     });
     expect(decision).toMatchObject({
@@ -152,7 +152,7 @@ describe("conservative destination classification", () => {
     });
     const serialized = JSON.stringify(decision);
     expect(serialized).not.toContain("provider.secret.example");
-    expect(serialized).not.toContain("203.0.113.9");
+    expect(serialized).not.toContain("93.184.216.34");
     expect(serialized).toBe(JSON.stringify(decision));
   });
 });

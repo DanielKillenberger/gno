@@ -116,26 +116,108 @@ function parseIpv6(address: string): readonly number[] | null {
   return groups.map((group) => Number.parseInt(group, 16));
 }
 
+interface Ipv4SpecialPrefix {
+  readonly address: readonly [number, number, number, number];
+  readonly prefixLength: number;
+  readonly addressClass: Exclude<DestinationAddressClass, "public">;
+}
+
+// IANA IPv4 Special-Purpose Address Space, refreshed 2025-10-09. GNO
+// conservatively keeps every registered block out of provider-public proof.
+const IPV4_SPECIAL_PREFIXES = [
+  { address: [0, 0, 0, 0], prefixLength: 8, addressClass: "unknown" },
+  { address: [10, 0, 0, 0], prefixLength: 8, addressClass: "private" },
+  { address: [100, 64, 0, 0], prefixLength: 10, addressClass: "unknown" },
+  { address: [127, 0, 0, 0], prefixLength: 8, addressClass: "loopback" },
+  { address: [169, 254, 0, 0], prefixLength: 16, addressClass: "unknown" },
+  { address: [172, 16, 0, 0], prefixLength: 12, addressClass: "private" },
+  { address: [192, 0, 0, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [192, 0, 2, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [192, 31, 196, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [192, 52, 193, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [192, 88, 99, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [192, 168, 0, 0], prefixLength: 16, addressClass: "private" },
+  { address: [192, 175, 48, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [198, 18, 0, 0], prefixLength: 15, addressClass: "unknown" },
+  { address: [198, 51, 100, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [203, 0, 113, 0], prefixLength: 24, addressClass: "unknown" },
+  { address: [224, 0, 0, 0], prefixLength: 3, addressClass: "unknown" },
+] as const satisfies readonly Ipv4SpecialPrefix[];
+
+function ipv4Integer(octets: readonly number[]): number {
+  return (
+    ((((octets[0] ?? 0) << 24) >>> 0) |
+      ((octets[1] ?? 0) << 16) |
+      ((octets[2] ?? 0) << 8) |
+      (octets[3] ?? 0)) >>>
+    0
+  );
+}
+
+function matchesIpv4Prefix(
+  octets: readonly number[],
+  prefix: Ipv4SpecialPrefix
+): boolean {
+  const mask =
+    prefix.prefixLength === 0
+      ? 0
+      : (0xffffffff << (32 - prefix.prefixLength)) >>> 0;
+  return (
+    (ipv4Integer(octets) & mask) >>> 0 ===
+    (ipv4Integer(prefix.address) & mask) >>> 0
+  );
+}
+
 function classifyIpv4(octets: readonly number[]): DestinationAddressClass {
-  const [first = -1, second = -1] = octets;
-  if (first === 127) return "loopback";
-  if (
-    first === 10 ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  ) {
-    return "private";
-  }
-  if (
-    first === 0 ||
-    (first === 100 && second >= 64 && second <= 127) ||
-    (first === 169 && second === 254) ||
-    first >= 224 ||
-    octets.every((octet) => octet === 255)
-  ) {
-    return "unknown";
+  for (const prefix of IPV4_SPECIAL_PREFIXES) {
+    if (matchesIpv4Prefix(octets, prefix)) return prefix.addressClass;
   }
   return "public";
+}
+
+interface Ipv6Prefix {
+  readonly groups: readonly number[];
+  readonly prefixLength: number;
+}
+
+// IANA IPv6 Special-Purpose Address Space, refreshed 2025-10-09. Mapped IPv4
+// and the globally reachable NAT64 WKP are handled separately by target
+// semantics; every prefix below remains ineligible for provider-public proof.
+const IPV6_SPECIAL_PREFIXES = [
+  { groups: [0x0100], prefixLength: 64 },
+  { groups: [0x0100, 0, 0, 1], prefixLength: 64 },
+  { groups: [0x2001], prefixLength: 23 },
+  { groups: [0x2001, 0x0db8], prefixLength: 32 },
+  { groups: [0x2002], prefixLength: 16 },
+  { groups: [0x2620, 0x004f, 0x8000], prefixLength: 48 },
+  { groups: [0x3fff], prefixLength: 20 },
+  { groups: [0x5f00], prefixLength: 16 },
+] as const satisfies readonly Ipv6Prefix[];
+
+function matchesIpv6Prefix(
+  groups: readonly number[],
+  prefix: Ipv6Prefix
+): boolean {
+  const fullGroups = Math.floor(prefix.prefixLength / 16);
+  for (let index = 0; index < fullGroups; index += 1) {
+    if ((groups[index] ?? 0) !== (prefix.groups[index] ?? 0)) return false;
+  }
+  const remainingBits = prefix.prefixLength % 16;
+  if (remainingBits === 0) return true;
+  const mask = (0xffff << (16 - remainingBits)) & 0xffff;
+  return (
+    ((groups[fullGroups] ?? 0) & mask) ===
+    ((prefix.groups[fullGroups] ?? 0) & mask)
+  );
+}
+
+function embeddedIpv4Class(
+  groups: readonly number[],
+  highGroupIndex: number
+): DestinationAddressClass {
+  const high = groups[highGroupIndex] ?? 0;
+  const low = groups[highGroupIndex + 1] ?? 0;
+  return classifyIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff]);
 }
 
 function classifyIpv6(groups: readonly number[]): DestinationAddressClass {
@@ -148,13 +230,20 @@ function classifyIpv6(groups: readonly number[]): DestinationAddressClass {
   const isMappedIpv4 =
     groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
   if (isMappedIpv4) {
-    return classifyIpv4([
-      (groups[6] ?? 0) >> 8,
-      (groups[6] ?? 0) & 0xff,
-      (groups[7] ?? 0) >> 8,
-      (groups[7] ?? 0) & 0xff,
-    ]);
+    return embeddedIpv4Class(groups, 6);
   }
+  const isCompatibleIpv4 = groups.slice(0, 6).every((group) => group === 0);
+  if (isCompatibleIpv4) return "unknown";
+  const isPublicNat64 =
+    first === 0x0064 &&
+    second === 0xff9b &&
+    groups.slice(2, 6).every((group) => group === 0);
+  if (isPublicNat64) {
+    return embeddedIpv4Class(groups, 6) === "public" ? "public" : "unknown";
+  }
+  const isLocalNat64 =
+    first === 0x0064 && second === 0xff9b && third === 0x0001;
+  if (isLocalNat64 || first === 0x2002) return "unknown";
   if (first === 0xfd7a && second === 0x115c && third === 0xa1e0) {
     return "tailscale";
   }
@@ -167,7 +256,17 @@ function classifyIpv6(groups: readonly number[]): DestinationAddressClass {
   if ((first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80) {
     return "private";
   }
-  return "public";
+  if (
+    IPV6_SPECIAL_PREFIXES.some((prefix) => matchesIpv6Prefix(groups, prefix))
+  ) {
+    return "unknown";
+  }
+  return matchesIpv6Prefix(groups, {
+    groups: [0x2000],
+    prefixLength: 3,
+  })
+    ? "public"
+    : "unknown";
 }
 
 export function classifyNetworkAddress(
@@ -289,10 +388,11 @@ export function classifyDestination(
   if (input.kind === "bind" && (hostname === "0.0.0.0" || hostname === "::")) {
     return classification("remote", "unknown", "WILDCARD_BIND", audit);
   }
-  if (input.remoteProvider) {
+  const addressSet = classifyAddressSet(classes, audit);
+  if (input.remoteProvider && addressSet.addressClass === "public") {
     return classification("remote", "public", "REMOTE_PROVIDER", audit);
   }
-  return classifyAddressSet(classes, audit);
+  return addressSet;
 }
 
 export function classifyBindDestination(
