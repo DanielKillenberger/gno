@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.29.3] - 2026-07-25
+
 ### Fixed
 
 - Synchronized the packaged GNO agent skill with every shipped v1.29
@@ -1880,7 +1882,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.29.2...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.29.3...HEAD
+[1.29.3]: https://github.com/gmickel/gno/compare/v1.29.2...v1.29.3
 [1.29.2]: https://github.com/gmickel/gno/compare/v1.29.1...v1.29.2
 [1.29.1]: https://github.com/gmickel/gno/compare/v1.29.0...v1.29.1
 [1.29.0]: https://github.com/gmickel/gno/compare/v1.28.0...v1.29.0
