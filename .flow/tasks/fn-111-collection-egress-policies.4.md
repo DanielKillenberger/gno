@@ -42,9 +42,8 @@ Deliver propagate restrictive policy through mixed and derived data with audit a
 
 
 ## Done summary
-TBD
-
+Propagated deterministic egress lineage through retrieval results, Context Capsules, trace exports and replay, change journals, publishing, browser clips, and record adapters. Added mixed-source default-deny and explicit-partial planning, content-free bounded audit receipts with retention and purge, compatibility migrations, schemas, documentation, regression coverage, and refreshed deterministic benchmark receipts.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 19554534, f212e228, 5bbb1187, c61b1638, 016e3f16
+- Tests: bun run lint:check, bun test (3407 pass, 2 expected platform or opt-in skips, 0 fail), bun run docs:verify (13 pass, 2 cached-model skips, 0 fail), bun run test:package, bun run eval:agentic -- --write, focused integration and task suites (114 pass, 0 fail)
 - PRs:
