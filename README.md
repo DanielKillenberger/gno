@@ -20,13 +20,23 @@ gno mcp install --target cursor    # or claude-code, claude-desktop, zed, ...
 
 ## What you get
 
-BM25 and vector retrieval fused and reranked over Markdown, code, PDFs, Office files, and exported mail, calendar and transcripts. A web workspace with cross-collection browse, a knowledge graph, a markdown editor and provenance-carrying capture. A fast CLI, a TypeScript SDK, a REST API, a headless daemon, and one-command install into ten agent clients. Optional hosted publishing when a slice needs a URL.
+**One local index across everything you have.** Markdown, PDFs, Office documents, plain text, source code, and portable mail, calendar and transcript exports. Point it at a folder that mixes all of them and it handles the mix.
 
-That is the table stakes. Here is the part that is harder to find elsewhere.
+**Three ways to search it.** Keyword (BM25), semantic (vector), and hybrid — fused, reranked, and explainable, with structured intent controls and metadata filters. Ask for "how we handle retries" and find the paragraph about exponential backoff that never uses the word.
+
+**A workspace, not a search box.** Cross-collection folder tree, per-tab browse context, a markdown editor, provenance-carrying quick capture, and a navigable knowledge graph.
+
+**Answers with citations.** Ask a question in natural language and get an answer built from your own documents, with citations that resolve to the source passage.
+
+**Six interfaces on one index.** A fast CLI, a web UI, a REST API, a TypeScript SDK, an MCP server, and a headless daemon — plus one-command install into ten agent clients. Nothing drifts between them.
+
+**Optional hosted publishing** at [gno.sh](https://gno.sh) when a slice needs a URL.
+
+No GPU required, no account required, no telemetry. Free and MIT licensed.
 
 ## Why not just another local RAG tool
 
-Most retrieval tools return a ranked list and leave the rest to optimism. Four things here are different, and each one is measurable rather than adjectival:
+The above is most of what people use day to day. Beyond it, four things here are different, and each one is measurable rather than adjectival:
 
 |                                                              | What it does                                                                                                                                                                   | Why it matters                                                                                                                                                                           |
 | :----------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
