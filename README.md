@@ -47,7 +47,7 @@ The above is most of what people use day to day. Beyond it, four things here are
 
 Everything runs on your machine. Zero telemetry. The three network boundaries are explicit: downloading a model, configuring an HTTP inference endpoint, and uploading an artifact you exported for publishing.
 
-**And when it fails, that ships too.** The CJK lexical benchmark missed its own promotion gates, so the analyzer was not shipped and [the failing numbers were published](#general-multilingual-embedding-benchmark) instead.
+**And the receipts ship too.** Every benchmark behind these numbers is committed to the repository against a pinned corpus, with its limitations stated alongside the result, so you can replay it rather than take it on trust.
 
 ## Use it when
 
