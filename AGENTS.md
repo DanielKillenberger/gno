@@ -402,15 +402,59 @@ DEPLOY_HOST=root@178.104.180.89 ./scripts/deploy-prod.sh
 
 If you change behavior, update docs in the same commit. Never leave docs out of sync.
 
+## Live QA Gate (`pipeline.qa = on`)
+
+The Flow-Next QA stage is **enabled** in this repo. `/flow-next:qa <spec-id>` runs a live-app
+real-user pass derived from the spec (AC / R-IDs / boundaries → scenarios), files P0/P1/P2
+findings with evidence, and ends with a YES/NO ship verdict receipt.
+
+Two entry points, same skill:
+
+- **User-invoked** - `/flow-next:qa fn-N` any time.
+- **Pilot stage** - inserted automatically at the all-tasks-done juncture, just before make-pr
+  (`plan → plan-review → work → qa → make-pr`). `NEEDS_WORK` never hard-blocks the loop; findings
+  ride the draft PR.
+
+**The hard rule**: PASS/SHIP may NEVER be derived from reading source. The verdict rests on captured
+evidence from the running app - screenshots, console dumps, observed state. No reachable app = `BLOCKED`,
+not PASS. QA **augments, never replaces** CI, `bun test`, staging, and manual QA.
+
+### QA surfaces to drive
+
+| Surface | Target | Notes |
+| --- | --- | --- |
+| GNO web UI | `gno serve` → `http://localhost:3000` | Primary drivable surface for this repo |
+| GNO REST API | same host, see `docs/API.md` | Evidence = actual responses, not schema reading |
+| CLI / MCP | real command + tool invocations | Evidence = captured stdout/JSON, never narration |
+
+### Downstream site is in scope too - `~/work/gno.sh`
+
+**Any change that lands in the marketing/docs site must be QA'd, not just diffed.** Docs and website
+work is user-facing product surface; a green build is not a QA pass.
+
+- **Before merge** - run the site locally (`cd ~/work/gno.sh && bun run dev` → `http://localhost:3344`)
+  and drive the changed pages: docs/reference pages, product pages, install pages, comparisons, FAQs.
+  Check rendering, navigation/links, code-block copy buttons, and mobile width.
+- **After deploy** - re-verify against production `https://gno.sh` following the deploy steps in
+  "Hosted website source/deploy" above (`curl -fsSI https://gno.sh`, service active, remote HEAD ==
+  `origin/main`), then drive the changed pages once more on the live site.
+- **Evidence** - screenshots or captured responses from the running site. "The MDX looks right" is not
+  a QA pass.
+- Site-repo gates (`bun run check`, `bun run typecheck`, `bun run build`) run in addition to, not
+  instead of, the driven pass.
+
+Turn the stage off with `flowctl config set pipeline.qa off`.
+
 ## Session Completion
 
 **When ending a work session:**
 
 1. **File issues** - Create Flow-Next epics/tasks for remaining/discovered work
 2. **Quality gates** (if code changed) - `bun run lint:check && bun test`
-3. **Update Flow-Next** - Mark tasks done via `flowctl done`
-4. **Commit & push** - `git push` (see Versioning for release pushes)
-5. **Verify** - `git status` shows up to date with origin
+3. **Live QA** (if user-facing surface changed, incl. `~/work/gno.sh`) - `/flow-next:qa <spec-id>`; see "Live QA Gate"
+4. **Update Flow-Next** - Mark tasks done via `flowctl done`
+5. **Commit & push** - `git push` (see Versioning for release pushes)
+6. **Verify** - `git status` shows up to date with origin
 
 Work is NOT complete until pushed to remote.
 
@@ -420,21 +464,21 @@ Work is NOT complete until pushed to remote.
 This project uses Flow-Next. Use `.flow/bin/flowctl` for ALL task tracking. Do NOT create markdown TODOs or use TodoWrite. Re-anchor (re-read spec + task status) before every task.
 
 ```bash
-.flow/bin/flowctl list # specs + tasks
-.flow/bin/flowctl show fn-N.M # view task
-.flow/bin/flowctl start fn-N.M # claim -> implement -> commit
+.flow/bin/flowctl list                # specs + tasks
+.flow/bin/flowctl show fn-N.M         # view task
+.flow/bin/flowctl start fn-N.M        # claim -> implement -> commit
 .flow/bin/flowctl done fn-N.M --summary-file s.md --evidence-json e.json
 # e.json: {"commits": ["<sha>"], "tests": ["<command>"], "prs": []}
 ```
 
-**Creating a spec:** write it directly - do NOT use `$flow-next-plan` (task breakdown only). Scaffold cascade (first match wins): `SPEC.md` -> `spec.md` -> `.flow/templates/spec.md` -> bundled template.
+**Creating a spec:** write it directly - do NOT use `/flow-next:plan` (task breakdown only). Scaffold cascade (first match wins): `SPEC.md` -> `spec.md` -> `.flow/templates/spec.md` -> bundled template.
 
 ```bash
 .flow/bin/flowctl spec create --title "Short title" --json
 .flow/bin/flowctl spec set-plan <spec-id> --file plan.md
 ```
 
-Then `$flow-next-plan <spec-id>`.
+Then `/flow-next:plan <spec-id>`.
 
 **More:** `.flow/bin/flowctl --help` or `.flow/usage.md`
 <!-- END FLOW-NEXT -->

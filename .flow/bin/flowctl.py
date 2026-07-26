@@ -7,10 +7,11 @@ Agents must use flowctl for all writes - never edit .flow/* directly.
 """
 
 import argparse
-import difflib
+import errno
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -24,28 +25,147 @@ import tempfile
 import unicodedata
 import uuid
 from abc import ABC, abstractmethod
+from collections import deque
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field, replace as dataclass_replace
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, ContextManager, Optional
 
-# Platform-specific file locking (fcntl on Unix, no-op on Windows)
-try:
+
+# Cross-process locks use platform-native kernel locks. The kernel releases
+# them when a process exits, avoiding both abandoned-lock cleanup and the ABA
+# race inherent in deleting/recreating a shared lock path.
+CROSS_PROCESS_LOCK_WAIT_SECS = 30.0
+CROSS_PROCESS_LOCK_POLL_SECS = 0.02
+
+
+class CrossProcessLockError(RuntimeError):
+    """A portable lock could not be acquired safely within its bound."""
+
+
+def _try_kernel_lock(fd: int) -> bool:
+    """Try one non-blocking platform-native exclusive lock acquisition."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                return False
+            raise
+
     import fcntl
 
-    def _flock(f, lock_type):
-        fcntl.flock(f, lock_type)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as e:
+        if e.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        raise
 
-    LOCK_EX = fcntl.LOCK_EX
-    LOCK_UN = fcntl.LOCK_UN
-except ImportError:
-    # Windows: fcntl not available, use no-op (acceptable for single-machine use)
-    def _flock(f, lock_type):
-        pass
 
-    LOCK_EX = 0
-    LOCK_UN = 0
+def _release_kernel_lock(fd: int) -> None:
+    """Release a platform-native lock; closing the fd remains the backstop."""
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+@contextmanager
+def cross_process_lock(
+    lock_path: Path,
+    *,
+    timeout: Optional[float] = None,
+    poll: Optional[float] = None,
+):
+    """Acquire a bounded POSIX/Windows kernel lock on a persistent lock file."""
+    if timeout is None:
+        timeout = CROSS_PROCESS_LOCK_WAIT_SECS
+    if poll is None:
+        poll = CROSS_PROCESS_LOCK_POLL_SECS
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        invalid_parent = lock_path.parent.is_symlink() or not lock_path.parent.is_dir()
+    except OSError as e:
+        raise CrossProcessLockError(
+            f"cannot prepare lock parent {lock_path.parent}: {e}"
+        ) from e
+    if invalid_parent:
+        raise CrossProcessLockError(
+            f"lock parent is not a real directory: {lock_path.parent}"
+        )
+    try:
+        leaf_info = os.lstat(lock_path)
+    except FileNotFoundError:
+        leaf_info = None
+    except OSError as e:
+        raise CrossProcessLockError(f"cannot inspect lock path {lock_path}: {e}") from e
+    if leaf_info is not None and not stat.S_ISREG(leaf_info.st_mode):
+        raise CrossProcessLockError(f"lock path is not a regular file: {lock_path}")
+
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError as e:
+        raise CrossProcessLockError(f"cannot open lock path {lock_path}: {e}") from e
+
+    try:
+        if os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+    except OSError as e:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise CrossProcessLockError(
+            f"cannot initialize lock {lock_path}: {e}"
+        ) from e
+
+    acquired = False
+    deadline = _monotonic_now() + max(0.0, timeout)
+    try:
+        while not acquired:
+            try:
+                acquired = _try_kernel_lock(fd)
+            except OSError as e:
+                raise CrossProcessLockError(
+                    f"cannot acquire lock {lock_path}: {e}"
+                ) from e
+            if acquired:
+                break
+            if _monotonic_now() >= deadline:
+                raise CrossProcessLockError(
+                    f"timed out acquiring live lock {lock_path} after {timeout:g}s"
+                )
+            _sleep_secs(poll)
+
+        yield
+    finally:
+        if acquired:
+            try:
+                _release_kernel_lock(fd)
+            except OSError:
+                # Closing the descriptor releases kernel ownership. Never mask
+                # an exception from the protected body.
+                pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 # --- Constants ---
@@ -115,12 +235,6 @@ STRATEGY_DRAFT_PLACEHOLDER = "_Not yet captured._"
 STRATEGY_EMPTY_SENTINELS: frozenset[str] = frozenset(
     {STRATEGY_HUSK_SENTINEL, STRATEGY_DRAFT_PLACEHOLDER}
 )
-# Frontmatter contract: exactly these three keys. Refuse unknown keys to keep
-# the audit story simple (single-source-of-truth invariant).
-STRATEGY_FRONTMATTER_FIELDS: frozenset[str] = frozenset(
-    {"name", "last_updated", "generator"}
-)
-
 SPEC_STATUS = ["open", "done"]
 EPIC_STATUS = SPEC_STATUS  # Backward-compat alias (removed in 2.0).
 TASK_STATUS = ["todo", "in_progress", "blocked", "done"]
@@ -171,7 +285,7 @@ def get_repo_root() -> Path:
         root = Path(result.stdout.strip())
         _REPO_ROOT_CACHE[cwd] = root
         return root
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         # Fallback to current directory (uncached: never sticky)
         return cwd
 
@@ -525,8 +639,6 @@ del _name, _key
 _STRATEGY_SECTION_NAMES_LOWER: frozenset[str] = frozenset(_STRATEGY_SECTION_KEYS.keys())
 
 _STRATEGY_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-# YYYY-MM-DD ISO date for last_updated validation.
-_STRATEGY_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # HTML comment matcher used by _strategy_section_filled.
 _STRATEGY_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -658,33 +770,32 @@ def parse_strategy_file(text: str) -> dict[str, Any]:
 
     # --- Frontmatter ---
     body_text = text
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            fm_text = parts[1]
+    envelope = _frontmatter_envelope(text)
+    if envelope.complete:
+        parser = _optional_yaml_parser()
+        if parser is None:
+            parsed_fm = _parse_inline_yaml(envelope.frontmatter)
+        else:
+            safe_load, yaml_error = parser
             try:
-                import yaml  # type: ignore[import-not-found]
-                try:
-                    parsed_fm = yaml.safe_load(fm_text)
-                except yaml.YAMLError:
-                    parsed_fm = None
-                if not isinstance(parsed_fm, dict):
-                    parsed_fm = {}
-            except ImportError:
-                parsed_fm = _parse_inline_yaml(fm_text)
-            for key in ("name", "last_updated", "generator"):
-                if key in parsed_fm:
-                    val = parsed_fm[key]
-                    # PyYAML may parse last_updated as datetime.date — coerce
-                    # to ISO string so JSON output round-trips cleanly.
-                    if isinstance(val, date) and not isinstance(val, datetime):
-                        result[key] = val.isoformat()
-                    else:
-                        result[key] = str(val) if val is not None else None
-            body_text = parts[2]
-            # Skip leading newline after the closing `---`.
-            if body_text.startswith("\n"):
-                body_text = body_text[1:]
+                parsed_fm = safe_load(envelope.frontmatter)
+            except yaml_error:
+                parsed_fm = None
+            if not isinstance(parsed_fm, dict):
+                parsed_fm = {}
+        for key in ("name", "last_updated", "generator"):
+            if key in parsed_fm:
+                val = parsed_fm[key]
+                # PyYAML may parse last_updated as datetime.date — coerce
+                # to ISO string so JSON output round-trips cleanly.
+                if isinstance(val, date) and not isinstance(val, datetime):
+                    result[key] = val.isoformat()
+                else:
+                    result[key] = str(val) if val is not None else None
+        body_text = envelope.body
+        # Skip leading newline after the closing `---`.
+        if body_text.startswith("\n"):
+            body_text = body_text[1:]
 
     # --- Section scan (after frontmatter) ---
     masked = _glossary_strip_fenced_code(body_text)
@@ -710,105 +821,6 @@ def parse_strategy_file(text: str) -> dict[str, Any]:
 
     result["_section_filled"] = section_filled
     return result
-
-
-def render_strategy_file(parsed: dict[str, Any]) -> str:
-    """Render a parsed strategy dict back to markdown.
-
-    Round-trip contract: `parse → render → parse` produces semantically
-    equivalent output; section bodies preserved (whitespace stripping
-    only at section boundaries). Frontmatter always written; H1 always
-    written (`# <name> Strategy`); required sections always written
-    (empty bodies allowed for husk semantics); optional sections only
-    written when their body is non-empty (per R2: "Optional sections
-    deleted entirely if unused; never left as empty headers").
-
-    Frontmatter key order: name, last_updated, generator (deterministic
-    diffs).
-
-    Husk render (R23 invariant): when all sections are empty, output is
-    H1 + frontmatter only; file is never deleted.
-    """
-    name = parsed.get("name") or "Untitled"
-    last_updated = parsed.get("last_updated") or date.today().isoformat()
-    generator = parsed.get("generator") or STRATEGY_GENERATOR
-
-    lines: list[str] = ["---"]
-    # Locked field order — never sort alphabetically.
-    lines.append(f"name: {_format_yaml_value(name, 'name')}")
-    # last_updated quoted as string so PyYAML doesn't coerce back to date.
-    lines.append(f"last_updated: {_quote_yaml_scalar(last_updated)}")
-    lines.append(f"generator: {_format_yaml_value(generator, 'generator')}")
-    lines.append("---")
-    lines.append("")
-    lines.append(f"# {name} Strategy")
-    lines.append("")
-
-    # Required sections — always emitted, even when empty (husk semantics).
-    for section_name, key in STRATEGY_REQUIRED_SECTIONS:
-        body = (parsed.get(key) or "").strip("\n").rstrip()
-        lines.append(f"## {section_name}")
-        lines.append("")
-        if body:
-            lines.append(body)
-            lines.append("")
-
-    # Optional sections — only emitted when body has content.
-    for section_name, key in STRATEGY_OPTIONAL_SECTIONS:
-        body = (parsed.get(key) or "").strip("\n").rstrip()
-        if body:
-            lines.append(f"## {section_name}")
-            lines.append("")
-            lines.append(body)
-            lines.append("")
-
-    out = "\n".join(lines).rstrip("\n") + "\n"
-    return out
-
-
-def validate_strategy_frontmatter(fm: dict[str, Any]) -> list[str]:
-    """Return validation errors for STRATEGY.md frontmatter (empty = valid).
-
-    Required: `name` (non-empty str), `last_updated` (ISO YYYY-MM-DD),
-              `generator` (must equal `flow-next-strategy`).
-    Refuses: unknown keys (single-source-of-truth invariant).
-    """
-    errors: list[str] = []
-    if not isinstance(fm, dict):
-        return ["frontmatter must be a dict"]
-
-    missing = STRATEGY_FRONTMATTER_FIELDS - set(fm.keys())
-    if missing:
-        errors.append(f"missing required fields: {', '.join(sorted(missing))}")
-
-    name = fm.get("name")
-    if name is not None and (not isinstance(name, str) or not name.strip()):
-        errors.append("name must be a non-empty string")
-
-    last_updated = fm.get("last_updated")
-    if last_updated is not None:
-        if isinstance(last_updated, date) and not isinstance(last_updated, datetime):
-            # PyYAML coerced to a date — that's fine for validation purposes;
-            # the renderer will quote it back to ISO string.
-            pass
-        elif not isinstance(last_updated, str):
-            errors.append("last_updated must be a string (YYYY-MM-DD)")
-        elif not _STRATEGY_ISO_DATE_RE.match(last_updated):
-            errors.append(
-                f"last_updated '{last_updated}' is not ISO YYYY-MM-DD"
-            )
-
-    generator = fm.get("generator")
-    if generator is not None and generator != STRATEGY_GENERATOR:
-        errors.append(
-            f"generator must be '{STRATEGY_GENERATOR}' (got '{generator}')"
-        )
-
-    unknown = set(fm.keys()) - STRATEGY_FRONTMATTER_FIELDS
-    if unknown:
-        errors.append(f"unknown fields: {', '.join(sorted(unknown))}")
-
-    return errors
 
 
 # fn-109: hot-path memoization for get_state_dir. Keyed by
@@ -849,7 +861,7 @@ def get_state_dir() -> Path:
         state = Path(common) / "flow-state"
         _STATE_DIR_CACHE[cache_key] = state
         return state
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         pass
 
     # 3. Fallback for non-git repos (uncached: never sticky)
@@ -878,13 +890,20 @@ class StateStore(ABC):
         ...
 
     @abstractmethod
-    def list_runtime_files(self) -> list[str]:
-        """List all task IDs that have runtime state files."""
+    def load_all_runtime(
+        self, task_ids: Optional[set[str]] = None
+    ) -> dict[str, dict]:
+        """Load readable runtime state, optionally restricted to task IDs."""
+        ...
+
+    @abstractmethod
+    def delete_runtime(self, task_id: str) -> None:
+        """Delete a task's runtime state when present."""
         ...
 
 
 class LocalFileStateStore(StateStore):
-    """File-based state store with fcntl locking."""
+    """File-based state store with portable cross-process locking."""
 
     def __init__(self, state_dir: Path):
         self.state_dir = state_dir
@@ -895,6 +914,8 @@ class LocalFileStateStore(StateStore):
         return self.tasks_dir / f"{task_id}.state.json"
 
     def _lock_path(self, task_id: str) -> Path:
+        # Preserve the legacy path so POSIX processes running across an
+        # upgrade still contend on the same kernel lock.
         return self.locks_dir / f"{task_id}.lock"
 
     def load_runtime(self, task_id: str) -> Optional[dict]:
@@ -904,7 +925,7 @@ class LocalFileStateStore(StateStore):
         try:
             with open(state_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (json.JSONDecodeError, OSError, UnicodeError):
             return None
 
     def save_runtime(self, task_id: str, data: dict) -> None:
@@ -916,22 +937,39 @@ class LocalFileStateStore(StateStore):
     @contextmanager
     def lock_task(self, task_id: str):
         """Acquire exclusive lock for task operations."""
-        self.locks_dir.mkdir(parents=True, exist_ok=True)
-        lock_path = self._lock_path(task_id)
-        with open(lock_path, "w") as f:
-            try:
-                _flock(f, LOCK_EX)
-                yield
-            finally:
-                _flock(f, LOCK_UN)
+        with cross_process_lock(self._lock_path(task_id)):
+            yield
 
-    def list_runtime_files(self) -> list[str]:
+    def load_all_runtime(
+        self, task_ids: Optional[set[str]] = None
+    ) -> dict[str, dict]:
         if not self.tasks_dir.exists():
-            return []
-        return [
-            f.stem.replace(".state", "")
-            for f in self.tasks_dir.glob("*.state.json")
-        ]
+            return {}
+        runtime_by_id = {}
+        if task_ids is None:
+            candidates = (
+                (state_path.name.removesuffix(".state.json"), state_path)
+                for state_path in self.tasks_dir.glob("*.state.json")
+            )
+        else:
+            candidates = (
+                (task_id, self._state_path(task_id))
+                for task_id in sorted(task_ids, key=id_sort_key)
+            )
+        for task_id, state_path in candidates:
+            if not is_task_id(task_id) or not state_path.exists():
+                continue
+            try:
+                with open(state_path, encoding="utf-8") as f:
+                    runtime_by_id[task_id] = json.load(f)
+            except (json.JSONDecodeError, OSError, UnicodeError):
+                continue
+        return runtime_by_id
+
+    def delete_runtime(self, task_id: str) -> None:
+        state_path = self._state_path(task_id)
+        if state_path.exists():
+            state_path.unlink()
 
 
 def get_state_store() -> LocalFileStateStore:
@@ -961,15 +999,19 @@ def load_task_with_state(task_id: str, use_json: bool = True) -> dict:
     store = get_state_store()
     runtime = store.load_runtime(task_id)
 
+    return merge_task_runtime(definition, runtime)
+
+
+def merge_task_runtime(definition: dict, runtime: Optional[dict]) -> dict:
+    """Merge one tracked task definition with its authoritative runtime state."""
     if runtime is None:
-        # Backward compat: extract runtime fields from definition
+        # Backward compat: extract runtime fields from definition.
         runtime = {k: definition[k] for k in RUNTIME_FIELDS if k in definition}
         if not runtime:
             runtime = {"status": "todo"}
 
-    # Merge: runtime overwrites definition for runtime fields
-    merged = {**definition, **runtime}
-    return normalize_task(merged)
+    # Merge: runtime overwrites definition for runtime fields.
+    return normalize_task({**definition, **runtime})
 
 
 def save_task_runtime(task_id: str, updates: dict) -> None:
@@ -993,20 +1035,7 @@ def delete_task_runtime(task_id: str) -> None:
     """Delete runtime state file entirely. Used by checkpoint restore when no runtime."""
     store = get_state_store()
     with store.lock_task(task_id):
-        state_path = store._state_path(task_id)
-        if state_path.exists():
-            state_path.unlink()
-
-
-def save_task_definition(task_id: str, definition: dict) -> None:
-    """Write definition to tracked file (filters out runtime fields)."""
-    flow_dir = get_flow_dir()
-    def_path = flow_dir / TASKS_DIR / f"{task_id}.json"
-    # Filter out runtime fields
-    clean_def = {k: v for k, v in definition.items() if k not in RUNTIME_FIELDS}
-    # fn-43.2: ensure persisted JSON uses canonical "spec" key only.
-    canonicalize_task_for_write(clean_def)
-    atomic_write_json(def_path, clean_def)
+        store.delete_runtime(task_id)
 
 
 # --- Tracker sync (fn-52) ---
@@ -1022,7 +1051,6 @@ def save_task_definition(task_id: str, definition: dict) -> None:
 # bridge-active predicate alone, not a perEvent leaf — see SKILL.md / steps.md).
 TRACKER_TYPES = {"linear", "github", "gitlab", "jira"}
 TRACKER_PER_EVENT_LEAVES = {"off", "pull", "push", "reconcile", "comment"}
-TRACKER_TIEBREAKS = {"flow-wins", "tracker-wins", "always-ask"}
 # Default staleness threshold (hours) consumed by `sync list-stale`.
 TRACKER_DEFAULT_STALE_HOURS = 24
 # Sync receipt status enum spanning all three sync layers (body / status /
@@ -1130,6 +1158,22 @@ def get_default_tracker_config() -> dict:
         # perTracker. None = readiness projection off (the gate stays
         # dormant — R7 invisibility).
         "readyState": None,
+        # fn-134.2 — id scheme for new specs when a tracker bridge is active.
+        # Strict string-enum: "flow" (default, native fn-N) | "tracker"
+        # (tracker-keyed KEY-N-slug / synthetic gh-N / gl-N). Only the literal
+        # "tracker" activates; a coerced bool / typo never does (fail-closed
+        # on read via normalize_tracker_spec_ids). WRITE-side validation in
+        # cmd_config_set rejects anything outside the enum.
+        #
+        # UNSET-DETECTABLE (R9): this leaf is in get_default_tracker_config so
+        # MERGED reads return "flow", but it is NOT materialized at init
+        # (_INIT_UNMATERIALIZED_LEAVES). Setup asks when a tracker is configured
+        # AND `config get tracker.specIds --raw` returns null ("never asked").
+        # A materialized default of "flow" would make "never asked"
+        # indistinguishable from "answered flow" and silently suppress the
+        # question. Decision: DO NOT materialize at init; leave the leaf absent
+        # on disk until the user (or setup) explicitly sets it.
+        "specIds": "flow",
     }
 
 
@@ -1341,17 +1385,71 @@ def get_default_config() -> dict:
 # their materialize-on-init behavior unchanged.
 _INIT_UNMATERIALIZED_BLOCKS = ("artifacts",)
 
+# Leaf keys (dotted paths) that must stay absent from the on-disk file after
+# init so setup can detect "never asked" via `config get <key> --raw` → null.
+# MERGED defaults still apply (see get_default_config / get_default_tracker_config).
+# fn-134.2: tracker.specIds — see get_default_tracker_config comment for the
+# materialization decision (DO NOT materialize; unset must be detectable).
+_INIT_UNMATERIALIZED_LEAVES = ("tracker.specIds",)
+
+# Strict enum for tracker.specIds (fn-134.2). Write-side rejects anything else;
+# read-side fail-closes anything else to "flow".
+TRACKER_SPEC_IDS_VALUES = frozenset({"flow", "tracker"})
+
+
+def normalize_tracker_spec_ids(value) -> str:
+    """Semantic value of ``tracker.specIds``.
+
+    Only the literal string ``"tracker"`` activates tracker-keyed ids. A coerced
+    bool, typo, null, or any other value fail-closes to ``"flow"`` (R6). Never
+    treat a truthy non-string as activating.
+    """
+    if isinstance(value, str) and value == "tracker":
+        return "tracker"
+    return "flow"
+
+
+def _with_tracker_spec_ids_normalized(cfg: dict) -> dict:
+    """Return cfg with ``tracker.specIds`` fail-closed on the merged tree.
+
+    Copy-on-write when normalizing so a shared defaults dict is never mutated.
+    """
+    tracker = cfg.get("tracker")
+    if not isinstance(tracker, dict) or "specIds" not in tracker:
+        return cfg
+    raw_val = tracker["specIds"]
+    norm = normalize_tracker_spec_ids(raw_val)
+    if raw_val == norm:
+        return cfg
+    new_cfg = dict(cfg)
+    new_tracker = dict(tracker)
+    new_tracker["specIds"] = norm
+    new_cfg["tracker"] = new_tracker
+    return new_cfg
+
 
 def _init_persisted_defaults() -> dict:
     """Defaults `cmd_init` writes/merges into config.json.
 
-    Equal to get_default_config() minus _INIT_UNMATERIALIZED_BLOCKS, so the
-    raw-file presence of those keys stays a faithful "explicitly set"
-    provenance signal for the setup ceremony's `--raw` probe.
+    Equal to get_default_config() minus _INIT_UNMATERIALIZED_BLOCKS and
+    _INIT_UNMATERIALIZED_LEAVES, so the raw-file presence of those keys stays
+    a faithful "explicitly set" provenance signal for the setup ceremony's
+    `--raw` probe.
     """
     defaults = get_default_config()
     for block in _INIT_UNMATERIALIZED_BLOCKS:
         defaults.pop(block, None)
+    for leaf in _INIT_UNMATERIALIZED_LEAVES:
+        parts = leaf.split(".")
+        cur = defaults
+        for part in parts[:-1]:
+            nxt = cur.get(part) if isinstance(cur, dict) else None
+            if not isinstance(nxt, dict):
+                cur = None
+                break
+            cur = nxt
+        if isinstance(cur, dict):
+            cur.pop(parts[-1], None)
     return defaults
 
 
@@ -1376,14 +1474,14 @@ def load_flow_config() -> dict:
     config_path = get_flow_dir() / CONFIG_FILE
     defaults = get_default_config()
     if not config_path.exists():
-        return defaults
+        return _with_tracker_spec_ids_normalized(defaults)
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            return deep_merge(defaults, data)
-        return defaults
+            return _with_tracker_spec_ids_normalized(deep_merge(defaults, data))
+        return _with_tracker_spec_ids_normalized(defaults)
     except (json.JSONDecodeError, Exception):
-        return defaults
+        return _with_tracker_spec_ids_normalized(defaults)
 
 
 def _walk_config_value(config, key: str, default=None):
@@ -1491,7 +1589,7 @@ def load_config_snapshot() -> ConfigSnapshot:
         merged = defaults
     else:
         merged = deep_merge(defaults, raw)
-    return ConfigSnapshot(raw, merged)
+    return ConfigSnapshot(raw, _with_tracker_spec_ids_normalized(merged))
 
 
 def _snapshot_raw_probe(snapshot: ConfigSnapshot, key: str):
@@ -1620,20 +1718,43 @@ def now_iso() -> str:
 
 
 def require_rp_cli() -> str:
-    """Ensure rp-cli is available."""
-    rp = shutil.which("rp-cli")
-    if not rp:
-        error_exit("rp-cli not found in PATH", use_json=False, code=2)
-    return rp
+    """Resolve the supported RepoPrompt CLI ladder, preferring CE."""
+    candidates = [
+        shutil.which("rpce-cli"),
+        str(Path.home() / "RepoPrompt" / "repoprompt_ce_cli"),
+        str(
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "RepoPrompt CE"
+            / "repoprompt_ce_cli"
+        ),
+        shutil.which("rp-cli"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        try:
+            if path.is_file() and os.access(path, os.X_OK):
+                return str(path)
+        except OSError:
+            continue
+    error_exit(
+        "RepoPrompt CE CLI not found. Install RepoPrompt CE with rpce-cli "
+        "(legacy rp-cli is accepted only as a Classic compatibility fallback).",
+        use_json=False,
+        code=2,
+    )
 
 
 def run_rp_cli(
     args: list[str], timeout: Optional[int] = None
 ) -> subprocess.CompletedProcess:
-    """Run rp-cli with safe error handling and timeout.
+    """Run the selected RepoPrompt CLI with safe error handling and timeout.
 
     Args:
-        args: Command arguments to pass to rp-cli
+        args: Command arguments to pass to the selected RepoPrompt CLI
         timeout: Max seconds to wait. Default from FLOW_RP_TIMEOUT env or 1200s (20min).
     """
     if timeout is None:
@@ -1645,16 +1766,16 @@ def run_rp_cli(
             cmd, capture_output=True, text=True, encoding="utf-8", check=True, timeout=timeout
         )
     except subprocess.TimeoutExpired:
-        error_exit(f"rp-cli timed out after {timeout}s", use_json=False, code=3)
+        error_exit(f"RepoPrompt CLI timed out after {timeout}s", use_json=False, code=3)
     except subprocess.CalledProcessError as e:
         msg = (e.stderr or e.stdout or str(e)).strip()
-        error_exit(f"rp-cli failed: {msg}", use_json=False, code=2)
+        error_exit(f"RepoPrompt CLI failed: {msg}", use_json=False, code=2)
 
 
 def run_rp_cli_unchecked(
     args: list[str], timeout: Optional[int] = None
 ) -> subprocess.CompletedProcess:
-    """Run rp-cli without collapsing command failures.
+    """Run the selected RepoPrompt CLI without collapsing command failures.
 
     Used when a caller needs to inspect stderr/stdout before deciding whether a
     failure is a capability mismatch or a real RepoPrompt error.
@@ -1666,16 +1787,17 @@ def run_rp_cli_unchecked(
     try:
         return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
     except subprocess.TimeoutExpired:
-        error_exit(f"rp-cli timed out after {timeout}s", use_json=False, code=3)
+        error_exit(f"RepoPrompt CLI timed out after {timeout}s", use_json=False, code=3)
 
 
 def try_run_rp_cli(
     args: list[str], timeout: Optional[int] = None
 ) -> Optional[subprocess.CompletedProcess]:
-    """Run rp-cli and return None on failure.
+    """Run optional Classic capability probes without masking real failures.
 
-    Used for optional capability probing where newer RepoPrompt features may not
-    exist yet and flowctl should fall back gracefully.
+    Only Classic's explicit missing-``bind_context`` response is optional. CE
+    operational/protocol failures and all other Classic failures are
+    authoritative and must not fall through to workspace creation.
     """
     if timeout is None:
         timeout = int(os.environ.get("FLOW_RP_TIMEOUT", "1200"))
@@ -1685,8 +1807,15 @@ def try_run_rp_cli(
         return subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8", check=True, timeout=timeout
         )
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-        return None
+    except subprocess.TimeoutExpired:
+        error_exit(f"RepoPrompt CLI timed out after {timeout}s", use_json=False, code=3)
+    except subprocess.CalledProcessError as exc:
+        output = (exc.stderr or exc.stdout or str(exc)).strip()
+        if Path(rp).name == "rp-cli" and is_rp_tool_missing_error(
+            output, "bind_context"
+        ):
+            return None
+        error_exit(f"RepoPrompt CLI failed: {output}", use_json=False, code=2)
 
 
 def is_rp_tool_missing_error(output: str, tool_name: str) -> bool:
@@ -1741,14 +1870,30 @@ def extract_window_id(win: dict[str, Any]) -> Optional[int]:
 
 
 def extract_root_paths(win: dict[str, Any]) -> list[str]:
+    """Collect legacy and CE tab repository roots in deterministic order."""
+    paths: list[str] = []
+
+    def add(value: Any, *, coerce: bool = False) -> None:
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            path = item if isinstance(item, str) else str(item) if coerce else None
+            if path is not None and path not in paths:
+                paths.append(path)
+
     for key in ("rootFolderPaths", "rootFolders", "rootFolderPath"):
         if key in win:
-            val = win[key]
-            if isinstance(val, list):
-                return [str(v) for v in val]
-            if isinstance(val, str):
-                return [val]
-    return []
+            add(win[key], coerce=True)
+
+    tabs = win.get("tabs")
+    if isinstance(tabs, list):
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            for key in ("repo_paths", "repoPaths"):
+                if key in tab:
+                    add(tab[key])
+
+    return paths
 
 
 def parse_manage_workspaces(raw: str) -> list[dict[str, Any]]:
@@ -1899,7 +2044,7 @@ def extract_response_window_id(data: Any) -> Optional[int]:
         win_id = extract_window_id(data)
         if win_id is not None:
             return win_id
-        for key in ("result", "data"):
+        for key in ("result", "data", "binding"):
             if key in data:
                 win_id = extract_response_window_id(data[key])
                 if win_id is not None:
@@ -1937,9 +2082,13 @@ def extract_builder_tab_from_payload(data: Any) -> Optional[str]:
     return None
 
 
-def bind_context_window(repo_root: str) -> Optional[int]:
+def bind_context_window(
+    repo_root: str, *, create_if_missing: bool = False
+) -> Optional[int]:
     """Prefer RepoPrompt's bind_context repo-path matching when available."""
     payload = {"op": "bind", "working_dirs": normalize_repo_root(repo_root)}
+    if create_if_missing:
+        payload["create_if_missing"] = True
     result = try_run_rp_cli(
         ["--raw-json", "-e", f"call bind_context {json.dumps(payload)}"]
     )
@@ -1948,10 +2097,19 @@ def bind_context_window(repo_root: str) -> Optional[int]:
 
     try:
         data = json.loads(result.stdout or "{}")
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as exc:
+        error_exit(
+            f"bind_context JSON parse failed: {exc}", use_json=False, code=2
+        )
 
-    return extract_response_window_id(data)
+    window_id = extract_response_window_id(data)
+    if window_id is None:
+        error_exit(
+            "bind_context response missing numeric window id",
+            use_json=False,
+            code=2,
+        )
+    return window_id
 
 
 def parse_builder_tab(output: str) -> str:
@@ -1982,7 +2140,7 @@ def parse_builder_tab(output: str) -> str:
 
 
 def parse_chat_id(output: str) -> Optional[str]:
-    match = re.search(r"Chat\s*:\s*`([^`]+)`", output)
+    match = re.search(r"(?:\*\*)?Chat(?:\*\*)?\s*:\s*`([^`]+)`", output)
     if match:
         return match.group(1)
     match = re.search(r"\"chat_id\"\s*:\s*\"([^\"]+)\"", output)
@@ -2050,6 +2208,32 @@ def atomic_write_json(path: Path, data: dict) -> None:
     """Write JSON file atomically with sorted keys."""
     content = json.dumps(data, indent=2, sort_keys=True) + "\n"
     atomic_write(path, content)
+
+
+def atomic_create(path: Path, content: str) -> None:
+    """Publish a new file atomically without ever replacing an existing path.
+
+    A complete sibling temp file is hard-linked into place. ``os.link`` is an
+    atomic no-clobber publication on POSIX and Windows when source and target
+    share a directory; a concurrent/pre-existing target raises
+    ``FileExistsError`` instead of being overwritten by ``os.replace``.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.link(tmp_path, path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            # Temp cleanup is best-effort. If os.link failed, preserve that
+            # original exception; if it succeeded, publication is complete
+            # and the caller must be allowed to track/rollback the target.
+            pass
 
 
 def load_json(path: Path) -> dict:
@@ -2258,30 +2442,13 @@ def _setup_block_lock():
     second writer clobbers the first target's hash. A repo-local exclusive lock
     (re-read meta INSIDE the lock at each call site) makes the map merge safe.
     """
-    lock_dir = get_flow_dir() / "locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    # The parent dir itself must be a real directory: a repository-controlled
-    # `.flow/locks -> /outside` symlink would relocate every child open even
-    # with O_NOFOLLOW on the leaf (security review, PR #209 wave 2).
-    if lock_dir.is_symlink() or not lock_dir.is_dir():
-        error_exit(f"setup-block lock dir is not a real directory: {lock_dir}", use_json=True)
-    lock_path = lock_dir / "setup-block.lock"
-    # O_NOFOLLOW: a repository-controlled symlink at the lock path must not
-    # redirect the open outside .flow/locks (security review, PR #209). No
-    # truncation flag - flock only needs a stable fd, never file content.
-    flags = os.O_CREAT | os.O_WRONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    # Preserve the legacy leaf so POSIX processes across an upgrade contend.
+    lock_path = get_flow_dir() / "locks" / "setup-block.lock"
     try:
-        fd = os.open(lock_path, flags, 0o644)
-    except OSError as e:
-        error_exit(f"setup-block lock unavailable: {lock_path} ({e})", use_json=True)
-    with os.fdopen(fd, "w") as f:
-        try:
-            _flock(f, LOCK_EX)
+        with cross_process_lock(lock_path):
             yield
-        finally:
-            _flock(f, LOCK_UN)
+    except CrossProcessLockError as e:
+        error_exit(f"setup-block lock unavailable: {e}", use_json=True)
 
 
 def _setup_block_emit(args: argparse.Namespace, target: str, action: str,
@@ -2656,8 +2823,11 @@ def validate_tracker_identifier(
     / ``#01`` are rejected (fn-69 R4-identity). The bare-``N`` form (fn-64) lets
     ``sync set-tracker-id --identifier 42`` succeed; it is normalized to the
     ``#42`` display form on the way out. Tracker-first canonical-id generation
-    does NOT pass this flag, so a GitHub/GitLab ref can never become a canonical
-    spec id.
+    does NOT pass this flag: a GitHub/GitLab ref never becomes a canonical spec
+    id *through this function*. Since fn-134 such a ref CAN still mint one, but
+    only via ``resolve_tracker_first_mint``, which derives a synthetic
+    ``gh-<n>`` / ``gl-<iid>`` key from ``tracker.type`` rather than storing the
+    raw ref as the id. The raw ``#123`` form stays display-only either way.
     """
     if not identifier:
         if required:
@@ -2734,6 +2904,213 @@ def reject_reserved_tracker_key(
             "tracker key.",
             use_json=use_json,
         )
+
+
+# fn-134.2 — synthetic key prefixes for trackers that lack a native KEY-N
+# identifier. Type-gating alone is NOT enough (ids are permanent; config is
+# not): while tracker.type is github/gitlab the matching prefix is reserved
+# for synthesis in that repo, and minting preflights the store for collisions.
+_SYNTHETIC_TRACKER_KEYS = {
+    "github": "gh",
+    "gitlab": "gl",
+}
+
+
+def parse_issue_ref_for_mint(
+    identifier: Optional[str],
+) -> Optional[tuple[int, str]]:
+    """Mint-side parse for ``#123`` / ``<project>#456`` issue references.
+
+    Returns ``(iid, display)`` where ``iid`` is the project-scoped issue number
+    (GitLab ``iid`` / GitHub issue number) — never an opaque global id. Accepts
+    bare ``123`` (normalized to ``#123`` display) and nested GitLab paths
+    (``group/subgroup/project#12``).
+
+    Separate from ``validate_tracker_identifier(allow_reference=True)``, which
+    is link-time only and returns an empty key ``("", n, display)`` — the wrong
+    shape for minting a resolvable ``gh-N-slug`` / ``gl-N-slug`` id.
+    """
+    if not identifier:
+        return None
+    stripped = identifier.strip()
+    # Optional path + #N (positive integer, no leading zero).
+    ref = re.match(r"^(?:(?:[^/#]+/)+[^/#]+)?#([1-9][0-9]*)$", stripped)
+    if ref:
+        return (int(ref.group(1)), stripped)
+    bare = re.match(r"^([1-9][0-9]*)$", stripped)
+    if bare:
+        return (int(bare.group(1)), f"#{bare.group(1)}")
+    return None
+
+
+def _tracker_type_for_synthesis() -> str:
+    """Lowercased tracker.type from merged config, or empty when unset."""
+    ttype = get_config("tracker.type")
+    if not isinstance(ttype, str):
+        return ""
+    return ttype.strip().lower()
+
+
+def reject_synthetic_prefix_reservation(
+    key: str, display: str, *, use_json: bool = False
+) -> None:
+    """While tracker.type is github/gitlab, reserve gh/gl for synthesis.
+
+    An explicit native identifier using the reserved key (e.g. ``GH-123`` on a
+    GitHub-configured repo) is rejected at link and create time. Linear/Jira
+    repos natively keyed GH are unaffected — type is not github/gitlab, so the
+    reservation does not fire.
+    """
+    ttype = _tracker_type_for_synthesis()
+    reserved = _SYNTHETIC_TRACKER_KEYS.get(ttype)
+    if not reserved or key != reserved:
+        return
+    error_exit(
+        f"Tracker identifier '{display}' uses key '{key}' which is reserved "
+        f"for synthetic minting while tracker.type is {ttype}. Pass a "
+        f"#N-style issue reference (e.g. #123 or group/project#456) instead "
+        f"of a native {reserved.upper()}-N key, or re-point tracker.type.",
+        use_json=use_json,
+    )
+
+
+def resolve_tracker_first_mint(
+    identifier: Optional[str], *, use_json: bool = False
+) -> tuple[str, int, str]:
+    """Resolve a tracker-first identifier into ``(key, number, display)``.
+
+    - Linear/Jira ``KEY-N`` → native key (unchanged).
+    - GitHub ``#123`` / bare ``123`` when ``tracker.type=github`` → ``gh``, 123.
+    - GitLab ``<project>#456`` when ``tracker.type=gitlab`` → ``gl``, 456 (iid).
+    - Explicit ``GH-N`` / ``GL-N`` while type is github/gitlab → rejected
+      (contextual reservation).
+    - ``fn`` reserved key → rejected.
+    """
+    if not identifier or not str(identifier).strip():
+        error_exit(
+            "A tracker identifier is required (e.g., WOR-17, #123, or group/project#456).",
+            use_json=use_json,
+        )
+    stripped = str(identifier).strip()
+
+    # KEY-N path first (Linear/Jira; also catches mistaken GH-N under github).
+    parsed = parse_tracker_identifier(stripped)
+    if parsed is not None:
+        key, number = parsed
+        if key == RESERVED_TRACKER_KEY:
+            error_exit(
+                f"Tracker identifier '{stripped}' uses the reserved key 'fn', "
+                "which collides with flow's native id scheme. Use a different "
+                "tracker key.",
+                use_json=use_json,
+            )
+        reject_synthetic_prefix_reservation(key, stripped, use_json=use_json)
+        return (key, number, stripped)
+
+    # Reference form → synthetic mint only when type is github/gitlab.
+    ref = parse_issue_ref_for_mint(stripped)
+    if ref is not None:
+        number, display = ref
+        ttype = _tracker_type_for_synthesis()
+        synthetic = _SYNTHETIC_TRACKER_KEYS.get(ttype)
+        if synthetic:
+            return (synthetic, number, display)
+        error_exit(
+            f"Issue reference '{stripped}' requires tracker.type github or "
+            f"gitlab for synthetic key minting (got "
+            f"{get_config('tracker.type')!r}). Linear/Jira use KEY-N "
+            f"identifiers (e.g. WOR-17 / PROJ-123).",
+            use_json=use_json,
+        )
+
+    error_exit(
+        f"Invalid tracker identifier '{stripped}'. Expected a bare display "
+        "key like WOR-17 or PROJ-123, or (with tracker.type github/gitlab) an "
+        "issue reference like #123 or group/project#456.",
+        use_json=use_json,
+    )
+
+
+def preflight_tracker_mint(
+    flow_dir: Path,
+    key: str,
+    number: int,
+    suffix: str,
+    *,
+    display: Optional[str] = None,
+    use_json: bool = False,
+) -> None:
+    """Refuse a tracker-first mint that would collide with the existing store.
+
+    Checks for a colliding canonical id (exact path) or a resolvable alias
+    (prefix ``<key>-<n>-*``, bare ``<key>-<n>``, or stored ``tracker.identifier``
+    matching the handle). Type-gating alone is not enough: a mixed historical
+    store (e.g. a Linear-keyed ``gh-123-*`` that predated a re-point to GitHub)
+    must not be silently collided with.
+    """
+    candidate = f"{key}-{number}-{suffix}"
+    bare = f"{key}-{number}"
+    collisions: set[str] = set()
+
+    for path in (
+        flow_dir / SPECS_JSON_DIR / f"{candidate}.json",
+        flow_dir / EPICS_DIR / f"{candidate}.json",
+        flow_dir / SPECS_DIR / f"{candidate}.md",
+        flow_dir / SPECS_JSON_DIR / f"{bare}.json",
+        flow_dir / EPICS_DIR / f"{bare}.json",
+    ):
+        if path.exists():
+            collisions.add(path.stem)
+
+    for directory in (flow_dir / SPECS_JSON_DIR, flow_dir / EPICS_DIR):
+        if not directory.exists():
+            continue
+        for path in directory.glob(f"{bare}-*.json"):
+            collisions.add(path.stem)
+
+    # Alias index: flow-first or tracker specs whose stored identifier resolves
+    # as this bare handle (case-insensitive KEY-N or #N display forms).
+    alias_targets = {
+        bare.lower(),
+        f"{key.upper()}-{number}".lower(),
+    }
+    # The `#N` display form belongs ONLY to a mint that is synthetic FOR THE
+    # ACTIVE TRACKER, where `gh-123` and `#123` genuinely name the same issue.
+    # Gating on the key string alone is not enough: a Linear or Jira project
+    # legitimately keyed `GH` would mint `gh-123` natively and then be blocked
+    # by an unrelated historical `#123`. Confirm `tracker.type` is the
+    # GitHub/GitLab source this key is synthesized from.
+    # Same normalization as synthesis (`_tracker_type_for_synthesis`). Reading
+    # the raw config value would decide `GitHub` / " github " is not synthetic
+    # while `resolve_tracker_first_mint` happily synthesizes `gh-N` from it.
+    synthetic_key = _SYNTHETIC_TRACKER_KEYS.get(_tracker_type_for_synthesis())
+    is_synthetic_mint = bool(synthetic_key) and key.lower() == synthetic_key
+    if is_synthetic_mint:
+        # Match the ACTUAL incoming reference, not a bare issue number. A
+        # project-qualified `group/project#12` and a bare `#12` are different
+        # issues, and so are `#12` on GitHub and `#12` on GitLab after a repo
+        # changes provider - matching on the number alone would let a stored
+        # reference block an unrelated mint. The bare `#N` form is added only
+        # when the incoming identifier is itself bare.
+        if display:
+            alias_targets.add(display.strip().lower())
+        if not display or "/" not in display:
+            alias_targets.add(f"#{number}")
+    for spec_file in iter_spec_json_files(flow_dir):
+        ident_lc, _ = _spec_tracker_fields(spec_file)
+        if ident_lc and ident_lc in alias_targets:
+            collisions.add(spec_file.stem)
+
+    if not collisions:
+        return
+    listed = ", ".join(sorted(collisions))
+    error_exit(
+        f"Refusing to mint {candidate}: bare handle '{bare}' collides with "
+        f"existing spec(s): {listed}. Ids never change; preflight refuses a "
+        f"duplicate alias. Use the full existing id, pick a different issue, "
+        f"or keep the historical id and link instead of re-minting.",
+        use_json=use_json,
+    )
 
 
 def parse_id(id_str: str) -> tuple[Optional[int], Optional[int]]:
@@ -2889,7 +3266,7 @@ def get_changed_files(base_branch: str) -> list[str]:
             cwd=get_repo_root(),
         )
         return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         return []
 
 
@@ -3079,7 +3456,7 @@ def find_references(
             if len(refs) >= max_results:
                 break
         return refs
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         return []
 
 
@@ -3155,7 +3532,7 @@ def get_codex_version() -> Optional[str]:
         output = result.stdout.strip()
         match = re.search(r"(\d+\.\d+\.\d+)", output)
         return match.group(1) if match else output
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         return None
 
 
@@ -3209,14 +3586,17 @@ def resolve_codex_sandbox(sandbox: str) -> str:
 # ONLY when that dispatch fails with the backend's DISTINCTIVE model-unavailable
 # signature; any OTHER failure (auth / network / sandbox / timeout) propagates
 # unchanged, so the ladder can never mask a real failure. A resolved downgrade
-# memoizes per ``(backend, CLI version)`` so the failed round-trip is paid at
-# most once per CLI upgrade. Explicit model pins bypass ladder + cache entirely.
+# memoizes per ``(backend, CLI version, routing intent)`` with bounded expiry so
+# role changes take effect immediately and stronger models are periodically
+# re-probed. Explicit model pins bypass ladder + cache entirely.
 #
 # The ladder lives BELOW the fn-90 review-round cap: the review handler increments
 # the cap once before calling the exec wrapper, and every ladder rung is the SAME
 # logical dispatch — ``enforce_and_increment_review_cap`` is NEVER called here.
 
 _MODEL_CACHE_FLOOR = "__floor__"  # sentinel: resolution reached the never-fail floor
+_MODEL_CACHE_TTL_SECS = 24 * 60 * 60
+_MODEL_CACHE_MAX_FUTURE_SKEW_SECS = 5 * 60
 
 # Distinctive model-unavailable signatures, captured VERBATIM from live probes
 # 2026-07-10 (all three CLIs). Matching ONLY these keeps the ladder from stepping
@@ -3259,8 +3639,42 @@ def _model_cache_path(repo_root: Optional[Path]) -> Optional[Path]:
     return repo_root / ".flow" / ".cache" / "model-resolution.json"
 
 
-def _model_cache_key(backend: str, cli_version: Optional[str]) -> str:
-    return f"{backend}@{cli_version or 'unknown'}"
+def _model_cache_now() -> float:
+    """Persistable wall clock for bounded cache entries (test indirection)."""
+    import time as _time
+
+    return _time.time()
+
+
+def _model_cache_intent(
+    backend: str,
+    spec: "BackendSpec",
+    ranking: list[str],
+    floor_model: Optional[str],
+    max_steps: int,
+) -> str:
+    """Fingerprint the effective non-explicit routing ladder.
+
+    CLI version alone cannot identify a resolution: role-map mutations and
+    registry updates can change the requested start/candidates without changing
+    the installed CLI. Hash the complete deterministic model-selection intent.
+    """
+    payload = {
+        "backend": backend,
+        "start": spec.model,
+        "source": spec.routing_intent or f"implicit:{spec.model or 'none'}",
+        "ranking": ranking,
+        "floor": floor_model,
+        "max_steps": max_steps,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def _model_cache_key(
+    backend: str, cli_version: Optional[str], intent: str
+) -> str:
+    return f"{backend}@{cli_version or 'unknown'}@{intent}"
 
 
 def _read_model_cache(repo_root: Optional[Path]) -> dict:
@@ -3275,37 +3689,109 @@ def _read_model_cache(repo_root: Optional[Path]) -> dict:
         return {}
 
 
+def _model_cache_entry(data: dict, key: str) -> Optional[str]:
+    """Return one fresh cached model; legacy/malformed/expired entries are cold."""
+    entry = data.get(key)
+    if not isinstance(entry, dict):
+        return None
+    model = entry.get("model")
+    cached_at = entry.get("cached_at")
+    if (
+        not isinstance(model, str)
+        or not model.strip()
+        or isinstance(cached_at, bool)
+        or not isinstance(cached_at, (int, float))
+        or not math.isfinite(float(cached_at))
+    ):
+        return None
+    age = _model_cache_now() - float(cached_at)
+    if age < -_MODEL_CACHE_MAX_FUTURE_SKEW_SECS or age >= _MODEL_CACHE_TTL_SECS:
+        return None
+    return model
+
+
+def _model_cache_lock_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.lock")
+
+
 def _model_cache_put(
-    repo_root: Optional[Path], backend: str, cli_version: Optional[str], model: str
+    repo_root: Optional[Path],
+    backend: str,
+    cli_version: Optional[str],
+    intent: str,
+    model: str,
 ) -> None:
     """Memoize a resolved model. Best-effort — a cache write never fails a review."""
     path = _model_cache_path(repo_root)
     if path is None:
         return
     try:
-        data = _read_model_cache(repo_root)
-        data[_model_cache_key(backend, cli_version)] = model
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(path, data)
-    except OSError:
+        with cross_process_lock(_model_cache_lock_path(path)):
+            data = _read_model_cache(repo_root)
+            data[_model_cache_key(backend, cli_version, intent)] = {
+                "model": model,
+                "cached_at": _model_cache_now(),
+            }
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(path, data)
+    except (OSError, CrossProcessLockError):
         pass
 
 
 def _model_cache_invalidate(
-    repo_root: Optional[Path], backend: str, cli_version: Optional[str]
+    repo_root: Optional[Path],
+    backend: str,
+    cli_version: Optional[str],
+    intent: str,
 ) -> None:
     """Drop a stale cache entry (a cached model that just failed the signature)."""
     path = _model_cache_path(repo_root)
     if path is None:
         return
-    key = _model_cache_key(backend, cli_version)
+    key = _model_cache_key(backend, cli_version, intent)
     try:
-        data = _read_model_cache(repo_root)
-        if key in data:
-            del data[key]
-            path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_json(path, data)
-    except OSError:
+        with cross_process_lock(_model_cache_lock_path(path)):
+            data = _read_model_cache(repo_root)
+            if key in data:
+                del data[key]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(path, data)
+    except (OSError, CrossProcessLockError):
+        pass
+
+
+def _model_cache_prune(
+    repo_root: Optional[Path],
+    backend: str,
+    cli_version: Optional[str],
+    intent: str,
+) -> None:
+    """Drop obsolete same-backend entries and an invalid current entry.
+
+    A routing/CLI change pays one version probe, then removes the superseded
+    keys so later happy-path dispatches return to the zero-probe fast path.
+    Other backends are unrelated cache owners and are always preserved.
+    """
+    path = _model_cache_path(repo_root)
+    if path is None:
+        return
+    keep_key = _model_cache_key(backend, cli_version, intent)
+    prefix = f"{backend}@"
+    try:
+        with cross_process_lock(_model_cache_lock_path(path)):
+            data = _read_model_cache(repo_root)
+            changed = False
+            for key in list(data):
+                if isinstance(key, str) and key.startswith(prefix) and key != keep_key:
+                    del data[key]
+                    changed = True
+            if keep_key in data and _model_cache_entry(data, keep_key) is None:
+                del data[keep_key]
+                changed = True
+            if changed:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(path, data)
+    except (OSError, CrossProcessLockError):
         pass
 
 
@@ -3319,13 +3805,15 @@ def _warn_model_resolution(
         )
         print(
             f"warning: {backend} model {tried!r} unavailable; fell back to the "
-            f"never-fail floor ({used_desc}). Cached for this CLI version.",
+            f"never-fail floor ({used_desc}). Cached temporarily for this CLI "
+            "version and routing intent.",
             file=sys.stderr,
         )
     else:
         print(
             f"warning: {backend} model {tried!r} unavailable; downgraded to "
-            f"{used!r}. Cached for this CLI version.",
+            f"{used!r}. Cached temporarily for this CLI version and routing "
+            "intent.",
             file=sys.stderr,
         )
 
@@ -3370,6 +3858,9 @@ def _dispatch_review_with_fallback(
             ranking = ranking[ranking.index(spec.model):]
         else:
             ranking = [spec.model] + ranking
+    cache_intent = _model_cache_intent(
+        backend, spec, ranking, floor_model, max_steps
+    )
 
     def _record(model: Optional[str], floor: bool) -> None:
         if resolution_out is not None:
@@ -3397,7 +3888,19 @@ def _dispatch_review_with_fallback(
     # Cheap pre-check: only consult the version (a subprocess) when the cache
     # file actually has entries — the pristine happy path never touches it.
     raw_cache = _read_model_cache(repo_root)
-    cached = raw_cache.get(_model_cache_key(backend, _ver())) if raw_cache else None
+    backend_keys = [
+        key
+        for key in raw_cache
+        if isinstance(key, str) and key.startswith(f"{backend}@")
+    ]
+    cache_key = (
+        _model_cache_key(backend, _ver(), cache_intent) if backend_keys else None
+    )
+    cached = _model_cache_entry(raw_cache, cache_key) if cache_key else None
+    if cache_key and (
+        cached is None or any(key != cache_key for key in backend_keys)
+    ):
+        _model_cache_prune(repo_root, backend, _ver(), cache_intent)
 
     if cached is not None:
         if cached == _MODEL_CACHE_FLOOR:
@@ -3408,7 +3911,7 @@ def _dispatch_review_with_fallback(
             return _resolved(out, sid, rc, err, cached, False)
         # A cached model that now fails the signature (org revoked it mid-version)
         # → drop it and re-resolve fresh from the ranking top. Self-healing.
-        _model_cache_invalidate(repo_root, backend, _ver())
+        _model_cache_invalidate(repo_root, backend, _ver(), cache_intent)
 
     top = ranking[0]
 
@@ -3423,11 +3926,13 @@ def _dispatch_review_with_fallback(
         if best is not None:
             out, sid, rc, err = dispatch(best, False)
             if rc == 0 or not is_unavailable(out, err):
-                _model_cache_put(repo_root, backend, _ver(), best)
+                _model_cache_put(repo_root, backend, _ver(), cache_intent, best)
                 _warn_model_resolution(backend, top, best, floor=False)
                 return _resolved(out, sid, rc, err, best, False)
         out, sid, rc, err = dispatch(floor_model, True)
-        _model_cache_put(repo_root, backend, _ver(), _MODEL_CACHE_FLOOR)
+        _model_cache_put(
+            repo_root, backend, _ver(), cache_intent, _MODEL_CACHE_FLOOR
+        )
         _warn_model_resolution(backend, top, floor_model, floor=True)
         return _resolved(out, sid, rc, err, floor_model, True)
 
@@ -3439,11 +3944,11 @@ def _dispatch_review_with_fallback(
         out, sid, rc, err = dispatch(model, False)
         if rc == 0 or not is_unavailable(out, err):
             if idx > 0:
-                _model_cache_put(repo_root, backend, _ver(), model)
+                _model_cache_put(repo_root, backend, _ver(), cache_intent, model)
                 _warn_model_resolution(backend, top, model, floor=False)
             return _resolved(out, sid, rc, err, model, False)
     out, sid, rc, err = dispatch(floor_model, True)
-    _model_cache_put(repo_root, backend, _ver(), _MODEL_CACHE_FLOOR)
+    _model_cache_put(repo_root, backend, _ver(), cache_intent, _MODEL_CACHE_FLOOR)
     _warn_model_resolution(backend, top, floor_model, floor=True)
     return _resolved(out, sid, rc, err, floor_model, True)
 
@@ -4284,14 +4789,22 @@ BACKEND_REGISTRY: dict[str, dict[str, Any]] = {
         # fn-76: ORDERED quality ranking (strongest first); ``default_model`` ==
         # ``models[0]``. copilot 1.0.65 rejects gpt-5.6-sol (``--model flag is
         # not available``), so the ranking top stays gpt-5.5; the ladder steps
-        # down on that signature. Verified via live probe against copilot CLI
-        # 1.0.65 — asked the CLI itself for the exact ``--model`` strings it
-        # accepts. Keep synced with ``copilot -p "/model"``; GitHub ships new
-        # rows without changelog. (1.0.65 dropped ``gpt-5.2`` / ``gpt-5.2-codex``
+        # down on that signature. (1.0.65 dropped ``gpt-5.2`` / ``gpt-5.2-codex``
         # — they 400 "Model not available".)
+        # SOURCE OF TRUTH for this list: the GitHub Copilot supported-models
+        # docs (docs.github.com/copilot/reference/ai-models/supported-models),
+        # NOT a local ``--model`` probe — Copilot availability is org-policy
+        # managed, so a policy-restricted install rejecting an id proves
+        # nothing about CLI support (observed 2026-07-24: an org-managed
+        # 1.0.74 rejected ``claude-opus-5``/``claude-opus-4.8`` while the docs
+        # list both GA in the CLI). Unknown-model is warn-and-accept and the
+        # ladder heals per-install gaps, so docs-listed rungs are safe even
+        # where a given org disallows them.
         "models": [
             "gpt-5.5",
             "gpt-5.4",
+            "claude-opus-5",  # GA per docs 2026-07-24 (1M ctx + reasoning levels in CLI)
+            "claude-opus-4.8",
             "claude-opus-4.7",
             "claude-opus-4.6",
             "claude-opus-4.5",
@@ -4318,7 +4831,7 @@ BACKEND_REGISTRY: dict[str, dict[str, Any]] = {
         # ``default_model`` == ``models[0]``. Cursor's fallback (run_cursor_exec)
         # consults ``cursor-agent --list-models`` on failure and dispatches the
         # best ``list ∩ ranking`` entry. Model strings are verbatim from
-        # ``cursor-agent --list-models`` (v2026.06); keep synced.
+        # ``cursor-agent --list-models`` (v2026.07); keep synced.
         "models": [
             "gpt-5.6-sol-high",
             "gpt-5.6-sol-xhigh",
@@ -4327,6 +4840,7 @@ BACKEND_REGISTRY: dict[str, dict[str, Any]] = {
             "gpt-5.6-sol-low",
             "gpt-5.6-terra-high",
             "gpt-5.6-luna-high",
+            "claude-opus-5-thinking-high",  # probed live 2026-07-24 (launch-day slug)
             "claude-opus-4-8-thinking-high",
             "claude-opus-4-7-thinking-high",
             "gpt-5.5-high",
@@ -4345,6 +4859,15 @@ BACKEND_REGISTRY: dict[str, dict[str, Any]] = {
     "none": {
         # Explicit opt-out. Parser still validates it so ``--review=none`` can
         # be stored as a spec without special-casing upstream.
+        "models": None,
+        "efforts": None,
+    },
+    "host": {
+        # fn-123 R5: NON-EXECUTABLE selection sentinel. Review runs as a
+        # host-native fresh-context subagent (skill-owned judgment). No model
+        # or effort on the backend string — pins live in the AGENTS.md
+        # model-routing section (caller routing instructions). No ``run_exec``
+        # hook, no ``flowctl host`` subcommand, never a subprocess path.
         "models": None,
         "efforts": None,
     },
@@ -4372,7 +4895,7 @@ MODEL_ROLES: tuple[str, ...] = (
     "scoutFast",
     "scoutIntelligent",
 )
-# Backends that accept a model pin in the role map (rp/none have no model axis).
+# Backends that accept a model pin in the role map (rp/none/host have no model axis).
 MODEL_ROLE_BACKENDS: tuple[str, ...] = ("codex", "copilot", "cursor")
 MODELS_STALE_DAYS = 90
 
@@ -4807,6 +5330,10 @@ class BackendSpec:
     # registry-default fill) — only those code paths may mark a populated
     # model as non-explicit.
     model_explicit: Optional[bool] = field(default=None, compare=False)
+    # Non-explicit routing source used only for cache identity. A configured
+    # role pin and the registry baseline remain distinct intents even when both
+    # currently name the same model.
+    routing_intent: Optional[str] = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.model_explicit is None:
@@ -4820,7 +5347,7 @@ class BackendSpec:
           - empty / whitespace-only → ``Empty backend spec``
           - more than 3 colon-separated parts → explicit ValueError
           - unknown backend → lists valid backends
-          - model on backend that doesn't accept one (rp/none) → ValueError
+          - model on backend that doesn't accept one (rp/none/host) → ValueError
           - unknown model → lists valid models for that backend
           - effort on backend that doesn't accept one → ValueError
           - unknown effort → lists valid efforts for that backend
@@ -4859,6 +5386,15 @@ class BackendSpec:
 
         if model is not None:
             if reg["models"] is None:
+                # fn-123 R5: host pins live in AGENTS.md model-routing, never in
+                # the backend string — reject host:<model> with a pointed hint.
+                if backend == "host":
+                    raise ValueError(
+                        f"Backend 'host' does not accept a model "
+                        f"(got {model!r}). Pins live in the AGENTS.md "
+                        f"model-routing section (caller routing instructions), "
+                        f"not the backend string. Use bare `host`."
+                    )
                 raise ValueError(
                     f"Backend {backend!r} does not accept a model "
                     f"(got {model!r})"
@@ -4878,6 +5414,13 @@ class BackendSpec:
                 )
         if effort is not None:
             if reg["efforts"] is None:
+                if backend == "host":
+                    raise ValueError(
+                        f"Backend 'host' does not accept an effort "
+                        f"(got {effort!r}). Pins live in the AGENTS.md "
+                        f"model-routing section (caller routing instructions), "
+                        f"not the backend string. Use bare `host`."
+                    )
                 raise ValueError(
                     f"Backend {backend!r} does not accept an effort "
                     f"(got {effort!r})"
@@ -4907,10 +5450,10 @@ class BackendSpec:
         is too new for the installed CLI still steps down the ranking; the role
         map's job is healing pin-too-old, not hard-locking the dispatch.
 
-        Backends with ``models is None`` (rp, none) always resolve ``model`` to
-        ``None`` - env vars and the role map are ignored for fields the backend
-        doesn't accept. Same for ``effort``. This prevents a stray
-        ``FLOW_RP_MODEL`` from leaking into an RP spec.
+        Backends with ``models is None`` (rp, none, host) always resolve
+        ``model`` to ``None`` - env vars and the role map are ignored for
+        fields the backend doesn't accept. Same for ``effort``. This prevents
+        a stray ``FLOW_RP_MODEL`` from leaking into an RP spec.
         """
         reg = BACKEND_REGISTRY[self.backend]
         env_model_key = f"FLOW_{self.backend.upper()}_MODEL"
@@ -4933,21 +5476,28 @@ class BackendSpec:
         if reg["models"] is None:
             model = None
             model_explicit = False
+            routing_intent = None
         elif self.model is not None:
             model = self.model
             # PROPAGATE the incoming flag — never re-infer from presence: a
             # default-filled spec that gets re-resolved must stay non-explicit;
             # a parse()d or env-pinned model already carries True.
             model_explicit = self.model_explicit
+            routing_intent = self.routing_intent
+            if not model_explicit and routing_intent is None:
+                routing_intent = f"resolved:{model}"
         elif os.environ.get(env_model_key):
             model = os.environ.get(env_model_key)
             model_explicit = True
+            routing_intent = None
         elif role_model is not None:
             model = role_model
             model_explicit = False
+            routing_intent = f"role-map:review:{pin}"
         else:
             model = reg.get("default_model")
             model_explicit = False
+            routing_intent = f"registry:{model or 'none'}"
 
         if reg["efforts"] is None:
             effort = None
@@ -4960,7 +5510,11 @@ class BackendSpec:
             )
 
         return BackendSpec(
-            self.backend, model, effort, model_explicit=model_explicit
+            self.backend,
+            model,
+            effort,
+            model_explicit=model_explicit,
+            routing_intent=routing_intent,
         )
 
     def __str__(self) -> str:
@@ -5046,6 +5600,16 @@ def parse_backend_spec_lenient(
     except ValueError as e:
         # Try bare-backend fallback: first ':'-separated part.
         first = str(raw).strip().split(":", 1)[0].strip()
+        # fn-123 R5: never degrade an invalid host spec to bare ``host`` —
+        # that would silently ignore the model the user thought they pinned.
+        # Treat it as unset so resolution falls through, and always say why.
+        if first == "host":
+            print(
+                f"error: spec {str(raw)!r} is invalid: {e} Ignoring this "
+                f"value (treated as unset).",
+                file=sys.stderr,
+            )
+            return None
         if first in BACKEND_REGISTRY:
             if warn:
                 print(
@@ -5235,7 +5799,7 @@ def get_copilot_version() -> Optional[str]:
         version = match.group(1) if match else output
         _CLI_VERSION_CACHE[copilot] = version
         return version
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         return None
 
 
@@ -5459,7 +6023,7 @@ def get_cursor_version() -> Optional[str]:
         version = match.group(1) if match else output
         _CLI_VERSION_CACHE[cursor] = version
         return version
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         return None
 
 
@@ -6452,7 +7016,7 @@ def build_review_prompt(
 def get_max_review_iterations() -> int:
     """Resolve the cumulative review-round cap (``MAX_REVIEW_ITERATIONS``, default 4).
 
-    A non-positive or non-integer env value falls back to the default 3 — the
+    A non-positive or non-integer env value falls back to the default 4 — the
     cap can never be disabled or made zero (that would reopen the runaway).
     """
     raw = os.environ.get("MAX_REVIEW_ITERATIONS")
@@ -6470,6 +7034,23 @@ def get_max_review_iterations() -> int:
 # from transport/backend failure codes (2 = exec failure, 3 = sandbox) so hosts
 # and Ralph can't misread the refusal as a retryable error.
 REVIEW_CAP_EXIT_CODE = 4
+# Repeated no-verdict transport failures are not review non-convergence. Keep
+# their stop signal separate so callers never surface a false ESCALATE.
+REVIEW_TRANSPORT_EXIT_CODE = 5
+DEFAULT_MAX_REVIEW_TRANSPORT_FAILURES = 2
+
+
+def get_max_review_transport_failures() -> int:
+    """Resolve the consecutive no-verdict failure budget (default 2)."""
+    raw = os.environ.get("MAX_REVIEW_TRANSPORT_FAILURES")
+    if raw:
+        try:
+            value = int(raw)
+            if value >= 1:
+                return value
+        except ValueError:
+            pass
+    return DEFAULT_MAX_REVIEW_TRANSPORT_FAILURES
 
 
 def _read_review_rounds(spec_data: dict, review_kind: str, task_id: Optional[str]) -> int:
@@ -6495,6 +7076,174 @@ def _write_review_rounds(
             spec_data["impl_review_rounds"] = rounds
         if task_id:
             rounds[task_id] = value
+
+
+def _review_attempt_scope(
+    review_kind: str, task_id: Optional[str], review_type: Optional[str] = None
+) -> str:
+    """Stable key for consecutive transport failures and attempt filtering."""
+    kind = review_type or review_kind
+    return f"{kind}:{task_id}" if task_id else kind
+
+
+def _review_counter_scope(review_kind: str, task_id: Optional[str]) -> str:
+    """Stable key for a pre-dispatch reservation on the shared counter."""
+    return f"impl:{task_id}" if review_kind == "impl" and task_id else "plan"
+
+
+def _review_attempt_summary(
+    spec_data: dict,
+    review_kind: str,
+    task_id: Optional[str],
+    *,
+    review_type: Optional[str] = None,
+) -> dict:
+    """Return durable real/refunded counts for one review scope."""
+    scope = _review_attempt_scope(review_kind, task_id, review_type)
+    attempts = spec_data.get("review_attempts")
+    if not isinstance(attempts, list):
+        attempts = []
+    if review_type is not None:
+        scoped = [
+            row
+            for row in attempts
+            if isinstance(row, dict) and row.get("scope") == scope
+        ]
+    else:
+        # Cap messages aggregate every workflow that shares the same counter:
+        # plan + completion for the spec counter, one impl task for task scope.
+        scoped = [
+            row
+            for row in attempts
+            if (
+                isinstance(row, dict)
+                and row.get("counter_kind") == review_kind
+                and row.get("task") == task_id
+            )
+        ]
+    return {
+        "scope": scope,
+        "verdict_attempts": sum(
+            1 for row in scoped if row.get("outcome") == "verdict"
+        ),
+        "refunded_attempts": sum(
+            1 for row in scoped if row.get("outcome") == "transport_failure"
+        ),
+        "attempts": scoped,
+    }
+
+
+def record_review_attempt(
+    spec_id: str,
+    review_kind: str,
+    *,
+    backend: str,
+    output: str,
+    verdict: Optional[str] = None,
+    failure_class: Optional[str] = None,
+    task_id: Optional[str] = None,
+    review_type: Optional[str] = None,
+    use_json: bool = False,
+) -> dict:
+    """Finalize one pre-dispatch reservation and persist its outcome.
+
+    Verdict-bearing attempts keep the reserved round and reset the consecutive
+    transport-failure count. A no-verdict attempt refunds exactly one reserved
+    round, increments the separate transport-failure count, and remains
+    auditable in ``review_attempts`` on the spec sidecar.
+    """
+    flow_dir = get_flow_dir()
+    spec_json_path = find_spec_json_path(flow_dir, spec_id)
+    if not spec_json_path.exists():
+        return {
+            "recorded": False,
+            "outcome": "verdict" if verdict else "transport_failure",
+        }
+
+    spec_data = normalize_epic(
+        load_json_or_exit(spec_json_path, f"Spec {spec_id}", use_json=use_json)
+    )
+    scope = _review_attempt_scope(review_kind, task_id, review_type)
+    counter_scope = _review_counter_scope(review_kind, task_id)
+    pending = spec_data.get("review_pending_rounds")
+    if not isinstance(pending, dict):
+        pending = {}
+        spec_data["review_pending_rounds"] = pending
+    pending_count = int(pending.get(counter_scope, 0) or 0)
+    if pending_count < 1:
+        error_exit(
+            f"No reserved {review_kind}-review round exists for "
+            f"{task_id or spec_id}; refusing to finalize or refund.",
+            use_json=use_json,
+            code=2,
+        )
+    if pending_count == 1:
+        pending.pop(counter_scope, None)
+    else:
+        pending[counter_scope] = pending_count - 1
+
+    failures = spec_data.get("review_transport_failures")
+    if not isinstance(failures, dict):
+        failures = {}
+        spec_data["review_transport_failures"] = failures
+
+    outcome = "verdict" if verdict else "transport_failure"
+    refunded = outcome == "transport_failure"
+    if refunded:
+        current = _read_review_rounds(spec_data, review_kind, task_id)
+        _write_review_rounds(
+            spec_data, review_kind, task_id, max(0, current - 1)
+        )
+        consecutive = int(failures.get(scope, 0) or 0) + 1
+        failures[scope] = consecutive
+    else:
+        consecutive = 0
+        failures[scope] = 0
+
+    row = {
+        "timestamp": now_iso(),
+        "scope": scope,
+        "backend": backend,
+        "kind": review_type or review_kind,
+        "counter_kind": review_kind,
+        "task": task_id,
+        "outcome": outcome,
+        "verdict": verdict,
+        "failure_class": failure_class if refunded else None,
+        "output_sha256": hashlib.sha256(
+            (output or "").encode("utf-8", errors="replace")
+        ).hexdigest(),
+        "round_consumed": not refunded,
+    }
+    attempts = spec_data.get("review_attempts")
+    if not isinstance(attempts, list):
+        attempts = []
+        spec_data["review_attempts"] = attempts
+    attempts.append(row)
+    spec_data["updated_at"] = now_iso()
+    atomic_write_json(spec_json_path, spec_data)
+
+    summary = _review_attempt_summary(
+        spec_data, review_kind, task_id, review_type=review_type
+    )
+    summary.update(
+        {
+            "recorded": True,
+            "outcome": outcome,
+            "verdict": verdict,
+            "failure_class": failure_class if refunded else None,
+            "consecutive_transport_failures": consecutive,
+            "transport_failure_cap": get_max_review_transport_failures(),
+            "transport_unhealthy": (
+                refunded
+                and consecutive > get_max_review_transport_failures()
+            ),
+            "review_rounds": _read_review_rounds(
+                spec_data, review_kind, task_id
+            ),
+        }
+    )
+    return summary
 
 
 def enforce_and_increment_review_cap(
@@ -6537,9 +7286,14 @@ def enforce_and_increment_review_cap(
     current = _read_review_rounds(spec_data, review_kind, task_id)
     scope = task_id if (review_kind == "impl" and task_id) else spec_id
     if current >= cap:
+        attempts = _review_attempt_summary(
+            spec_data, review_kind, task_id
+        )
         marker = (
             f"ESCALATE: {review_kind}-review round cap reached "
-            f"({current}/{cap}) for {scope}. The reviewer and implementer have "
+            f"({current}/{cap} verdict rounds; "
+            f"{attempts['refunded_attempts']} refunded transport attempts) "
+            f"for {scope}. The reviewer and implementer have "
             f"not converged within MAX_REVIEW_ITERATIONS={cap}. This is NOT a "
             f"retryable error — escalate to a human (or, under an autonomous "
             f"loop, surface NEEDS_HUMAN). The counter resets only on a SHIP "
@@ -6556,6 +7310,8 @@ def enforce_and_increment_review_cap(
                     "task": task_id,
                     "rounds": current,
                     "cap": cap,
+                    "verdict_attempts": attempts["verdict_attempts"],
+                    "refunded_attempts": attempts["refunded_attempts"],
                 },
                 success=False,
             )
@@ -6564,6 +7320,12 @@ def enforce_and_increment_review_cap(
         sys.exit(REVIEW_CAP_EXIT_CODE)
     new_val = current + 1
     _write_review_rounds(spec_data, review_kind, task_id, new_val)
+    pending = spec_data.get("review_pending_rounds")
+    if not isinstance(pending, dict):
+        pending = {}
+        spec_data["review_pending_rounds"] = pending
+    counter_scope = _review_counter_scope(review_kind, task_id)
+    pending[counter_scope] = int(pending.get(counter_scope, 0) or 0) + 1
     spec_data["updated_at"] = now_iso()
     atomic_write_json(spec_json_path, spec_data)
     return new_val
@@ -6576,6 +7338,13 @@ def reset_review_cap(
 
     Best-effort: a missing spec / unreadable state is silently ignored so a
     reset never breaks the review-write path.
+
+    fn-134.7 / R22: does NOT clear ``review_pending_rounds``. Pending is the
+    attempt-lifecycle reservation owned solely by reserve (enforce/increment)
+    and finalize/refund (``record_review_attempt``). Clearing it here raced
+    finalize: a SHIP path that reset before (or while) finalize ran left
+    ``pending_count == 0`` and made a successful convergence exit non-zero.
+    Re-plan abandon still clears pending via ``cmd_spec_reset_review_rounds``.
     """
     try:
         flow_dir = get_flow_dir()
@@ -6586,6 +7355,7 @@ def reset_review_cap(
             load_json_or_exit(spec_json_path, f"Spec {spec_id}", use_json=True)
         )
         _write_review_rounds(spec_data, review_kind, task_id, 0)
+        # Intentionally leave review_pending_rounds alone — see docstring.
         spec_data["updated_at"] = now_iso()
         atomic_write_json(spec_json_path, spec_data)
     except SystemExit:
@@ -6853,7 +7623,7 @@ def get_actor() -> str:
         )
         if email := result.stdout.strip():
             return email
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         pass
 
     # 3. git config user.name
@@ -6863,7 +7633,7 @@ def get_actor() -> str:
         )
         if name := result.stdout.strip():
             return name
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         pass
 
     # 4. $USER env var
@@ -6874,8 +7644,168 @@ def get_actor() -> str:
     return "unknown"
 
 
+# Hang-prevention ceiling for allocation git probes. Success path is <<150ms;
+# this only bounds a stuck git process so spec create never hangs.
+_SPEC_ID_ALLOC_GIT_TIMEOUT = 10
+
+# Filename pattern for native fn-N specs (json + md; legacy short suffix + slug).
+_FN_NATIVE_SPEC_NAME_RE = re.compile(
+    r"^fn-(\d+)(?:-[a-z0-9][a-z0-9-]*[a-z0-9]|-[a-z0-9]{1,3})?\.(json|md)$"
+)
+
+
+def _scan_max_fn_names_in_dir(directory: Path) -> int:
+    """In-process max native fn-N from one directory via os.scandir. Fail-open."""
+    max_n = 0
+    try:
+        if not directory.is_dir():
+            return 0
+        with os.scandir(directory) as it:
+            for entry in it:
+                name = entry.name
+                if not name.startswith("fn-"):
+                    continue
+                match = _FN_NATIVE_SPEC_NAME_RE.match(name)
+                if match:
+                    n = int(match.group(1))
+                    if n > max_n:
+                        max_n = n
+    except OSError:
+        return max_n
+    return max_n
+
+
+def _scan_max_fn_in_flow_dir(flow_dir: Path) -> int:
+    """In-process max native fn-N across epics/ + specs/ of one .flow/ tree."""
+    max_n = 0
+    for sub in (EPICS_DIR, SPECS_DIR):
+        n = _scan_max_fn_names_in_dir(flow_dir / sub)
+        if n > max_n:
+            max_n = n
+    return max_n
+
+
+def _spec_alloc_git(
+    root: Path,
+    args: list,
+    timeout: float = _SPEC_ID_ALLOC_GIT_TIMEOUT,
+) -> "tuple[int, str, str]":
+    """Run `git -C <root> -c color.ui=never <args>`. Fail-open: never raises.
+
+    Matches the `_prime_git` subprocess convention: git -C, capture_output,
+    text, check=False, explicit timeout, catch TimeoutExpired / OSError /
+    SubprocessError. `-c color.ui=never` neutralizes forced-color configs
+    that have broken regex post-filters in this repo before (portable
+    substitute for global `--no-color`, which older gits reject).
+    """
+    try:
+        # Neutralize color via -c (portable): global --no-color is not accepted
+        # by all git builds, and forced color.ui=always has broken regex filters.
+        result = subprocess.run(
+            ["git", "-C", str(root), "-c", "color.ui=never", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=timeout,
+        )
+        return (result.returncode, result.stdout or "", result.stderr or "")
+    except subprocess.TimeoutExpired:
+        return (1, "", "timeout")
+    except (OSError, subprocess.SubprocessError) as exc:
+        return (1, "", str(exc))
+
+
+def _scan_max_fn_from_worktrees(repo_root: Path, current_flow_dir: Path) -> int:
+    """Max native fn-N across every registered worktree's .flow/ (in-process).
+
+    Parses `git worktree list --porcelain` once, then os.scandir each path's
+    .flow/specs and .flow/epics. Never spawns a subprocess per worktree.
+    Fail-open on missing paths, unreadable dirs, or absent .flow/.
+    """
+    rc, out, _err = _spec_alloc_git(
+        repo_root, ["worktree", "list", "--porcelain"]
+    )
+    if rc != 0 or not out:
+        return 0
+    max_n = 0
+    current_resolved = None
+    try:
+        current_resolved = current_flow_dir.resolve()
+    except OSError:
+        pass
+    for line in out.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        wt_path = line[len("worktree ") :].strip()
+        if not wt_path:
+            continue
+        try:
+            flow = Path(wt_path) / FLOW_DIR
+            if current_resolved is not None:
+                try:
+                    if flow.resolve() == current_resolved:
+                        continue  # source 1 already covered this tree
+                except OSError:
+                    pass
+            if not flow.is_dir():
+                continue
+            n = _scan_max_fn_in_flow_dir(flow)
+            if n > max_n:
+                max_n = n
+        except OSError:
+            continue
+    return max_n
+
+
+def _scan_max_fn_from_refs(repo_root: Path) -> int:
+    """Max native fn-N ever *added* under .flow/specs or .flow/epics on any ref.
+
+    Single `git log --all --full-history --diff-filter=A` process.
+    Added-then-deleted numbers still appear, so allocation is monotonic over
+    retired ids.
+
+    `--full-history` is load-bearing, not decoration. With a pathspec, git's
+    default history simplification can prune a merged side branch that added
+    and then deleted a spec - measured on this repo, the flag is the difference
+    between 285 and 287 observed adds. Without it the allocator can REUSE a
+    retired number, which is exactly the monotonicity guarantee this function
+    exists to provide. It costs nothing measurable (both forms run well inside
+    the R3 budget).
+    """
+    pathspecs = [f"{FLOW_DIR}/{SPECS_DIR}", f"{FLOW_DIR}/{EPICS_DIR}"]
+    rc, out, _err = _spec_alloc_git(
+        repo_root,
+        [
+            "log",
+            "--all",
+            "--full-history",
+            "--diff-filter=A",
+            "--format=",
+            "--name-only",
+            "--",
+            *pathspecs,
+        ],
+    )
+    if rc != 0 or not out:
+        return 0
+    max_n = 0
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        base = line.rsplit("/", 1)[-1]
+        match = _FN_NATIVE_SPEC_NAME_RE.match(base)
+        if match:
+            n = int(match.group(1))
+            if n > max_n:
+                max_n = n
+    return max_n
+
+
 def scan_max_native_fn_spec_id(flow_dir: Path) -> int:
-    """Scan .flow/epics/ and .flow/specs/ to find max NATIVE `fn-N` spec number.
+    """Union max of native `fn-N` across working tree, worktrees, and refs.
 
     NATIVE-`fn`-ONLY (fn-52.10): this feeds `fn-N` allocation in
     `cmd_spec_create`, so tracker-key specs (`wor-9999-foo`) must NOT count —
@@ -6883,36 +7813,46 @@ def scan_max_native_fn_spec_id(flow_dir: Path) -> int:
     higher `fn-N`. Tracker-key specs are still visible to enumeration
     (`iter_spec_json_files`); they just don't drive the native allocator.
 
+    Three sources, take the maximum (fn-134):
+      1. Current working tree `.flow/epics/` + `.flow/specs/` (always).
+      2. Every registered git worktree's `.flow/` (in-process scandir).
+      3. Every ref via one `git log --all --full-history --diff-filter=A` over
+         the specs dirs (`--full-history` keeps pruned side branches visible).
+
     Handles legacy (fn-N.json), short suffix (fn-N-xxx.json), and slug
-    (fn-N-slug.json) formats. Scans both epics/*.json (legacy) and specs/*.json
-    (canonical post-1.0) plus specs/*.md as a safety net for orphaned specs
-    created without flowctl. Returns 0 if none exist.
+    (fn-N-slug.json) formats. Returns 0 if none exist.
+
+    Fail-open on every git problem (absent git, not a repo, stale worktree
+    path, missing/unreadable `.flow/`, non-zero git exit): degrade to whatever
+    sources worked, worst case source 1 alone. Never blocks spec creation.
+    Monotonic: a number that was allocated and later deleted is never reused
+    because source 3 still sees the historical add.
     """
-    max_n = 0
-    pattern = r"^fn-(\d+)(?:-[a-z0-9][a-z0-9-]*[a-z0-9]|-[a-z0-9]{1,3})?\.(json|md)$"
+    # Source 1 — current working tree (always available, never blocked).
+    max_n = _scan_max_fn_in_flow_dir(flow_dir)
 
-    # Scan epics/*.json (legacy 0.x location)
-    epics_dir = flow_dir / EPICS_DIR
-    if epics_dir.exists():
-        for spec_file in epics_dir.glob("fn-*.json"):
-            match = re.match(pattern, spec_file.name)
-            if match:
-                n = int(match.group(1))
-                max_n = max(max_n, n)
+    # Git sources need a repo root. flow_dir is conventionally `<repo>/.flow`.
+    try:
+        repo_root = flow_dir.parent
+    except (AttributeError, TypeError, OSError):
+        return max_n
 
-    # Scan specs/ (canonical post-1.0 location: both .json and .md)
-    specs_dir = flow_dir / SPECS_DIR
-    if specs_dir.exists():
-        for spec_file in specs_dir.glob("fn-*.json"):
-            match = re.match(pattern, spec_file.name)
-            if match:
-                n = int(match.group(1))
-                max_n = max(max_n, n)
-        for spec_file in specs_dir.glob("fn-*.md"):
-            match = re.match(pattern, spec_file.name)
-            if match:
-                n = int(match.group(1))
-                max_n = max(max_n, n)
+    # Source 2 — sibling/registered worktrees (created-but-uncommitted window).
+    try:
+        wt_max = _scan_max_fn_from_worktrees(repo_root, flow_dir)
+        if wt_max > max_n:
+            max_n = wt_max
+    except Exception:
+        # Helpers are already fail-open; this is belt-and-suspenders.
+        pass
+
+    # Source 3 — all refs (committed-on-another-branch + retired numbers).
+    try:
+        ref_max = _scan_max_fn_from_refs(repo_root)
+        if ref_max > max_n:
+            max_n = ref_max
+    except Exception:
+        pass
 
     return max_n
 
@@ -7223,6 +8163,152 @@ def iter_spec_json_files(flow_dir: Path):
         yield seen[stem]
 
 
+def iter_task_json_files(flow_dir: Path, spec_id: Optional[str] = None):
+    """Yield every eligible task definition in stable cross-scheme order.
+
+    Task definitions have one canonical directory, but that directory also
+    contains JSON receipts and review artifacts. Filename grammar is the
+    cheap authoritative first gate; ``TaskInventory`` applies the second
+    gate (a real task payload with an ``id``) after the single file read.
+    """
+    tasks_dir = flow_dir / TASKS_DIR
+    if not tasks_dir.exists():
+        return
+    pattern = f"{spec_id}.*.json" if spec_id else "*.json"
+    eligible = (
+        task_file
+        for task_file in tasks_dir.glob(pattern)
+        if is_task_id(task_file.stem)
+        and (spec_id is None or spec_id_from_task(task_file.stem) == spec_id)
+    )
+    yield from sorted(eligible, key=lambda path: id_sort_key(path.stem))
+
+
+@dataclass
+class TaskInventory:
+    """One command-scoped scan of all tasks, or one requested spec's tasks."""
+
+    ordered: list[dict]
+    by_id: dict[str, dict]
+    by_spec: dict[str, list[dict]]
+    issues_by_spec: dict[str, list[str]] = field(default_factory=dict)
+
+    @classmethod
+    def load(
+        cls,
+        flow_dir: Path,
+        *,
+        use_json: bool = True,
+        tolerate_errors: bool = False,
+        merge_runtime: bool = True,
+        spec_id: Optional[str] = None,
+        spec_ids: Optional[set[str]] = None,
+        collect_consistency_errors: bool = False,
+        collect_load_errors: bool = False,
+    ) -> "TaskInventory":
+        task_files = list(iter_task_json_files(flow_dir, spec_id=spec_id))
+        if spec_ids is not None:
+            task_files = [
+                task_file
+                for task_file in task_files
+                if spec_id_from_task(task_file.stem) in spec_ids
+            ]
+        if not task_files:
+            return cls(ordered=[], by_id={}, by_spec={})
+        runtime_by_id = (
+            get_state_store().load_all_runtime(
+                {task_file.stem for task_file in task_files}
+            )
+            if merge_runtime
+            else {}
+        )
+        ordered = []
+        by_id = {}
+        by_spec: dict[str, list[dict]] = {}
+        issues_by_spec: dict[str, list[str]] = {}
+
+        def reject(file_spec: str, message: str) -> None:
+            if collect_consistency_errors:
+                issues_by_spec.setdefault(file_spec, []).append(message)
+            elif not tolerate_errors:
+                error_exit(message, use_json=use_json)
+
+        for task_file in task_files:
+            file_id = task_file.stem
+            file_spec = spec_id_from_task(file_id)
+            try:
+                if tolerate_errors or collect_load_errors:
+                    definition = load_json(task_file)
+                else:
+                    definition = load_json_or_exit(
+                        task_file,
+                        f"Task {task_file.stem}",
+                        use_json=use_json,
+                    )
+                task = (
+                    merge_task_runtime(
+                        definition, runtime_by_id.get(task_file.stem)
+                    )
+                    if merge_runtime
+                    else normalize_task(definition)
+                )
+            except Exception as error:
+                if collect_load_errors:
+                    kind = (
+                        "invalid JSON"
+                        if isinstance(error, json.JSONDecodeError)
+                        else "unreadable"
+                    )
+                    issues_by_spec.setdefault(file_spec, []).append(
+                        f"Task {file_id} {kind}: {task_file} ({error})"
+                    )
+                    continue
+                if tolerate_errors:
+                    continue
+                raise
+
+            # GH-21: a task-shaped artifact filename without an id is not a
+            # task payload. A present-but-invalid id is corrupt task data.
+            if "id" not in task:
+                continue
+            task_id = task.get("id")
+            if not isinstance(task_id, str) or not is_task_id(task_id):
+                reject(
+                    file_spec,
+                    f"Task definition {file_id}: invalid payload id {task_id!r}",
+                )
+                continue
+            if task_id != file_id:
+                reject(
+                    file_spec,
+                    f"Task definition {file_id}: payload id is {task_id}",
+                )
+                continue
+            owner = task.get("spec") or task.get("epic")
+            if owner != file_spec:
+                reject(
+                    file_spec,
+                    f"Task definition {file_id}: owning spec is {owner!r}, expected {file_spec}",
+                )
+                continue
+            if task_id in by_id:
+                reject(file_spec, f"Duplicate task definition id: {task_id}")
+                continue
+            ordered.append(task)
+            by_id[task_id] = task
+            by_spec.setdefault(file_spec, []).append(task)
+
+        ordered.sort(key=lambda task: id_sort_key(task["id"]))
+        for tasks in by_spec.values():
+            tasks.sort(key=lambda task: id_sort_key(task["id"]))
+        return cls(
+            ordered=ordered,
+            by_id=by_id,
+            by_spec=by_spec,
+            issues_by_spec=issues_by_spec,
+        )
+
+
 def scan_max_task_id(flow_dir: Path, epic_id: str) -> int:
     """Scan .flow/tasks/ to find max task number for an epic. Returns 0 if none exist."""
     tasks_dir = flow_dir / TASKS_DIR
@@ -7236,15 +8322,6 @@ def scan_max_task_id(flow_dir: Path, epic_id: str) -> int:
             m = int(match.group(1))
             max_m = max(max_m, m)
     return max_m
-
-
-def require_keys(obj: dict, keys: list[str], what: str, use_json: bool = True) -> None:
-    """Validate dict has required keys. Exits on missing keys."""
-    missing = [k for k in keys if k not in obj]
-    if missing:
-        error_exit(
-            f"{what} missing required keys: {', '.join(missing)}", use_json=use_json
-        )
 
 
 # --- Spec File Operations ---
@@ -7586,41 +8663,42 @@ def clear_task_evidence(task_id: str) -> None:
 def find_dependents(task_id: str, same_epic: bool = False) -> list[str]:
     """Find tasks that depend on task_id (recursive). Returns list of dependent task IDs."""
     flow_dir = get_flow_dir()
-    tasks_dir = flow_dir / TASKS_DIR
-    if not tasks_dir.exists():
+    if not (flow_dir / TASKS_DIR).exists():
         return []
 
     spec_id = spec_id_from_task(task_id) if same_epic else None
-    dependents: set[str] = set()  # Use set to avoid duplicates
-    to_check = [task_id]
-    checked = set()
-
-    while to_check:
-        checking = to_check.pop(0)
-        if checking in checked:
+    inventory = TaskInventory.load(
+        flow_dir,
+        tolerate_errors=True,
+        merge_runtime=False,
+    )
+    reverse: dict[str, list[str]] = {}
+    for task in inventory.ordered:
+        tid = task["id"]
+        if same_epic and spec_id_from_task(tid) != spec_id:
             continue
-        checked.add(checking)
+        dependencies = task.get("depends_on", [])
+        if not isinstance(dependencies, list):
+            continue
+        for dependency in dependencies:
+            if not isinstance(dependency, str) or not is_task_id(dependency):
+                continue
+            reverse.setdefault(dependency, []).append(tid)
 
-        for task_file in tasks_dir.glob("fn-*.json"):
-            if not is_task_id(task_file.stem):
-                continue  # Skip non-task files (e.g., fn-1.2-review.json)
-            try:
-                task_data = load_json(task_file)
-                tid = task_data.get("id", task_file.stem)
-                if tid in checked or tid in dependents:
-                    continue
-                # Skip if same_epic filter and different spec
-                if same_epic and spec_id_from_task(tid) != spec_id:
-                    continue
-                # Support both legacy "deps" and current "depends_on"
-                deps = task_data.get("depends_on", task_data.get("deps", []))
-                if checking in deps:
-                    dependents.add(tid)
-                    to_check.append(tid)
-            except Exception:
-                pass
+    # Build the reverse graph once, then traverse each edge at most once.
+    found: set[str] = set()
+    seen = {task_id}
+    to_check = deque(reverse.get(task_id, []))
+    while to_check:
+        dependent = to_check.popleft()
+        if dependent in seen:
+            continue
+        seen.add(dependent)
+        found.add(dependent)
+        to_check.extend(reverse.get(dependent, []))
 
-    return sorted(dependents)
+    # Preserve the historic public ordering contract (plain ID sort).
+    return sorted(found)
 
 
 # --- Ralph status soft-probe (fn-114 PLAN DECISION 2026-07-21) ---
@@ -7734,10 +8812,16 @@ FLOW_GITIGNORE_AUTO_PATTERNS = [
     # proof-of-work; accumulate per pilot tick, same runtime-artifact class as
     # sync-runs/ — deliberately NOT a receipts/ path the ralph-guard validates)
     "pilot-runs/",
-    # fn-76 per-CLI-version model-resolution cache (.flow/.cache/): a memoized
+    # fn-76 model-resolution cache (.flow/.cache/): a memoized
     # ladder result, a runtime artifact keyed on the local CLI version — never
     # durable repo state.
     ".cache/",
+    # fn-134 tracker-sync create-first pre-spec recovery files. MUST stay local:
+    # the retry key is a hash of tracker type + title + body, so a committed
+    # recovery file would let a teammate computing the same key resume by
+    # linking to SOMEONE ELSE'S issue instead of creating their own. Runtime
+    # artifact, same class as sync-runs/.
+    "create-first/",
 ]
 
 
@@ -7748,6 +8832,11 @@ def _ensure_flow_gitignore(flow_dir: Path) -> bool:
     Preserves any user-added patterns below the auto-managed footer.
     """
     gi_path = flow_dir / ".gitignore"
+    if not _flow_leaf_is_safe(flow_dir, gi_path):
+        # Untrusted checkout shipped .flow/.gitignore as a symlink (out of tree,
+        # or in-tree at another managed file such as config.json).
+        # Never write through it; the caller's own work is unaffected.
+        return False
     auto_block = "\n".join(
         [FLOW_GITIGNORE_AUTO_HEADER, *FLOW_GITIGNORE_AUTO_PATTERNS, FLOW_GITIGNORE_AUTO_FOOTER]
     )
@@ -7786,54 +8875,66 @@ def _ensure_flow_gitignore(flow_dir: Path) -> bool:
 # endings; LAUNCHER_CMD is stored LF here but written to disk as CRLF (a
 # Windows batch file) by _stamp_flow_bin_launchers.
 LAUNCHER_SH = r'''#!/bin/bash
-# flowctl wrapper — invokes flowctl.py from the same directory via a probed
-# Python interpreter.
+# flowctl wrapper — invokes the source-first bootstrap beside flowctl.py via a
+# probed Python 3.11+ interpreter.
 #
 # SELF-CONTAINED: this launcher does NOT source scripts/lib/pick-python.sh —
 # installed copies (.flow/bin/flowctl, scripts/ralph/flowctl) can't assume that
 # path is reachable. Keep this inline probe in sync with the shared resolver at
 # plugins/flow-next/scripts/lib/pick-python.sh.
 #
-# Probe = functionality, not presence: each candidate must actually run
-# `<cand> -c "import sys"` and exit 0, so the Windows Store `python3` App
-# Execution Alias stub (prints "Python was not found", exits 9009) is skipped
-# even though it is present on PATH. Candidate order:
+# Probe = functionality + minimum version: each candidate must actually run and
+# report Python 3.11+, so the Windows Store `python3` App Execution Alias stub
+# and working-but-too-old interpreters are skipped. Candidate order:
 #   $PYTHON_BIN (scalar override) -> py -3 -> python3 -> python
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FLOWCTL_SOURCE_DIR="$SCRIPT_DIR"
 
 FLOW_PY=()
+FLOW_PY_TOO_OLD=()
 for _cand in "${PYTHON_BIN:-}" "py -3" "python3" "python"; do
   [ -n "$_cand" ] || continue
   # Intentional word-split so the two-word `py -3` becomes two argv elements.
   read -r -a _argv <<< "$_cand"
   [ "${#_argv[@]}" -gt 0 ] || continue
-  if "${_argv[@]}" -c "import sys" >/dev/null 2>&1; then
+  if "${_argv[@]}" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 3)" >/dev/null 2>&1; then
     FLOW_PY=("${_argv[@]}")
     break
+  elif [ "$?" -eq 3 ]; then
+    FLOW_PY_TOO_OLD+=("$_cand")
   fi
 done
 
 if [ "${#FLOW_PY[@]}" -eq 0 ]; then
-  echo "flowctl: no working Python interpreter found (tried \$PYTHON_BIN, py -3, python3, python)." >&2
-  echo "  On Windows, 'python3' may be the disabled Microsoft Store alias stub;" >&2
-  echo "  install python.org Python (or the py launcher), or set PYTHON_BIN to a working interpreter." >&2
+  if [ "${#FLOW_PY_TOO_OLD[@]}" -gt 0 ]; then
+    echo "flowctl: Python 3.11 or newer is required; working but too-old candidate(s): ${FLOW_PY_TOO_OLD[*]}." >&2
+    echo "  Install a supported Python, or set PYTHON_BIN to its command name." >&2
+  else
+    echo "flowctl: no working Python interpreter found (tried \$PYTHON_BIN, py -3, python3, python)." >&2
+    echo "  On Windows, 'python3' may be the disabled Microsoft Store alias stub;" >&2
+    echo "  install python.org Python (or the py launcher), or set PYTHON_BIN to a working interpreter." >&2
+  fi
   exit 1
 fi
 
-exec "${FLOW_PY[@]}" "$SCRIPT_DIR/flowctl.py" "$@"
+FLOWCTL_ENTRY="$FLOWCTL_SOURCE_DIR/flowctl.py"
+if [ "$#" -eq 1 ] && { [ "$1" = "usage" ] || [ "$1" = "--help" ]; } \
+  && [ -f "$FLOWCTL_SOURCE_DIR/flowctl_bootstrap.py" ]; then
+  FLOWCTL_ENTRY="$FLOWCTL_SOURCE_DIR/flowctl_bootstrap.py"
+fi
+exec "${FLOW_PY[@]}" "$FLOWCTL_ENTRY" "$@"
 '''
 
 LAUNCHER_CMD = '''@ECHO OFF
 REM flowctl.cmd -- Windows batch launcher for cmd.exe / PowerShell (Claude
-REM Desktop, native Codex, native Cursor). Invokes flowctl.py from this
-REM directory via a probed Python interpreter. Companion to the extensionless
+REM Desktop, native Codex, native Cursor). Invokes the source-first bootstrap
+REM beside flowctl.py via a probed Python 3.11+ interpreter. Companion to the extensionless
 REM bash `flowctl` launcher (Git Bash / WSL / macOS / Linux); PATHEXT resolves
 REM `flowctl` to this file in cmd/PowerShell.
 REM
-REM Probe = functionality, not presence: each candidate must actually run
-REM `<cand> -c "import sys"` and exit 0, so the Microsoft Store `python3` App
-REM Execution Alias stub (prints "Python was not found", exits 9009) is skipped
-REM even though it is on PATH. Candidate order mirrors the bash launcher:
+REM Probe = functionality + minimum version: each candidate must actually run
+REM and report Python 3.11+, so the Microsoft Store `python3` App Execution
+REM Alias stub and working-but-too-old interpreters are skipped. Candidate order:
 REM   %PYTHON_BIN% (command name only) -> py -3 -> python3 -> python
 REM Keep this probe in sync with plugins/flow-next/scripts/lib/pick-python.sh.
 GOTO :start
@@ -7847,33 +8948,52 @@ SETLOCAL
 CALL :find_dp0
 
 SET "_prog="
+SET "_old="
 
 REM %PYTHON_BIN% is honored as a COMMAND NAME ONLY (e.g. python3.12, py) -- no
 REM quoted paths-with-spaces / embedded args, which keeps batch quoting trivial.
+REM CALL is required because a candidate may itself be a .cmd shim; without it,
+REM control transfers out of this launcher instead of resuming the probe ladder.
 IF DEFINED PYTHON_BIN (
-  "%PYTHON_BIN%" -c "import sys" >NUL 2>&1 && SET "_prog=%PYTHON_BIN%"
+  CALL "%PYTHON_BIN%" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 3)" >NUL 2>&1
+  IF NOT ERRORLEVEL 1 SET "_prog=%PYTHON_BIN%"
+  IF NOT DEFINED _prog IF ERRORLEVEL 3 IF NOT ERRORLEVEL 4 SET "_old=%PYTHON_BIN%"
 )
 IF NOT DEFINED _prog (
-  py -3 -c "import sys" >NUL 2>&1 && SET "_prog=py -3"
+  CALL py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 3)" >NUL 2>&1
+  IF NOT ERRORLEVEL 1 SET "_prog=py -3"
+  IF NOT DEFINED _prog IF ERRORLEVEL 3 IF NOT ERRORLEVEL 4 SET "_old=py -3"
 )
 IF NOT DEFINED _prog (
-  python3 -c "import sys" >NUL 2>&1 && SET "_prog=python3"
+  CALL python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 3)" >NUL 2>&1
+  IF NOT ERRORLEVEL 1 SET "_prog=python3"
+  IF NOT DEFINED _prog IF ERRORLEVEL 3 IF NOT ERRORLEVEL 4 SET "_old=python3"
 )
 IF NOT DEFINED _prog (
-  python -c "import sys" >NUL 2>&1 && SET "_prog=python"
+  CALL python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 3)" >NUL 2>&1
+  IF NOT ERRORLEVEL 1 SET "_prog=python"
+  IF NOT DEFINED _prog IF ERRORLEVEL 3 IF NOT ERRORLEVEL 4 SET "_old=python"
 )
 
 IF NOT DEFINED _prog (
-  ECHO flowctl: no working Python interpreter found ^(tried PYTHON_BIN, py -3, python3, python^). 1>&2
-  ECHO   On Windows, 'python3' may be the disabled Microsoft Store alias stub; 1>&2
-  ECHO   install python.org Python ^(or the py launcher^), or set PYTHON_BIN to a working interpreter. 1>&2
+  IF DEFINED _old (
+    ECHO flowctl: Python 3.11 or newer is required; working but too-old candidate: %_old%. 1>&2
+    ECHO   Install a supported Python, or set PYTHON_BIN to its command name. 1>&2
+  ) ELSE (
+    ECHO flowctl: no working Python interpreter found ^(tried PYTHON_BIN, py -3, python3, python^). 1>&2
+    ECHO   On Windows, 'python3' may be the disabled Microsoft Store alias stub; 1>&2
+    ECHO   install python.org Python ^(or the py launcher^), or set PYTHON_BIN to a working interpreter. 1>&2
+  )
   EXIT /b 1
 )
 
 REM %_prog% is intentionally UNQUOTED so a two-word `py -3` expands to two argv
 REM words; this is why %PYTHON_BIN% must be a command name only. Args (%*) and
 REM the dp0 path are quoted so spaced/paren'd install paths survive.
-%_prog% "%dp0%flowctl.py" %*
+SET "_entry=%dp0%flowctl.py"
+IF EXIST "%dp0%flowctl_bootstrap.py" IF "%~2"=="" IF "%~1"=="usage" SET "_entry=%dp0%flowctl_bootstrap.py"
+IF EXIST "%dp0%flowctl_bootstrap.py" IF "%~2"=="" IF "%~1"=="--help" SET "_entry=%dp0%flowctl_bootstrap.py"
+%_prog% "%_entry%" %*
 EXIT /b %errorlevel%
 '''
 
@@ -8025,6 +9145,8 @@ PLUGIN_MODE_COPY_ARTIFACTS = [
     ".flow/bin/flowctl",
     ".flow/bin/flowctl.cmd",
     ".flow/bin/flowctl.py",
+    ".flow/bin/flowctl_bootstrap.py",
+    ".flow/bin/flowctl-help.txt",
     ".flow/templates/spec.md",
     ".flow/usage.md",
 ]
@@ -8206,8 +9328,6 @@ def cmd_status(args: argparse.Namespace) -> None:
     task_counts = {"todo": 0, "in_progress": 0, "blocked": 0, "done": 0}
 
     if flow_exists:
-        tasks_dir = flow_dir / TASKS_DIR
-
         # Walk both legacy + canonical spec metadata locations.
         for spec_file in iter_spec_json_files(flow_dir):
             try:
@@ -8218,19 +9338,15 @@ def cmd_status(args: argparse.Namespace) -> None:
             except Exception:
                 pass
 
-        if tasks_dir.exists():
-            for task_file in tasks_dir.glob("fn-*.json"):
-                task_id = task_file.stem
-                if not is_task_id(task_id):
-                    continue  # Skip non-task files (e.g., fn-1.2-review.json)
-                try:
-                    # Use merged state for accurate status counts
-                    task_data = load_task_with_state(task_id, use_json=True)
-                    status = task_data.get("status", "todo")
-                    if status in task_counts:
-                        task_counts[status] += 1
-                except Exception:
-                    pass
+        inventory = TaskInventory.load(
+            flow_dir,
+            use_json=True,
+            tolerate_errors=True,
+        )
+        for task_data in inventory.ordered:
+            status = task_data.get("status", "todo")
+            if status in task_counts:
+                task_counts[status] += 1
 
     # Soft-probe: only scan when scripts/ralph/runs/ exists (fn-114).
     runs_present = _ralph_runs_dir_present()
@@ -8387,6 +9503,35 @@ def cmd_config_set(args: argparse.Namespace) -> None:
         )
 
     canonical_key, _ = resolve_config_key_for_write(args.key)
+
+    # fn-123 R5 - reject invalid host backend specs at WRITE time. The read-time
+    # lenient parser treats a bad host spec as unset (loud, but late); accepting
+    # `host:opus` here and failing later is a worse contract. Only host is
+    # write-validated - legacy lenience for other backends' stored values stays.
+    if canonical_key == "review.backend" and isinstance(args.value, str):
+        _rb_first = args.value.strip().split(":", 1)[0].strip()
+        if _rb_first == "host" and ":" in args.value.strip():
+            error_exit(
+                f"Backend 'host' does not accept a model/effort (got {args.value!r}). "
+                f"Pins live in the AGENTS.md model-routing section, not the backend "
+                f"string. Use: flowctl config set review.backend host",
+                use_json=args.json,
+            )
+
+    # fn-134.2 — tracker.specIds is a strict string-enum (flow|tracker). Reject
+    # invalid values at WRITE time so a typo never lands on disk. READ-side
+    # fail-closed (normalize_tracker_spec_ids) is a separate contract for values
+    # that reached the file via hand-edit / merge / older versions.
+    if canonical_key == "tracker.specIds":
+        raw_val = args.value
+        # Pre-coercion check: set_config would turn "true"/"false" into bools.
+        if not isinstance(raw_val, str) or raw_val not in TRACKER_SPEC_IDS_VALUES:
+            error_exit(
+                f"Invalid tracker.specIds value {raw_val!r}. "
+                f"Expected one of: flow, tracker. "
+                f"Use: flowctl config set tracker.specIds flow|tracker",
+                use_json=args.json,
+            )
 
     # fn-115.1 - validate models.roles / verifiedAt before write. Coerce the
     # value the same way set_config will so JSON object pins validate as dicts.
@@ -8550,6 +9695,7 @@ MEMORY_OPTIONAL_FIELDS: frozenset[str] = frozenset(
         "status",
         "stale_reason",
         "stale_date",
+        "hardened_into",
         "last_updated",
         "last_audited",
         "audit_notes",
@@ -8585,7 +9731,14 @@ MEMORY_RESOLUTION_TYPES: tuple[str, ...] = (
     "refactor",
 )
 
-MEMORY_STATUS: tuple[str, ...] = ("active", "stale")
+# `hardened` (fn-122): the lesson graduated into an enforced gate (lint rule,
+# CI step, instruction-file rule). Not stale — the lesson is MORE alive, just
+# relocated out of the context window. Field invariants per status:
+#   active   → no `hardened_into`, no `stale_reason`/`stale_date`
+#   stale    → `stale_reason`/`stale_date`, no `hardened_into`
+#   hardened → `hardened_into`, no `stale_reason`/`stale_date`
+# Every mutation enforces the whole set, not just its own field.
+MEMORY_STATUS: tuple[str, ...] = ("active", "stale", "hardened")
 
 # Decision lifecycle for `decisions` category entries (fn-38 task 1).
 MEMORY_DECISION_STATUSES: tuple[str, ...] = ("proposed", "accepted", "superseded")
@@ -8610,6 +9763,7 @@ MEMORY_FIELD_ORDER: tuple[str, ...] = (
     "status",
     "stale_reason",
     "stale_date",
+    "hardened_into",
     "last_updated",
     "last_audited",
     "audit_notes",
@@ -8623,13 +9777,41 @@ MEMORY_LEGACY_FILES: tuple[str, ...] = ("pitfalls.md", "conventions.md", "decisi
 # --- Frontmatter parsing / writing ---
 
 
-def _memory_yaml_available() -> bool:
-    """Detect PyYAML for optional round-trip parse. Zero-dep by default."""
-    try:
-        import yaml  # noqa: F401
-    except ImportError:
-        return False
-    return True
+@dataclass(frozen=True, slots=True)
+class _FrontmatterEnvelope:
+    """Mechanical ``---`` envelope split; schema semantics stay with callers."""
+
+    present: bool
+    complete: bool
+    frontmatter: str
+    body: str
+
+
+def _frontmatter_envelope(text: str) -> _FrontmatterEnvelope:
+    """Split one leading frontmatter envelope without interpreting YAML."""
+    if not text.startswith("---"):
+        return _FrontmatterEnvelope(False, False, "", text)
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return _FrontmatterEnvelope(True, False, "", text)
+    return _FrontmatterEnvelope(True, True, parts[1], parts[2])
+
+
+_YAML_PARSER_UNSET: Any = object()
+_YAML_PARSER: Any = _YAML_PARSER_UNSET
+
+
+def _optional_yaml_parser() -> Optional[tuple[Any, type[BaseException]]]:
+    """Resolve PyYAML's loader/error pair once per process, or cache absence."""
+    global _YAML_PARSER
+    if _YAML_PARSER is _YAML_PARSER_UNSET:
+        try:
+            import yaml  # type: ignore[import-not-found]
+        except ImportError:
+            _YAML_PARSER = None
+        else:
+            _YAML_PARSER = (yaml.safe_load, yaml.YAMLError)
+    return _YAML_PARSER
 
 
 def _parse_inline_yaml(text: str) -> dict[str, Any]:
@@ -8665,7 +9847,10 @@ def _parse_inline_yaml(text: str) -> dict[str, Any]:
             and value[0] == value[-1]
             and value[0] in ('"', "'")
         ):
+            q = value[0]
             value = value[1:-1]
+            if q == '"':
+                value = _unquote_yaml_double(value)
             result[key] = value
             continue
         # Inline list: [a, b, c]
@@ -8683,7 +9868,10 @@ def _parse_inline_yaml(text: str) -> dict[str, Any]:
                         and item[0] == item[-1]
                         and item[0] in ('"', "'")
                     ):
+                        q = item[0]
                         item = item[1:-1]
+                        if q == '"':
+                            item = _unquote_yaml_double(item)
                     cleaned.append(item)
                 result[key] = cleaned
             continue
@@ -8764,7 +9952,27 @@ def _parse_inline_yaml(text: str) -> dict[str, Any]:
     return result
 
 
-def parse_memory_frontmatter(path: Path) -> dict[str, Any]:
+def _parse_memory_frontmatter_text(text: str) -> dict[str, Any]:
+    """Parse memory frontmatter from an already-read entry buffer."""
+    envelope = _frontmatter_envelope(text)
+    if not envelope.complete:
+        return {}
+    parser = _optional_yaml_parser()
+    if parser is None:
+        return _parse_inline_yaml(envelope.frontmatter)
+    safe_load, yaml_error = parser
+    try:
+        parsed = safe_load(envelope.frontmatter)
+    except yaml_error:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def parse_memory_frontmatter(
+    path: Path,
+    *,
+    text: Optional[str] = None,
+) -> dict[str, Any]:
     """Parse YAML frontmatter from a memory entry file.
 
     Returns an empty dict if:
@@ -8775,32 +9983,12 @@ def parse_memory_frontmatter(path: Path) -> dict[str, Any]:
     PyYAML is used when available (round-trip-safe); otherwise the inline
     parser runs. Both produce the same shape for entries we write.
     """
-    if not path.exists():
-        return {}
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-    if not text.startswith("---"):
-        return {}
-    # Split into (delim, frontmatter, delim, body).
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    fm_text = parts[1]
-    # Prefer PyYAML when available.
-    try:
-        import yaml  # type: ignore[import-not-found]
-
+    if text is None:
         try:
-            parsed = yaml.safe_load(fm_text)
-        except yaml.YAMLError:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
             return {}
-        if not isinstance(parsed, dict):
-            return {}
-        return parsed
-    except ImportError:
-        return _parse_inline_yaml(fm_text)
+    return _parse_memory_frontmatter_text(text)
 
 
 # Fields that PyYAML would auto-coerce to typed scalars (datetime.date,
@@ -8840,17 +10028,76 @@ def _yaml_scalar_needs_quoting(text: str) -> bool:
     # indicator — chokes PyYAML when it appears unquoted in a scalar.
     if ": " in text or text.endswith(":"):
         return True
+    # Leading/trailing whitespace is lost or mis-parsed if left unquoted.
+    if text != text.strip():
+        return True
+    # Line breaks and other control characters would terminate the scalar
+    # mid-value and produce malformed frontmatter. Quoted form escapes them.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
+        return True
+    # Block-sequence / mapping-key indicators: bare `-`/`?` or followed by space.
+    if text.startswith(("- ", "? ")) or text in {"-", "?"}:
+        return True
     # Leading characters that YAML treats as flow indicators / anchors /
-    # references / tags. Conservative — quote any of these.
-    if text and text[0] in "#&*!|>%@`":
+    # references / tags / quoted scalars. Conservative — quote any of these.
+    if text and text[0] in "#'\"&*!|>%@`":
         return True
     return False
 
 
+_YAML_ESCAPES: tuple[tuple[str, str], ...] = (
+    ("\n", "\\n"),
+    ("\r", "\\r"),
+    ("\t", "\\t"),
+)
+
+
 def _quote_yaml_scalar(text: str) -> str:
-    """Double-quote a scalar with embedded quotes escaped."""
+    """Double-quote a scalar, escaping quotes and control characters.
+
+    Line breaks and other C0/DEL characters must be escaped, not emitted
+    raw: an unescaped newline splits the scalar across lines and produces
+    frontmatter that reads back as `{}` (silent data loss on the next read).
+    """
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    for raw, repl in _YAML_ESCAPES:
+        escaped = escaped.replace(raw, repl)
+    escaped = "".join(
+        ch if ord(ch) >= 0x20 and ord(ch) != 0x7F else f"\\x{ord(ch):02x}"
+        for ch in escaped
+    )
     return f'"{escaped}"'
+
+
+def _unquote_yaml_double(value: str) -> str:
+    """Reverse `_quote_yaml_scalar` for the no-PyYAML inline parser."""
+    out: list[str] = []
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch != "\\" or i + 1 >= len(value):
+            out.append(ch)
+            i += 1
+            continue
+        nxt = value[i + 1]
+        if nxt == "n":
+            out.append("\n")
+        elif nxt == "r":
+            out.append("\r")
+        elif nxt == "t":
+            out.append("\t")
+        elif nxt == "x" and i + 3 < len(value):
+            try:
+                out.append(chr(int(value[i + 2 : i + 4], 16)))
+            except ValueError:
+                out.append(nxt)
+            else:
+                i += 4
+                continue
+        else:
+            out.append(nxt)
+        i += 2
+    return "".join(out)
 
 
 def _format_yaml_list_item(item: Any) -> str:
@@ -8886,11 +10133,23 @@ def _frontmatter_sort_key(field: str) -> tuple[int, str]:
         return (len(MEMORY_FIELD_ORDER), field)
 
 
-def write_memory_entry(path: Path, frontmatter: dict[str, Any], body: str) -> None:
+def write_memory_entry(
+    path: Path,
+    frontmatter: dict[str, Any],
+    body: str,
+    *,
+    raw_body: Optional[str] = None,
+) -> None:
     """Write a memory entry with deterministic field order.
 
     Validates required fields before writing. Raises ValueError on invalid
     frontmatter so callers can surface a clean error.
+
+    `raw_body` is the verbatim post-frontmatter segment (everything after the
+    closing `---`, its newline included) as read off disk. When given it is
+    emitted byte for byte and `body` is ignored — frontmatter-only mutations
+    (the audit `mark-*` handlers) must not reflow a body they never edited.
+    Omit it for new entries and let the normalizing path run.
     """
     errors = validate_memory_frontmatter(frontmatter)
     if errors:
@@ -8901,6 +10160,15 @@ def write_memory_entry(path: Path, frontmatter: dict[str, Any], body: str) -> No
         rendered = _format_yaml_value(frontmatter[key], key)
         lines.append(f"{key}: {rendered}")
     lines.append("---")
+    if raw_body is not None:
+        # `raw_body` starts with the closing `---` line's own terminator, so
+        # it also tells us which line ending the file uses. Emit the rewritten
+        # frontmatter with the same one — a CRLF-authored entry must not come
+        # back with an LF frontmatter block (whole-header diff on Windows).
+        newline = "\r\n" if raw_body.startswith("\r\n") else "\n"
+        content = newline.join(lines) + raw_body
+        atomic_write(path, content)
+        return
     lines.append("")
     # Body gets a trailing newline to keep round-trip clean.
     body_text = body.rstrip("\n") + "\n" if body else ""
@@ -9283,32 +10551,30 @@ def _prospect_parse_frontmatter(text: str) -> Optional[dict[str, Any]]:
     (and Phase 0) defer to. Phase 0 may import / shell out to this
     helper in a follow-on touch-up.
     """
-    if not text or not text.startswith("---"):
+    envelope = _frontmatter_envelope(text)
+    if not envelope.complete:
         return None
-    # Need a full ---\n<frontmatter>\n---\n block at the top.
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return None
-    fm_text = parts[1]
     # Closing delimiter must be its own line — `_parse_inline_yaml` is
     # tolerant, but a bare `---` mid-line wouldn't open the block above.
     # Prefer PyYAML when available so the parse matches `parse_memory_frontmatter`.
-    try:
-        import yaml  # type: ignore[import-not-found]
-
+    parser = _optional_yaml_parser()
+    if parser is not None:
+        safe_load, yaml_error = parser
         try:
-            parsed = yaml.safe_load(fm_text)
-        except yaml.YAMLError:
+            parsed = safe_load(envelope.frontmatter)
+        except yaml_error:
             return None
         if not isinstance(parsed, dict):
             return None
         return parsed
-    except ImportError:
-        result = _parse_inline_yaml(fm_text)
+    else:
+        result = _parse_inline_yaml(envelope.frontmatter)
         # `_parse_inline_yaml` returns {} for malformed input — distinguish
         # "no frontmatter" (None) from "empty frontmatter dict" by checking
         # whether the block contained any non-blank lines.
-        if not result and any(line.strip() for line in fm_text.splitlines()):
+        if not result and any(
+            line.strip() for line in envelope.frontmatter.splitlines()
+        ):
             return None
         # `_parse_inline_yaml` keeps booleans as strings ("memory entries don't
         # need typed scalars" per its docstring), but prospect frontmatter ships
@@ -9657,27 +10923,35 @@ def _memory_title_tokens(title: str) -> set[str]:
     return set(_WORD_RE.findall(title.lower()))
 
 
-def _memory_read_entry(path: Path) -> dict[str, Any]:
-    """Read a memory entry file into {frontmatter, body}.
+def _memory_read_entry(
+    path: Path,
+    *,
+    raise_errors: bool = False,
+) -> dict[str, Any]:
+    """Read a memory entry file once into {frontmatter, body, raw}.
+
+    `raw` is byte-verbatim: the file is opened with newline translation
+    disabled so a CRLF-authored entry keeps its CRLF line endings. That is
+    what `_memory_raw_body` hands to `write_memory_entry(raw_body=...)`, so
+    frontmatter-only rewrites cannot silently reflow a Windows body to LF.
+    `frontmatter`/`body` are derived from a universal-newline view — the
+    parsers and every body consumer expect LF.
 
     Returns {"frontmatter": {}, "body": ""} on any failure so callers can
     continue the overlap scan past a malformed entry.
     """
-    if not path.exists():
-        return {"frontmatter": {}, "body": ""}
     try:
-        text = path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8", newline="") as handle:
+            raw = handle.read()
     except OSError:
-        return {"frontmatter": {}, "body": ""}
-    fm = parse_memory_frontmatter(path)
-    body = ""
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            body = parts[2].lstrip("\n")
-    else:
-        body = text
-    return {"frontmatter": fm, "body": body}
+        if raise_errors:
+            raise
+        return {"frontmatter": {}, "body": "", "raw": ""}
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    envelope = _frontmatter_envelope(text)
+    fm = _parse_memory_frontmatter_text(text)
+    body = envelope.body.lstrip("\n") if envelope.complete else text
+    return {"frontmatter": fm, "body": body, "raw": raw}
 
 
 def _memory_score_overlap(
@@ -10336,15 +11610,67 @@ _LEGACY_TYPE_FOR_FILE: dict[str, str] = {
 }
 
 
+def _memory_entry_descriptor(
+    entry_path: Path,
+    track: str,
+    category: str,
+    slug: str,
+    entry_date: str,
+    *,
+    include_body: bool,
+    include_raw: bool = False,
+    data: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    """Build one categorized descriptor with exactly one content read."""
+    if include_body or include_raw:
+        if data is None:
+            data = _memory_read_entry(entry_path)
+        fm = data["frontmatter"]
+        body = data["body"] if include_body else ""
+        raw = data["raw"] if include_raw else ""
+    else:
+        fm = parse_memory_frontmatter(entry_path)
+        body = ""
+        raw = ""
+    if not fm:
+        return None
+    tags_raw = fm.get("tags", []) or []
+    if isinstance(tags_raw, str):
+        tags_list = [tags_raw]
+    elif isinstance(tags_raw, list):
+        tags_list = [str(tag) for tag in tags_raw]
+    else:
+        tags_list = []
+    return {
+        "entry_id": _memory_entry_id(track, category, slug, entry_date),
+        "track": track,
+        "category": category,
+        "slug": slug,
+        "date": entry_date,
+        "path": str(entry_path),
+        "frontmatter": fm,
+        "body": body,
+        "raw": raw,
+        "title": str(fm.get("title", "")),
+        "module": str(fm.get("module", "") or ""),
+        "tags": tags_list,
+        "status": str(fm.get("status", "active") or "active"),
+    }
+
+
 def _memory_iter_entries(
     memory_dir: Path,
     track: Optional[str] = None,
     category: Optional[str] = None,
+    *,
+    include_body: bool = False,
+    include_raw: bool = False,
 ) -> list[dict[str, Any]]:
     """Walk the categorized tree and return entry descriptors.
 
     Each descriptor: {entry_id, track, category, slug, date, path,
-    frontmatter, title, module, tags, status}. Entries with malformed
+    frontmatter, title, module, tags, status}. ``body`` and ``raw`` are
+    populated only when their corresponding flags are true. Entries with malformed
     filenames or missing/invalid frontmatter are skipped. Filters
     `--track` / `--category` narrow the scan. Status filtering is left
     to the caller (defaults live in `cmd_memory_list`).
@@ -10371,33 +11697,22 @@ def _memory_iter_entries(
                 slug, date = _memory_parse_entry_filename(entry_path)
                 if not slug or not date:
                     continue
-                data = _memory_read_entry(entry_path)
-                fm = data["frontmatter"]
-                if not fm:
-                    continue
-                tags_raw = fm.get("tags", []) or []
-                if isinstance(tags_raw, str):
-                    tags_list = [tags_raw]
-                elif isinstance(tags_raw, list):
-                    tags_list = [str(tt) for tt in tags_raw]
-                else:
-                    tags_list = []
-                entries.append(
-                    {
-                        "entry_id": _memory_entry_id(t, cat, slug, date),
-                        "track": t,
-                        "category": cat,
-                        "slug": slug,
-                        "date": date,
-                        "path": str(entry_path),
-                        "frontmatter": fm,
-                        "body": data["body"],
-                        "title": str(fm.get("title", "")),
-                        "module": str(fm.get("module", "") or ""),
-                        "tags": tags_list,
-                        "status": str(fm.get("status", "active") or "active"),
-                    }
+                descriptor = _memory_entry_descriptor(
+                    entry_path,
+                    t,
+                    cat,
+                    slug,
+                    date,
+                    include_body=include_body,
+                    include_raw=include_raw,
                 )
+                if descriptor is None:
+                    print(
+                        f"flowctl: skipping {entry_path}: malformed frontmatter",
+                        file=sys.stderr,
+                    )
+                    continue
+                entries.append(descriptor)
     return entries
 
 
@@ -10484,13 +11799,43 @@ def _memory_resolve_read_target(
             "text": segments[index - 1],
         }
 
-    all_entries = _memory_iter_entries(memory_dir)
     # Full id form.
     if entry_id.count("/") == 2:
-        for entry in all_entries:
-            if entry["entry_id"] == entry_id:
-                return {"kind": "categorized", "entry": entry}
-        return None
+        match = re.fullmatch(
+            r"(bug|knowledge)/([a-z0-9][a-z0-9-]*)/"
+            r"([a-z0-9][a-z0-9-]*)-(\d{4}-\d{2}-\d{2})",
+            entry_id,
+        )
+        if not match:
+            return None
+        track, category, slug, entry_date = match.groups()
+        if category not in MEMORY_CATEGORIES.get(track, []):
+            return None
+        entry_path = _memory_entry_path(
+            memory_dir, track, category, slug, entry_date
+        )
+        try:
+            resolved_root = memory_dir.resolve()
+            resolved_path = entry_path.resolve()
+            resolved_path.relative_to(resolved_root)
+            if not entry_path.is_file():
+                return None
+        except (OSError, RuntimeError, ValueError):
+            return None
+        descriptor = _memory_entry_descriptor(
+            entry_path,
+            track,
+            category,
+            slug,
+            entry_date,
+            include_body=True,
+            include_raw=True,
+        )
+        if descriptor is None:
+            return None
+        return {"kind": "categorized", "entry": descriptor}
+
+    all_entries = _memory_iter_entries(memory_dir)
 
     # slug[-date] form.
     m = re.match(r"^(.+)-(\d{4}-\d{2}-\d{2})$", entry_id)
@@ -10549,13 +11894,31 @@ def cmd_memory_read(args: argparse.Namespace) -> None:
         if resolved["kind"] == "categorized":
             entry = resolved["entry"]
             path_obj = Path(entry["path"])
-            try:
-                raw = path_obj.read_text(encoding="utf-8")
-            except OSError as exc:
-                error_exit(
-                    f"failed to read {entry['path']}: {exc}",
-                    use_json=args.json,
-                )
+            raw = entry.get("raw", "")
+            if not raw:
+                try:
+                    data = _memory_read_entry(path_obj, raise_errors=True)
+                except OSError as exc:
+                    error_exit(
+                        f"failed to read {entry['path']}: {exc}",
+                        use_json=args.json,
+                    )
+                raw = data["raw"]
+                if not raw:
+                    error_exit(
+                        f"failed to read {entry['path']}",
+                        use_json=args.json,
+                    )
+                entry = _memory_entry_descriptor(
+                    path_obj,
+                    entry["track"],
+                    entry["category"],
+                    entry["slug"],
+                    entry["date"],
+                    include_body=True,
+                    include_raw=True,
+                    data=data,
+                ) or entry
             if args.json:
                 json_output(
                     {
@@ -10650,7 +12013,7 @@ def cmd_memory_list(args: argparse.Namespace) -> None:
     Filters:
       --track bug|knowledge
       --category <cat>
-      --status active|stale|all   (default: active)
+      --status active|stale|hardened|all   (default: active)
 
     Legacy flat files are reported as synthetic entries when present.
     """
@@ -10659,9 +12022,10 @@ def cmd_memory_list(args: argparse.Namespace) -> None:
     track = getattr(args, "track", None)
     category = getattr(args, "category", None)
     status_filter = getattr(args, "status", "active") or "active"
-    if status_filter not in ("active", "stale", "all"):
+    if status_filter not in ("active", "stale", "hardened", "all"):
         error_exit(
-            f"invalid --status '{status_filter}' (valid: active, stale, all)",
+            f"invalid --status '{status_filter}' "
+            f"(valid: active, stale, hardened, all)",
             use_json=args.json,
         )
 
@@ -10679,11 +12043,13 @@ def cmd_memory_list(args: argparse.Namespace) -> None:
 
     entries = _memory_iter_entries(memory_dir, track=track, category=category)
 
-    # Apply status filter.
+    # Apply status filter. Default `active` excludes BOTH stale and hardened
+    # (a hardened lesson now lives in a gate — re-injecting it as context is
+    # exactly what hardening retires). Keep in lockstep with cmd_memory_search.
     if status_filter == "active":
-        filtered = [e for e in entries if e["status"] != "stale"]
-    elif status_filter == "stale":
-        filtered = [e for e in entries if e["status"] == "stale"]
+        filtered = [e for e in entries if e["status"] not in ("stale", "hardened")]
+    elif status_filter in ("stale", "hardened"):
+        filtered = [e for e in entries if e["status"] == status_filter]
     else:
         filtered = list(entries)
 
@@ -10717,6 +12083,11 @@ def cmd_memory_list(args: argparse.Namespace) -> None:
                 "date": e["date"],
                 "status": e["status"],
                 "path": e["path"],
+                **(
+                    {"hardened_into": str(e["frontmatter"].get("hardened_into"))}
+                    if e["frontmatter"].get("hardened_into")
+                    else {}
+                ),
             }
             for e in filtered
         ]
@@ -10734,7 +12105,9 @@ def cmd_memory_list(args: argparse.Namespace) -> None:
     if not filtered and not legacy_info:
         print("No memory entries.")
         if status_filter == "active":
-            print("  (run with --status all to include stale entries)")
+            print(
+                "  (run with --status all to include stale + hardened entries)"
+            )
         return
 
     from collections import defaultdict
@@ -10752,6 +12125,8 @@ def cmd_memory_list(args: argparse.Namespace) -> None:
                 suffix = f" (module: {e['module']})"
             if e["status"] == "stale":
                 suffix += " [stale]"
+            elif e["status"] == "hardened":
+                suffix += " [hardened]"
             print(
                 f"  {e['slug']}-{e['date']} — \"{title}\"{suffix}"
             )
@@ -10868,9 +12243,10 @@ def cmd_memory_search(args: argparse.Namespace) -> None:
             f"(valid: {', '.join(MEMORY_CATEGORIES[track])})",
             use_json=args.json,
         )
-    if status_filter not in ("active", "stale", "all"):
+    if status_filter not in ("active", "stale", "hardened", "all"):
         error_exit(
-            f"invalid --status '{status_filter}' (valid: active, stale, all)",
+            f"invalid --status '{status_filter}' "
+            f"(valid: active, stale, hardened, all)",
             use_json=args.json,
         )
 
@@ -10884,7 +12260,9 @@ def cmd_memory_search(args: argparse.Namespace) -> None:
     query_lower = query.lower()
 
     # Categorized walk.
-    entries = _memory_iter_entries(memory_dir, track=track, category=category)
+    entries = _memory_iter_entries(
+        memory_dir, track=track, category=category, include_body=True
+    )
     if module_filter:
         entries = [e for e in entries if e["module"] == module_filter]
     if tag_filter_set:
@@ -10893,13 +12271,14 @@ def cmd_memory_search(args: argparse.Namespace) -> None:
             for e in entries
             if tag_filter_set & {t.lower() for t in e["tags"]}
         ]
-    # Status filter — mirrors cmd_memory_list. Default `active` excludes
-    # stale-flagged entries from search results so the audit lifecycle
-    # actually keeps stale advice out of memory-scout / agent context.
+    # Status filter — mirrors cmd_memory_list. Default `active` excludes both
+    # stale-flagged and hardened entries from search results so the audit
+    # lifecycle actually keeps retired advice out of memory-scout / agent
+    # context. Keep in lockstep with cmd_memory_list.
     if status_filter == "active":
-        entries = [e for e in entries if e["status"] != "stale"]
-    elif status_filter == "stale":
-        entries = [e for e in entries if e["status"] == "stale"]
+        entries = [e for e in entries if e["status"] not in ("stale", "hardened")]
+    elif status_filter in ("stale", "hardened"):
+        entries = [e for e in entries if e["status"] == status_filter]
 
     results: list[dict[str, Any]] = []
     for e in entries:
@@ -10933,6 +12312,11 @@ def cmd_memory_search(args: argparse.Namespace) -> None:
                 "score": round(score, 2),
                 "snippet": snippet,
                 "path": e["path"],
+                **(
+                    {"hardened_into": str(fm.get("hardened_into"))}
+                    if fm.get("hardened_into")
+                    else {}
+                ),
             }
         )
 
@@ -10941,14 +12325,15 @@ def cmd_memory_search(args: argparse.Namespace) -> None:
     # Legacy substring search — only when no track/category filter
     # (legacy has no track/category metadata). Legacy entries have no
     # `status` field; treat them as implicitly active. Skip entirely on
-    # --status stale (audit-flag query); include on active (default) + all.
+    # --status stale / hardened (audit-flag queries); include on active
+    # (default) + all.
     legacy_results: list[dict[str, Any]] = []
     if (
         track is None
         and category is None
         and not tag_filter_set
         and not module_filter
-        and status_filter != "stale"
+        and status_filter not in ("stale", "hardened")
     ):
         for filename in MEMORY_LEGACY_FILES:
             path = memory_dir / filename
@@ -11059,12 +12444,24 @@ def _memory_resolve_categorized_entry(
     return resolved["entry"]
 
 
+def _memory_raw_body(data: dict[str, Any]) -> Optional[str]:
+    """Verbatim post-frontmatter segment for a frontmatter-only rewrite.
+
+    Returns None when the file has no complete envelope, so the caller falls
+    back to `write_memory_entry`'s normalizing path.
+    """
+    envelope = _frontmatter_envelope(data.get("raw", "") or "")
+    return envelope.body if envelope.complete else None
+
+
 def cmd_memory_mark_stale(args: argparse.Namespace) -> None:
     """Flag a memory entry as stale.
 
     Sets `status: stale`, stamps `last_audited` (today, UTC), records
     `audit_notes` from `--reason` (and an optional `(audited-by: …)`
-    suffix). Body preserved. Atomic via `write_memory_entry`.
+    suffix), and drops `hardened_into` (per-status field invariant — a
+    stale entry cannot keep pointing at a gate it no longer claims).
+    Body preserved. Atomic via `write_memory_entry`.
 
     Idempotent: re-marking a stale entry updates `last_audited` +
     `audit_notes` (the new reason replaces the old). No error.
@@ -11089,6 +12486,7 @@ def cmd_memory_mark_stale(args: argparse.Namespace) -> None:
     data = _memory_read_entry(path)
     fm = dict(data["frontmatter"])
     body = data["body"]
+    raw_body = _memory_raw_body(data)
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -11099,9 +12497,12 @@ def cmd_memory_mark_stale(args: argparse.Namespace) -> None:
     fm["status"] = "stale"
     fm["last_audited"] = today
     fm["audit_notes"] = audit_notes
+    # Per-status field invariant (fn-122): a stale entry never keeps a pointer
+    # to a gate it no longer claims.
+    fm.pop("hardened_into", None)
 
     try:
-        write_memory_entry(path, fm, body)
+        write_memory_entry(path, fm, body, raw_body=raw_body)
     except ValueError as exc:
         error_exit(f"failed to write entry: {exc}", use_json=args.json)
 
@@ -11124,11 +12525,13 @@ def cmd_memory_mark_stale(args: argparse.Namespace) -> None:
 
 
 def cmd_memory_mark_fresh(args: argparse.Namespace) -> None:
-    """Clear stale flag on a memory entry.
+    """Clear the stale flag / hardened pointer on a memory entry.
 
     Resets `status` to active (default — field is removed from
-    frontmatter), clears `audit_notes`, stamps `last_audited` (today, UTC).
-    Idempotent: marking a non-stale entry just stamps `last_audited`.
+    frontmatter), clears `audit_notes`, drops `hardened_into` (the
+    un-graduation escape hatch when a gate is later removed), stamps
+    `last_audited` (today, UTC). Idempotent: marking an already-active entry
+    just stamps `last_audited`.
     """
     memory_dir = require_memory_enabled(args)
 
@@ -11143,13 +12546,22 @@ def cmd_memory_mark_fresh(args: argparse.Namespace) -> None:
     data = _memory_read_entry(path)
     fm = dict(data["frontmatter"])
     body = data["body"]
+    raw_body = _memory_raw_body(data)
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Reset to active default — drop optional stale fields entirely so the
     # frontmatter stays minimal. `status: active` is the implicit default,
     # so we omit it from the file rather than write it explicitly.
-    for key in ("status", "stale_reason", "stale_date", "audit_notes"):
+    # `hardened_into` is dropped too (fn-122): mark-fresh is the un-graduation
+    # escape hatch, so both the stale family and the hardened pointer go.
+    for key in (
+        "status",
+        "stale_reason",
+        "stale_date",
+        "hardened_into",
+        "audit_notes",
+    ):
         fm.pop(key, None)
     if audited_by:
         # Audited-by on mark-fresh is just a breadcrumb; keep it concise.
@@ -11157,7 +12569,7 @@ def cmd_memory_mark_fresh(args: argparse.Namespace) -> None:
     fm["last_audited"] = today
 
     try:
-        write_memory_entry(path, fm, body)
+        write_memory_entry(path, fm, body, raw_body=raw_body)
     except ValueError as exc:
         error_exit(f"failed to write entry: {exc}", use_json=args.json)
 
@@ -11178,6 +12590,96 @@ def cmd_memory_mark_fresh(args: argparse.Namespace) -> None:
     print(f"  last_audited: {today}")
     if fm.get("audit_notes"):
         print(f"  audit_notes: {fm['audit_notes']}")
+
+
+def cmd_memory_mark_hardened(args: argparse.Namespace) -> None:
+    """Demote a memory entry to a pointer at an enforced gate (fn-122).
+
+    Sets `status: hardened` and `hardened_into` (the `--gate-ref` value,
+    stored VERBATIM — flowctl does not parse or validate the skill-side
+    `<path>#<rule-id> -- <note>` convention, only non-emptiness), stamps
+    `last_audited` (today, UTC date), records optional `audit_notes` from
+    `--audited-by`, and clears the stale-only fields so the frontmatter is
+    consistent with exactly one status. Atomic via `write_memory_entry`.
+
+    Body: never modified — the exact body segment is read and written back.
+    The shared read/write pair normalizes blank lines at the body EDGES
+    (`_memory_read_entry` drops leading newlines, `write_memory_entry`
+    collapses trailing ones to a single `\\n`); that is the pre-existing
+    round-trip contract of every memory writer, identical for `mark-stale` /
+    `mark-fresh`, and a no-op on any entry flowctl itself wrote.
+
+    Idempotent: re-marking a hardened entry replaces `hardened_into`
+    (`last_audited` is date precision, so a same-day re-mark is a no-op on
+    that field).
+    """
+    memory_dir = require_memory_enabled(args)
+
+    entry_id = args.id
+    # Verbatim storage: the raw value is what lands in `hardened_into`; the
+    # stripped copy exists ONLY for the non-emptiness check. (The YAML writer
+    # quotes edge-whitespace scalars, so a padded value round-trips intact.)
+    gate_ref = getattr(args, "gate_ref", None) or ""
+    if not gate_ref.strip():
+        error_exit(
+            "--gate-ref is required (the gate this lesson graduated into, "
+            'e.g. "pyproject.toml#DTZ -- ruff select entry, bans naive datetimes")',
+            code=2,
+            use_json=args.json,
+        )
+    audited_by = (getattr(args, "audited_by", None) or "").strip()
+
+    entry = _memory_resolve_categorized_entry(
+        memory_dir, entry_id, use_json=args.json, command="mark-hardened"
+    )
+
+    path = Path(entry["path"])
+    data = _memory_read_entry(path)
+    fm = dict(data["frontmatter"])
+    body = data["body"]
+    raw_body = _memory_raw_body(data)
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    fm["status"] = "hardened"
+    fm["hardened_into"] = gate_ref
+    fm["last_audited"] = today
+    # Per-status field invariant (fn-122): hardened is not stale, so the
+    # stale-only pair never survives the flip (`stale -> hardened` is legal).
+    fm.pop("stale_reason", None)
+    fm.pop("stale_date", None)
+
+    audit_notes = ""
+    if audited_by:
+        audit_notes = f"hardened into {gate_ref} (audited-by: {audited_by})"
+        fm["audit_notes"] = audit_notes
+    else:
+        fm.pop("audit_notes", None)
+
+    try:
+        write_memory_entry(path, fm, body, raw_body=raw_body)
+    except ValueError as exc:
+        error_exit(f"failed to write entry: {exc}", use_json=args.json)
+
+    if args.json:
+        json_output(
+            {
+                "id": entry["entry_id"],
+                "path": str(path),
+                "status": "hardened",
+                "hardened_into": gate_ref,
+                "last_audited": today,
+                "audit_notes": audit_notes,
+            }
+        )
+        return
+
+    print(f"Hardened: {entry['entry_id']}")
+    print(f"  path: {path}")
+    print(f"  hardened_into: {gate_ref}")
+    print(f"  last_audited: {today}")
+    if audit_notes:
+        print(f"  audit_notes: {audit_notes}")
 
 
 # --- Migration (fn-30 task 4) ---
@@ -13744,13 +15246,17 @@ def cmd_spec_create(args: argparse.Namespace) -> None:
     suffix = slug if slug else generate_epic_suffix()
 
     if tracker_first:
-        # Strict identifier validation: a bare display key (WOR-17) only — a
-        # slugged / suffixed / reserved-`fn` identifier is rejected so the
-        # stored alias is always a resolvable bare handle. Use the STRIPPED
-        # display form returned by the validator (never the raw input) so
-        # surrounding whitespace can't persist an unresolvable alias.
-        key, number, tracker_identifier = validate_tracker_identifier(
-            tracker_identifier, required=True, use_json=args.json
+        # fn-134.2: KEY-N (Linear/Jira) OR synthetic gh/gl from #N / project#N
+        # when tracker.type is github/gitlab. Contextual reservation rejects
+        # an explicit GH-N/GL-N under those types; preflight refuses a mint
+        # that would collide with a canonical id or resolvable alias in the
+        # existing store (mixed historical stores are permanent).
+        key, number, tracker_identifier = resolve_tracker_first_mint(
+            tracker_identifier, use_json=args.json
+        )
+        preflight_tracker_mint(
+            flow_dir, key, number, suffix,
+            display=tracker_identifier, use_json=args.json,
         )
         spec_id = f"{key}-{number}-{suffix}"
     else:
@@ -13880,6 +15386,10 @@ def cmd_task_create(args: argparse.Namespace) -> None:
             ".flow/ does not exist. Run 'flowctl init' first.", use_json=args.json
         )
 
+    # Reject here too, not only in `set-title`: otherwise the bad state is
+    # simply reachable one command earlier.
+    _reject_multiline_title(getattr(args, "title", ""), use_json=args.json)
+
     spec_id = resolve_spec_arg(args, get_flow_dir())
     if not spec_id or not is_spec_id(spec_id):
         error_exit(
@@ -13890,22 +15400,6 @@ def cmd_task_create(args: argparse.Namespace) -> None:
     spec_path = find_spec_json_path(flow_dir, spec_id)
 
     load_json_or_exit(spec_path, f"Spec {spec_id}", use_json=args.json)
-
-    # MU-1: Scan-based allocation for merge safety
-    # Scan existing tasks to determine next ID (don't rely on counter)
-    max_task = scan_max_task_id(flow_dir, spec_id)
-    task_num = max_task + 1
-    task_id = f"{spec_id}.{task_num}"
-
-    # Double-check no collision (shouldn't happen with scan-based allocation)
-    task_json_path = flow_dir / TASKS_DIR / f"{task_id}.json"
-    task_spec_path = flow_dir / TASKS_DIR / f"{task_id}.md"
-    if task_json_path.exists() or task_spec_path.exists():
-        error_exit(
-            f"Refusing to overwrite existing task {task_id}. "
-            f"This shouldn't happen - check for orphaned files.",
-            use_json=args.json,
-        )
 
     # Parse dependencies (shared same-spec canonicalize helper).
     deps = []
@@ -13948,30 +15442,72 @@ def cmd_task_create(args: argparse.Namespace) -> None:
         except ValueError as e:
             error_exit(str(e), use_json=args.json)
 
-    # fn-43.2: persisted task JSON uses canonical "spec" key only. Read paths
-    # accept legacy "epic" via normalize_task() for 0.x task files that
-    # haven't been rewritten yet.
-    task_data = {
-        "id": task_id,
-        "spec": spec_id,
-        "title": args.title,
-        "status": "todo",
-        "priority": args.priority,
-        "depends_on": deps,
-        "assignee": None,
-        "claimed_at": None,
-        "claim_note": "",
-        "spec_path": f"{FLOW_DIR}/{TASKS_DIR}/{task_id}.md",
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
-    atomic_write_json(flow_dir / TASKS_DIR / f"{task_id}.json", task_data)
+    # Allocation and the paired JSON/Markdown publication are one per-spec
+    # transaction. A process reports success only after both complete files
+    # exist; any second-write/collision failure removes files created by this
+    # transaction before surfacing the error.
+    lock_hash = hashlib.sha256(spec_id.encode("utf-8")).hexdigest()[:16]
+    lock_path = flow_dir / "locks" / f"task-create-{lock_hash}.lock.d"
+    try:
+        with cross_process_lock(lock_path):
+            # MU-1: scan while holding the allocation lock. The previous
+            # unlocked scan let concurrent creators all choose the same id.
+            task_num = scan_max_task_id(flow_dir, spec_id) + 1
+            task_id = f"{spec_id}.{task_num}"
+            task_json_path = flow_dir / TASKS_DIR / f"{task_id}.json"
+            task_spec_path = flow_dir / TASKS_DIR / f"{task_id}.md"
+            if task_json_path.exists() or task_spec_path.exists():
+                error_exit(
+                    f"Refusing to overwrite existing task {task_id}. "
+                    f"This shouldn't happen - check for orphaned files.",
+                    use_json=args.json,
+                )
 
-    # Create task spec
-    spec_content = create_task_spec(
-        task_id, args.title, acceptance, description=description, satisfies=satisfies
-    )
-    atomic_write(flow_dir / TASKS_DIR / f"{task_id}.md", spec_content)
+            # fn-43.2: persisted task JSON uses canonical "spec" key only.
+            created_at = now_iso()
+            task_data = {
+                "id": task_id,
+                "spec": spec_id,
+                "title": args.title,
+                "status": "todo",
+                "priority": args.priority,
+                "depends_on": deps,
+                "assignee": None,
+                "claimed_at": None,
+                "claim_note": "",
+                "spec_path": f"{FLOW_DIR}/{TASKS_DIR}/{task_id}.md",
+                "created_at": created_at,
+                "updated_at": created_at,
+            }
+            json_content = json.dumps(task_data, indent=2, sort_keys=True) + "\n"
+            spec_content = create_task_spec(
+                task_id,
+                args.title,
+                acceptance,
+                description=description,
+                satisfies=satisfies,
+            )
+
+            published: list[Path] = []
+            try:
+                atomic_create(task_json_path, json_content)
+                published.append(task_json_path)
+                atomic_create(task_spec_path, spec_content)
+                published.append(task_spec_path)
+            except (OSError, ValueError) as e:
+                cleanup_errors = []
+                for published_path in reversed(published):
+                    try:
+                        published_path.unlink()
+                    except OSError as cleanup_error:
+                        cleanup_errors.append(str(cleanup_error))
+                detail = f"; cleanup failed: {'; '.join(cleanup_errors)}" if cleanup_errors else ""
+                error_exit(
+                    f"Failed to create task {task_id}: {e}{detail}",
+                    use_json=args.json,
+                )
+    except CrossProcessLockError as e:
+        error_exit(f"Task allocation lock unavailable for {spec_id}: {e}", use_json=args.json)
 
     # NOTE: We no longer update spec["next_task"] since scan-based allocation
     # is the source of truth. This reduces merge conflicts.
@@ -14060,26 +15596,25 @@ def cmd_show(args: argparse.Namespace) -> None:
             load_json_or_exit(spec_path, f"Spec {args.id}", use_json=args.json)
         )
 
-        # Get tasks for this epic (with merged runtime state)
+        # Get tasks for this spec from the command-scoped inventory.
         tasks = []
-        tasks_dir = flow_dir / TASKS_DIR
-        if tasks_dir.exists():
-            for task_file in sorted(tasks_dir.glob(f"{args.id}.*.json")):
-                task_id = task_file.stem
-                if not is_task_id(task_id):
-                    continue  # Skip non-task files (e.g., fn-1.2-review.json)
-                task_data = load_task_with_state(task_id, use_json=args.json)
-                if "id" not in task_data:
-                    continue  # Skip artifact files (GH-21)
-                tasks.append(
-                    {
-                        "id": task_data["id"],
-                        "title": task_data["title"],
-                        "status": task_data["status"],
-                        "priority": task_data.get("priority"),
-                        "depends_on": task_data.get("depends_on", task_data.get("deps", [])),
-                    }
-                )
+        inventory = TaskInventory.load(
+            flow_dir,
+            use_json=args.json,
+            spec_id=args.id,
+        )
+        for task_data in inventory.by_spec.get(args.id, []):
+            tasks.append(
+                {
+                    "id": task_data["id"],
+                    "title": task_data["title"],
+                    "status": task_data["status"],
+                    "priority": task_data.get("priority"),
+                    "depends_on": task_data.get(
+                        "depends_on", task_data.get("deps", [])
+                    ),
+                }
+            )
 
         # Sort tasks by numeric suffix. fn-52.10: tracker-aware so a wor-* spec's
         # tasks order by suffix (parse_id is fn-only → None for wor-* tasks).
@@ -14140,27 +15675,31 @@ def cmd_specs(args: argparse.Namespace) -> None:
         )
 
     flow_dir = get_flow_dir()
-
-    specs = []
+    spec_data_list = []
     for spec_file in iter_spec_json_files(flow_dir):
-        spec_data = normalize_epic(
-            load_json_or_exit(
-                spec_file, f"Spec {spec_file.stem}", use_json=args.json
+        spec_data_list.append(
+            normalize_epic(
+                load_json_or_exit(
+                    spec_file, f"Spec {spec_file.stem}", use_json=args.json
+                )
             )
         )
-        # Count tasks (with merged runtime state)
-        tasks_dir = flow_dir / TASKS_DIR
-        task_count = 0
-        done_count = 0
-        if tasks_dir.exists():
-            for task_file in tasks_dir.glob(f"{spec_data['id']}.*.json"):
-                task_id = task_file.stem
-                if not is_task_id(task_id):
-                    continue  # Skip non-task files (e.g., fn-1.2-review.json)
-                task_data = load_task_with_state(task_id, use_json=args.json)
-                task_count += 1
-                if task_data.get("status") == "done":
-                    done_count += 1
+
+    inventory = (
+        TaskInventory.load(
+            flow_dir,
+            use_json=args.json,
+            spec_ids={spec_data["id"] for spec_data in spec_data_list},
+        )
+        if spec_data_list
+        else TaskInventory(ordered=[], by_id={}, by_spec={})
+    )
+    specs = []
+    for spec_data in spec_data_list:
+        # Count tasks from the one command-scoped task scan.
+        spec_tasks = inventory.by_spec.get(spec_data["id"], [])
+        task_count = len(spec_tasks)
+        done_count = sum(1 for task in spec_tasks if task.get("status") == "done")
 
         specs.append(
             {
@@ -14213,38 +15752,36 @@ def cmd_tasks(args: argparse.Namespace) -> None:
         )
 
     flow_dir = get_flow_dir()
-    tasks_dir = flow_dir / TASKS_DIR
-
     spec_filter = resolve_spec_arg(args, get_flow_dir())
 
     tasks = []
-    if tasks_dir.exists():
-        # fn-52.10: unfiltered glob is *.json (not fn-*) so tracker-key tasks
-        # (wor-17.M) list. spec_filter is already canonicalized by
-        # resolve_spec_arg (handle → wor-17-slug), so the scoped glob is correct.
-        pattern = f"{spec_filter}.*.json" if spec_filter else "*.json"
-        for task_file in sorted(tasks_dir.glob(pattern), key=lambda p: id_sort_key(p.stem)):
-            task_id = task_file.stem
-            if not is_task_id(task_id):
-                continue  # Skip non-task files (e.g., fn-1.2-review.json)
-            # Load task with merged runtime state
-            task_data = load_task_with_state(task_id, use_json=args.json)
-            if "id" not in task_data:
-                continue  # Skip artifact files (GH-21)
-            # Filter by status if requested
-            if args.status and task_data["status"] != args.status:
-                continue
-            spec_value = task_data.get("spec") or task_data.get("epic")
-            tasks.append(
-                {
-                    "id": task_data["id"],
-                    "spec": spec_value,
-                    "title": task_data["title"],
-                    "status": task_data["status"],
-                    "priority": task_data.get("priority"),
-                    "depends_on": task_data.get("depends_on", task_data.get("deps", [])),
-                }
-            )
+    inventory = TaskInventory.load(
+        flow_dir,
+        use_json=args.json,
+        spec_id=spec_filter,
+    )
+    candidates = (
+        inventory.by_spec.get(spec_filter, [])
+        if spec_filter
+        else inventory.ordered
+    )
+    for task_data in candidates:
+        # Filter by status if requested.
+        if args.status and task_data["status"] != args.status:
+            continue
+        spec_value = task_data.get("spec") or task_data.get("epic")
+        tasks.append(
+            {
+                "id": task_data["id"],
+                "spec": spec_value,
+                "title": task_data["title"],
+                "status": task_data["status"],
+                "priority": task_data.get("priority"),
+                "depends_on": task_data.get(
+                    "depends_on", task_data.get("deps", [])
+                ),
+            }
+        )
 
     # Sort tasks by spec then task number. fn-52.10: tracker-aware total order
     # across the mixed fn-* + wor-* set.
@@ -14275,8 +15812,6 @@ def cmd_list(args: argparse.Namespace) -> None:
         )
 
     flow_dir = get_flow_dir()
-    tasks_dir = flow_dir / TASKS_DIR
-
     # Load all specs (both legacy and canonical layouts).
     specs = []
     for spec_file in iter_spec_json_files(flow_dir):
@@ -14290,40 +15825,27 @@ def cmd_list(args: argparse.Namespace) -> None:
     # Sort specs by number. fn-52.10: tracker-aware total order (mixed fn-* + wor-*).
     specs.sort(key=lambda e: id_sort_key(e["id"]))
 
-    # Load all tasks grouped by spec (with merged runtime state). fn-52.10:
-    # glob ALL task json (not just fn-*) so tracker-key tasks (wor-17.M) list.
-    tasks_by_spec = {}
+    # Load all tasks grouped by spec (with merged runtime state). The shared
+    # iterator includes both native and tracker-key task definitions.
+    inventory = TaskInventory.load(flow_dir, use_json=args.json)
+    tasks_by_spec = inventory.by_spec
     all_tasks = []
-    if tasks_dir.exists():
-        for task_file in sorted(tasks_dir.glob("*.json"), key=lambda p: id_sort_key(p.stem)):
-            task_id = task_file.stem
-            if not is_task_id(task_id):
-                continue  # Skip non-task files (e.g., fn-1.2-review.json)
-            task_data = load_task_with_state(task_id, use_json=args.json)
-            if "id" not in task_data:
-                continue  # Skip artifact files (GH-21)
-            spec_value = task_data.get("spec") or task_data.get("epic")
-            if not spec_value:
-                continue
-            if spec_value not in tasks_by_spec:
-                tasks_by_spec[spec_value] = []
-            tasks_by_spec[spec_value].append(task_data)
-            all_tasks.append(
-                {
-                    "id": task_data["id"],
-                    "spec": spec_value,
-                    "title": task_data["title"],
-                    "status": task_data["status"],
-                    "priority": task_data.get("priority"),
-                    "depends_on": task_data.get("depends_on", task_data.get("deps", [])),
-                }
-            )
-
-    # Sort tasks within each spec
-    for spec_id in tasks_by_spec:
-        # fn-52.10: tracker-aware suffix sort (parse_id is fn-only → None for
-        # wor-* tasks; id_sort_key's task_num element orders both schemes).
-        tasks_by_spec[spec_id].sort(key=lambda t: id_sort_key(t["id"]))
+    for task_data in inventory.ordered:
+        spec_value = task_data.get("spec") or task_data.get("epic")
+        if not spec_value:
+            continue
+        all_tasks.append(
+            {
+                "id": task_data["id"],
+                "spec": spec_value,
+                "title": task_data["title"],
+                "status": task_data["status"],
+                "priority": task_data.get("priority"),
+                "depends_on": task_data.get(
+                    "depends_on", task_data.get("deps", [])
+                ),
+            }
+        )
 
     if args.json:
         specs_out = []
@@ -14553,6 +16075,13 @@ def cmd_spec_reset_review_rounds(args: argparse.Namespace) -> None:
     also_impl = getattr(args, "impl", False)
     if also_impl:
         spec_data["impl_review_rounds"] = {}
+    pending = spec_data.get("review_pending_rounds")
+    if isinstance(pending, dict):
+        pending.pop("plan", None)
+        if also_impl:
+            for key in list(pending):
+                if key.startswith("impl:"):
+                    pending.pop(key, None)
     spec_data["updated_at"] = now_iso()
     atomic_write_json(spec_json_path, spec_data)
 
@@ -14647,6 +16176,116 @@ def cmd_review_rounds_reset(args: argparse.Namespace) -> None:
         )
     else:
         print(f"{args.kind}-review round counter reset for {scope}")
+
+
+def cmd_review_rounds_record(args: argparse.Namespace) -> None:
+    """Record an RP response and refund its reservation when no verdict exists."""
+    spec_id, task_id = _resolve_review_rounds_args(args)
+    try:
+        output = Path(args.output_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        error_exit(
+            f"Unable to read review output file {args.output_file}: {exc}",
+            use_json=args.json,
+            code=2,
+        )
+
+    verdict = parse_codex_verdict(output)
+    failure_class: Optional[str] = None
+    if not verdict:
+        if args.failure_class:
+            failure_class = args.failure_class
+        elif args.exit_code != 0:
+            failure_class = "nonzero_exit"
+        elif not output.strip():
+            failure_class = "empty_output"
+        else:
+            failure_class = "missing_verdict"
+
+    result = record_review_attempt(
+        spec_id,
+        args.kind,
+        backend=args.backend,
+        output=output,
+        verdict=verdict,
+        failure_class=failure_class,
+        task_id=task_id,
+        review_type=args.review_type,
+        use_json=args.json,
+    )
+    if result.get("transport_unhealthy"):
+        error_exit(
+            f"TRANSPORT_UNHEALTHY: {args.backend} {args.review_type} review "
+            f"produced no verdict {result['consecutive_transport_failures']} "
+            f"consecutive times (budget {result['transport_failure_cap']}). "
+            f"The reserved review round was refunded; repair the "
+            f"backend/environment before retrying. This is not review "
+            f"non-convergence and does not require review-rounds reset.",
+            use_json=args.json,
+            code=REVIEW_TRANSPORT_EXIT_CODE,
+        )
+    if args.json:
+        json_output(result)
+    else:
+        if verdict:
+            print(
+                f"{args.review_type}-review verdict {verdict} recorded; "
+                f"round consumed"
+            )
+        else:
+            print(
+                f"{args.review_type}-review transport failure "
+                f"({failure_class}) recorded; round refunded"
+            )
+
+
+def cmd_review_rounds_attempts(args: argparse.Namespace) -> None:
+    """Show durable verdict/refund attempts for one review scope."""
+    spec_id, task_id = _resolve_review_rounds_args(args)
+    flow_dir = get_flow_dir()
+    spec_json_path = find_spec_json_path(flow_dir, spec_id)
+    spec_data = normalize_epic(
+        load_json_or_exit(spec_json_path, f"Spec {spec_id}", use_json=args.json)
+    )
+    result = _review_attempt_summary(
+        spec_data,
+        args.kind,
+        task_id,
+        review_type=args.review_type,
+    )
+    result.update(
+        {
+            "id": spec_id,
+            "kind": args.review_type,
+            "task": task_id,
+            "review_rounds": _read_review_rounds(
+                spec_data, args.kind, task_id
+            ),
+            "review_rounds_cap": get_max_review_iterations(),
+            "consecutive_transport_failures": int(
+                (
+                    spec_data.get("review_transport_failures")
+                    if isinstance(
+                        spec_data.get("review_transport_failures"), dict
+                    )
+                    else {}
+                ).get(result["scope"], 0)
+                or 0
+            ),
+            "transport_failure_cap": get_max_review_transport_failures(),
+        }
+    )
+    if args.json:
+        json_output(result)
+    else:
+        print(
+            f"{result['scope']}: {result['review_rounds']}/"
+            f"{result['review_rounds_cap']} live verdict rounds; "
+            f"{result['verdict_attempts']} verdict attempts; "
+            f"{result['refunded_attempts']} refunded transport attempts; "
+            f"{result['consecutive_transport_failures']}/"
+            f"{result['transport_failure_cap']} consecutive transport failures"
+        )
 
 
 def _cmd_spec_set_ready(args: argparse.Namespace, *, target: bool) -> None:
@@ -15328,6 +16967,119 @@ def _export_run_git(args: list[str], cwd: Optional[Path] = None) -> tuple[int, s
         return (1, "", str(exc))
 
 
+@dataclass(frozen=True, slots=True)
+class _ExportDiffEvent:
+    """One path-bound semantic event from a zero-context unified diff."""
+
+    path: str
+    kind: str  # "hunk", "add", or "remove"
+    text: str  # hunk context, or line body without the +/- marker
+
+
+@dataclass(frozen=True, slots=True)
+class _ExportDiffMaterialization:
+    """All git diff streams needed by one cognitive-aid export."""
+
+    head_sha: str
+    numstat_rc: int
+    numstat: str
+    name_status_rc: int
+    name_status: str
+    unified_rc: int
+    events: tuple[_ExportDiffEvent, ...]
+
+
+def _export_parse_unified_diff(unified_diff: str) -> tuple[_ExportDiffEvent, ...]:
+    """Parse a unified diff once into path-bound events.
+
+    Consumers no longer repeat header/path parsing or materialize their own
+    ``splitlines()`` lists. Deleted files retain the old path; renames use the
+    new path, matching the pre-fn-122 analyzers.
+    """
+    if not unified_diff:
+        return ()
+    events: list[_ExportDiffEvent] = []
+    current_path: Optional[str] = None
+    pending_removed_path: Optional[str] = None
+    for line in unified_diff.splitlines():
+        if line.startswith("diff --git "):
+            current_path = None
+            pending_removed_path = None
+            continue
+        if line.startswith("--- a/"):
+            pending_removed_path = line[len("--- a/") :].strip() or None
+            continue
+        if line.startswith("--- "):
+            pending_removed_path = None
+            continue
+        if line.startswith("+++ b/"):
+            current_path = line[len("+++ b/") :].strip() or None
+            pending_removed_path = None
+            continue
+        if line.startswith("+++ /dev/null"):
+            current_path = pending_removed_path
+            pending_removed_path = None
+            continue
+        if current_path is None:
+            continue
+        if line.startswith("@@"):
+            match = _EXPORT_HUNK_HEADER_RE.match(line)
+            if match:
+                events.append(
+                    _ExportDiffEvent(current_path, "hunk", match.group(1).strip())
+                )
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            events.append(_ExportDiffEvent(current_path, "add", line[1:]))
+        elif line.startswith("-") and not line.startswith("---"):
+            events.append(_ExportDiffEvent(current_path, "remove", line[1:]))
+    return tuple(events)
+
+
+def _export_diff_events(
+    value: str | tuple[_ExportDiffEvent, ...],
+) -> tuple[_ExportDiffEvent, ...]:
+    """Accept legacy raw-diff callers while export passes parsed events."""
+    if isinstance(value, str):
+        return _export_parse_unified_diff(value)
+    return value
+
+
+def _export_materialize_diff(
+    merge_base_sha: str,
+    repo_root: Path,
+) -> _ExportDiffMaterialization:
+    """Read each git diff representation exactly once for one export."""
+    head_rc, head_out, _ = _export_run_git(["rev-parse", "HEAD"], cwd=repo_root)
+    numstat_rc, numstat, _ = _export_run_git(
+        [
+            "diff",
+            "--numstat",
+            "-M",
+            "--diff-filter=AMRD",
+            f"{merge_base_sha}..HEAD",
+        ],
+        cwd=repo_root,
+    )
+    name_status_rc, name_status, _ = _export_run_git(
+        ["diff", "--name-status", "-M", f"{merge_base_sha}..HEAD"],
+        cwd=repo_root,
+    )
+    unified_rc, unified, _ = _export_run_git(
+        ["diff", "-M", "--unified=0", f"{merge_base_sha}..HEAD"],
+        cwd=repo_root,
+    )
+    return _ExportDiffMaterialization(
+        head_sha=head_out.strip() if head_rc == 0 else "",
+        numstat_rc=numstat_rc,
+        numstat=numstat,
+        name_status_rc=name_status_rc,
+        name_status=name_status,
+        unified_rc=unified_rc,
+        events=_export_parse_unified_diff(unified) if unified_rc == 0 else (),
+    )
+
+
 def _export_resolve_merge_base(base_ref: str) -> Optional[str]:
     """Return the merge-base sha for `base_ref..HEAD`, or None on failure."""
     rc, out, _err = _export_run_git(["merge-base", base_ref, "HEAD"])
@@ -15515,6 +17267,7 @@ def _export_diff_summary(
     base_ref: str,
     merge_base_sha: str,
     repo_root: Path,
+    materialized: Optional[_ExportDiffMaterialization] = None,
 ) -> dict[str, Any]:
     """Build the diff_summary block from git diff output.
 
@@ -15522,25 +17275,15 @@ def _export_diff_summary(
     per-file additions/deletions, `--name-status -M` for status (A/M/R/D),
     and a unified-diff scan for added export lines.
     """
-    head_sha_rc, head_sha_out, _ = _export_run_git(["rev-parse", "HEAD"], cwd=repo_root)
-    head_sha = head_sha_out.strip() if head_sha_rc == 0 else ""
+    diff = materialized or _export_materialize_diff(merge_base_sha, repo_root)
+    head_sha = diff.head_sha
 
     # numstat: per-file additions/deletions. Renames render as a tab-separated
     # `old\tnew` path on the third column (or `{old => new}` brace form when
     # `-M` matches a rename).
-    rc_n, out_n, _ = _export_run_git(
-        [
-            "diff",
-            "--numstat",
-            "-M",
-            "--diff-filter=AMRD",
-            f"{merge_base_sha}..HEAD",
-        ],
-        cwd=repo_root,
-    )
     files_numstat: dict[str, dict[str, Any]] = {}
-    if rc_n == 0:
-        for line in out_n.splitlines():
+    if diff.numstat_rc == 0:
+        for line in diff.numstat.splitlines():
             parts = line.split("\t")
             if len(parts) < 3:
                 continue
@@ -15572,18 +17315,9 @@ def _export_diff_summary(
             }
 
     # name-status: A/M/D/R. Renames appear as `R<score>\told\tnew`.
-    rc_s, out_s, _ = _export_run_git(
-        [
-            "diff",
-            "--name-status",
-            "-M",
-            f"{merge_base_sha}..HEAD",
-        ],
-        cwd=repo_root,
-    )
     file_status: dict[str, str] = {}
-    if rc_s == 0:
-        for line in out_s.splitlines():
+    if diff.name_status_rc == 0:
+        for line in diff.name_status.splitlines():
             parts = line.split("\t")
             if len(parts) < 2:
                 continue
@@ -15647,30 +17381,21 @@ def _export_diff_summary(
     # import/from/use/require lines, derive `(adding_module, target_module)`
     # pairs, surface only when target_module != adding_module.
     cross_module_changes: list[str] = []
-    rc_u, out_u, _ = _export_run_git(
-        [
-            "diff",
-            "-M",
-            "--unified=0",
-            f"{merge_base_sha}..HEAD",
-        ],
-        cwd=repo_root,
-    )
-    if rc_u == 0:
-        cross_module_changes = _export_detect_cross_module(out_u, files)
+    if diff.unified_rc == 0:
+        cross_module_changes = _export_detect_cross_module(diff.events, files)
 
     # changed_symbols (fn-86 R1): attach per-file hunk-header context from the
     # same unified diff — empty list where git detects no function context.
-    if rc_u == 0:
-        symbols_by_path = _export_changed_symbols(out_u)
+    if diff.unified_rc == 0:
+        symbols_by_path = _export_changed_symbols(diff.events)
         for f in files:
             f["changed_symbols"] = symbols_by_path.get(f["path"], [])
 
     # Public-exports-changed detection: parse +/- lines in index/__init__/lib
     # files to compute added/removed exports.
     public_exports_changed: list[dict[str, Any]] = []
-    if rc_u == 0:
-        public_exports_changed = _export_detect_public_exports(out_u)
+    if diff.unified_rc == 0:
+        public_exports_changed = _export_detect_public_exports(diff.events)
 
     return {
         "base_ref": base_ref,
@@ -15703,7 +17428,10 @@ _EXPORT_SOURCE_EXTENSIONS: frozenset[str] = frozenset(
 )
 
 
-def _export_detect_cross_module(unified_diff: str, files: list[dict[str, Any]]) -> list[str]:
+def _export_detect_cross_module(
+    unified_diff: str | tuple[_ExportDiffEvent, ...],
+    files: list[dict[str, Any]],
+) -> list[str]:
     """Surface new dependency edges across modules from a unified diff.
 
     Heuristic: scan added (`+`) lines in *source files* for actual
@@ -15716,17 +17444,14 @@ def _export_detect_cross_module(unified_diff: str, files: list[dict[str, Any]]) 
     capped at 12. Both endpoints must be modules that actually changed in
     this diff (otherwise a fresh `import os` would surface).
     """
-    if not unified_diff:
+    events = _export_diff_events(unified_diff)
+    if not events:
         return []
 
     diff_modules: set[str] = {f["module"] for f in files}
     if len(diff_modules) < 2:
         return []
 
-    # Track which file we're currently inside (header `+++ b/<path>`).
-    current_path: Optional[str] = None
-    current_module: Optional[str] = None
-    current_is_source = False
     edges: set[tuple[str, str]] = set()
 
     # Strict patterns — keyword required at line start (after whitespace).
@@ -15743,27 +17468,11 @@ def _export_detect_cross_module(unified_diff: str, files: list[dict[str, Any]]) 
     sh_source_re = re.compile(r"^(?:source|\.)\s+([./a-zA-Z0-9_-]+)")
     go_import_re = re.compile(r'^import\s+["\']([^"\']+)["\']')
 
-    for line in unified_diff.splitlines():
-        if line.startswith("+++ b/"):
-            current_path = line[len("+++ b/") :].strip()
-            current_module = (
-                _export_path_module(current_path) if current_path else None
-            )
-            current_is_source = False
-            if current_path:
-                idx = current_path.rfind(".")
-                if idx != -1:
-                    ext = current_path[idx:].lower()
-                    if ext in _EXPORT_SOURCE_EXTENSIONS:
-                        current_is_source = True
+    for event in events:
+        if event.kind != "add" or not _export_path_is_source(event.path):
             continue
-        if line.startswith("--- ") or line.startswith("@@"):
-            continue
-        if not line.startswith("+") or line.startswith("+++"):
-            continue
-        if current_module is None or not current_is_source:
-            continue
-        body = line[1:].lstrip()
+        current_module = _export_path_module(event.path)
+        body = event.text.lstrip()
         candidates: list[str] = []
         for regex in (py_from_re, py_import_re, rust_use_re):
             mm = regex.match(body)
@@ -15795,7 +17504,9 @@ def _export_detect_cross_module(unified_diff: str, files: list[dict[str, Any]]) 
     return sorted(f"{src} imports {dst} (new)" for src, dst in edges)[:12]
 
 
-def _export_detect_public_exports(unified_diff: str) -> list[dict[str, Any]]:
+def _export_detect_public_exports(
+    unified_diff: str | tuple[_ExportDiffEvent, ...],
+) -> list[dict[str, Any]]:
     """Detect added/removed exports in `index.*`, `__init__.py`, `lib.rs`, etc.
 
     For each matching file in the diff, scan added (`+`) and removed (`-`)
@@ -15803,54 +17514,17 @@ def _export_detect_public_exports(unified_diff: str) -> list[dict[str, Any]]:
     and emit `{"file": ..., "added": [...], "removed": [...]}`. Skips files
     without any export-shaped changes.
     """
-    if not unified_diff:
+    events = _export_diff_events(unified_diff)
+    if not events:
         return []
 
     per_file: dict[str, dict[str, list[str]]] = {}
-    current_path: Optional[str] = None
-    is_export_file = False
-    pending_removed_path: Optional[str] = None
-
-    for line in unified_diff.splitlines():
-        # New diff stanza — reset any pending `--- a/<path>` candidate so
-        # state from the prior file does not leak into this one.
-        if line.startswith("diff --git "):
-            pending_removed_path = None
+    for event in events:
+        if event.kind not in ("add", "remove"):
             continue
-        # `--- a/<path>` precedes `+++ b/<path>` (or `+++ /dev/null` for
-        # deletions). Stash the old-side path so we can fall back to it
-        # when the new side is /dev/null (deleted-file case).
-        if line.startswith("--- a/"):
-            pending_removed_path = line[len("--- a/") :].strip() or None
+        if not _PUBLIC_EXPORT_FILES_RE.search(event.path):
             continue
-        if line.startswith("--- "):
-            # `--- /dev/null` (added file) or other non-`a/` form — no
-            # deleted-side path to remember.
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ b/"):
-            current_path = line[len("+++ b/") :].strip()
-            is_export_file = bool(
-                current_path and _PUBLIC_EXPORT_FILES_RE.search(current_path)
-            )
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ /dev/null"):
-            # Deleted file — use the path captured from `--- a/<path>`.
-            current_path = pending_removed_path
-            is_export_file = bool(
-                current_path and _PUBLIC_EXPORT_FILES_RE.search(current_path)
-            )
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ ") or line.startswith("@@"):
-            continue
-        if not is_export_file or not current_path:
-            continue
-        sign = line[:1] if line else ""
-        if sign not in ("+", "-"):
-            continue
-        body = line[1:].lstrip()
+        body = event.text.lstrip()
         for regex in _PUBLIC_EXPORT_LINE_RES:
             mm = regex.match(body)
             if not mm:
@@ -15862,9 +17536,9 @@ def _export_detect_public_exports(unified_diff: str) -> list[dict[str, Any]]:
                 if not sym:
                     continue
                 bucket = per_file.setdefault(
-                    current_path, {"added": [], "removed": []}
+                    event.path, {"added": [], "removed": []}
                 )
-                target = "added" if sign == "+" else "removed"
+                target = "added" if event.kind == "add" else "removed"
                 if sym not in bucket[target]:
                     bucket[target].append(sym)
             break
@@ -15904,7 +17578,9 @@ _EXPORT_HUNK_HEADER_RE = re.compile(
 )
 
 
-def _export_changed_symbols(unified_diff: str) -> dict[str, list[str]]:
+def _export_changed_symbols(
+    unified_diff: str | tuple[_ExportDiffEvent, ...],
+) -> dict[str, list[str]]:
     """Map each changed file to its list of hunk-context symbols.
 
     Parses `git diff` hunk headers (`@@ … @@ <context>`); dedupes per file,
@@ -15912,44 +17588,16 @@ def _export_changed_symbols(unified_diff: str) -> dict[str, list[str]]:
     pure top-level edit) yields no entry — the render falls back to file-level
     anchoring, never fabricates. Deleted files anchor under their old path.
     """
-    if not unified_diff:
+    events = _export_diff_events(unified_diff)
+    if not events:
         return {}
     symbols: dict[str, list[str]] = {}
-    current_path: Optional[str] = None
-    pending_removed_path: Optional[str] = None
-    for line in unified_diff.splitlines():
-        if line.startswith("diff --git "):
-            current_path = None
-            pending_removed_path = None
+    for event in events:
+        if event.kind != "hunk" or not event.text:
             continue
-        if line.startswith("--- a/"):
-            pending_removed_path = line[len("--- a/"):].strip() or None
-            continue
-        if line.startswith("--- "):
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ b/"):
-            current_path = line[len("+++ b/"):].strip() or None
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ /dev/null"):
-            current_path = pending_removed_path
-            pending_removed_path = None
-            continue
-        if line.startswith("+++"):
-            continue
-        if line.startswith("@@"):
-            if current_path is None:
-                continue
-            mm = _EXPORT_HUNK_HEADER_RE.match(line)
-            if not mm:
-                continue
-            ctx = mm.group(1).strip()
-            if not ctx:
-                continue
-            bucket = symbols.setdefault(current_path, [])
-            if ctx not in bucket:
-                bucket.append(ctx)
+        bucket = symbols.setdefault(event.path, [])
+        if event.text not in bucket:
+            bucket.append(event.text)
     return symbols
 
 
@@ -16064,45 +17712,24 @@ _EXPORT_REMOVED_REFS_GREP_CHUNK = 20
 
 
 
-def _export_extract_removed_symbols(unified_diff: str) -> dict[str, str]:
+def _export_extract_removed_symbols(
+    unified_diff: str | tuple[_ExportDiffEvent, ...],
+) -> dict[str, str]:
     """Extract candidate removed symbol definitions from a diff.
 
     Returns `{symbol: defining_file}` for removed (`-`) lines in *source*
     files whose body matches a conservative definition pattern. First-seen
     defining file wins on name collision.
     """
-    if not unified_diff:
+    events = _export_diff_events(unified_diff)
+    if not events:
         return {}
     out: dict[str, str] = {}
     added: set[tuple[str, str]] = set()
-    current_path: Optional[str] = None
-    current_is_source = False
-    pending_removed_path: Optional[str] = None
-    for line in unified_diff.splitlines():
-        if line.startswith("diff --git "):
-            current_path = None
-            current_is_source = False
-            pending_removed_path = None
+    for event in events:
+        if event.kind not in ("add", "remove"):
             continue
-        if line.startswith("--- a/"):
-            pending_removed_path = line[len("--- a/"):].strip() or None
-            continue
-        if line.startswith("--- "):
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ b/"):
-            current_path = line[len("+++ b/"):].strip() or None
-            current_is_source = _export_path_is_source(current_path)
-            pending_removed_path = None
-            continue
-        if line.startswith("+++ /dev/null"):
-            current_path = pending_removed_path
-            current_is_source = _export_path_is_source(current_path)
-            pending_removed_path = None
-            continue
-        if line.startswith("+++") or line.startswith("@@"):
-            continue
-        if not current_is_source or current_path is None:
+        if not _export_path_is_source(event.path):
             continue
         # Track BOTH sides: a definition on a `-` line that reappears on a `+`
         # line anywhere in the diff is a signature edit / move, NOT a removal
@@ -16113,8 +17740,8 @@ def _export_extract_removed_symbols(unified_diff: str) -> dict[str, str]:
         # false candidates); an indented `+def` (refactor into a class) does
         # NOT replace the removed top-level export — `from lib import helper`
         # callers still break, so it must not suppress the report.
-        if line.startswith("-"):
-            body = line[1:]
+        if event.kind == "remove":
+            body = event.text
             if body[:1].isspace():
                 continue
             for regex in _EXPORT_REMOVED_DEF_RES:
@@ -16122,19 +17749,19 @@ def _export_extract_removed_symbols(unified_diff: str) -> dict[str, str]:
                 if mm:
                     sym = mm.group(1)
                     if sym and sym not in out:
-                        out[sym] = current_path
+                        out[sym] = event.path
                     break
             continue
-        if line.startswith("+"):
-            body = line[1:]
+        if event.kind == "add":
+            body = event.text
             if body[:1].isspace():
                 continue
             for regex in _EXPORT_REMOVED_DEF_RES:
                 mm = regex.match(body)
                 if mm:
                     sym = mm.group(1)
-                    if sym and current_path:
-                        added.add((sym, current_path))
+                    if sym:
+                        added.add((sym, event.path))
                     break
             continue
     # Suppress ONLY same-file re-additions (signature edit / move within the
@@ -16150,7 +17777,8 @@ def _export_extract_removed_symbols(unified_diff: str) -> dict[str, str]:
 def _export_removed_export_refs(
     merge_base_sha: str,
     repo_root: Path,
-    files: list[dict[str, Any]],
+    *,
+    unified_diff: Optional[str | tuple[_ExportDiffEvent, ...]] = None,
 ) -> list[dict[str, Any]]:
     """Deleted symbols in the diff that are STILL referenced in the repo.
 
@@ -16162,13 +17790,15 @@ def _export_removed_export_refs(
     render states "no removed symbols still referenced (checked at export
     time)". Never claims completeness — false positives steer a human look.
     """
-    rc_u, out_u, _ = _export_run_git(
-        ["diff", "-M", "--unified=0", f"{merge_base_sha}..HEAD"],
-        cwd=repo_root,
-    )
-    if rc_u != 0:
-        return []
-    removed = _export_extract_removed_symbols(out_u)
+    if unified_diff is None:
+        rc_u, out_u, _ = _export_run_git(
+            ["diff", "-M", "--unified=0", f"{merge_base_sha}..HEAD"],
+            cwd=repo_root,
+        )
+        if rc_u != 0:
+            return []
+        unified_diff = out_u
+    removed = _export_extract_removed_symbols(unified_diff)
     if not removed:
         return []
 
@@ -16274,155 +17904,137 @@ def _export_task_evidence_block(
     }
 
 
-def _export_find_glossaries_downward(repo_root: Path) -> list[Path]:
-    """Find every `GLOSSARY.md` within the repo (downward walk).
-
-    The flow-next glossary model supports glossaries at the repo root **and
-    in any subdirectory** (CLAUDE.md "Project glossary" section). For PR
-    export, we need the full set so subdirectory-glossary deltas (e.g.
-    `apps/web/GLOSSARY.md`) surface in `glossary_changes`. The ancestor-walk
-    helper `find_all_glossaries(repo_root)` only returns the root file —
-    not what we want here.
-
-    Skips the same vendored / generated prefixes the triage classifier
-    skips (`node_modules/`, `vendor/`, `third_party/`, `dist/`, `build/`,
-    `.next/`, plugins/flow-next/codex/), plus `.git/` and `.flow/memory/`
-    (memory has its own export channel). Capped at
-    `GLOSSARY_WALK_MAX_DEPTH` levels deep as a defensive bound.
-    """
-    found: list[Path] = []
-    skip_dirs = {".git", "node_modules", "vendor", "third_party", "dist", "build", ".next"}
-    repo_root_resolved = repo_root.resolve()
-    repo_root_str = str(repo_root_resolved)
-
-    # Use os.walk with in-place dirnames pruning so massive vendored trees
-    # (node_modules, vendor, etc.) are never descended into. rglob() would
-    # walk the entire subtree before the post-filter could reject matches —
-    # O(N) on the full repo even when 99% of N is junk in monorepos.
-    for dirpath, dirnames, filenames in os.walk(repo_root_str, topdown=True):
-        # Compute depth of current dir relative to repo root.
-        try:
-            rel_dir = Path(dirpath).relative_to(repo_root_resolved)
-        except ValueError:
-            dirnames[:] = []
-            continue
-        rel_dir_parts = rel_dir.parts if rel_dir != Path(".") else ()
-        depth = len(rel_dir_parts)
-
-        # Depth cap: don't descend further than GLOSSARY_WALK_MAX_DEPTH dirs deep.
-        if depth >= GLOSSARY_WALK_MAX_DEPTH:
-            dirnames[:] = []
-            continue
-
-        # Prune skip_dirs in place so os.walk never recurses into them.
-        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
-
-        # Prune codex mirror and .flow/memory subtrees by exact prefix match.
-        rel_dir_posix = rel_dir.as_posix() if rel_dir != Path(".") else ""
-        if rel_dir_posix == "plugins/flow-next" and "codex" in dirnames:
-            dirnames.remove("codex")
-        if rel_dir_posix == ".flow" and "memory" in dirnames:
-            dirnames.remove("memory")
-
-        if GLOSSARY_FILE in filenames:
-            candidate = Path(dirpath) / GLOSSARY_FILE
-            try:
-                if candidate.is_file():
-                    found.append(candidate)
-            except OSError:
-                continue
-
-    found.sort()
-    return found
+_EXPORT_GLOSSARY_SKIP_DIRS: frozenset[str] = frozenset(
+    {".git", "node_modules", "vendor", "third_party", "dist", "build", ".next"}
+)
 
 
-def _export_find_glossaries_at_base(merge_base_sha: str, repo_root: Path) -> list[str]:
-    """Enumerate `GLOSSARY.md` paths that existed at the merge base.
-
-    Uses `git ls-tree -r <merge_base_sha> --name-only` to surface every
-    glossary path that existed at base, including ones the feature branch
-    deleted entirely (which the HEAD-only walk in
-    `_export_find_glossaries_downward` cannot see). Combined with the HEAD
-    walk to form the union over which `_export_glossary_diff` iterates.
-
-    Skips the same vendored / generated prefixes the HEAD walk skips so a
-    base-only `node_modules/.../GLOSSARY.md` doesn't sneak in. Returns
-    repo-relative POSIX paths sorted; empty list on git failure.
-    """
-    rc, out, _ = _export_run_git(
-        ["ls-tree", "-r", merge_base_sha, "--name-only"],
-        cwd=repo_root,
+def _export_is_glossary_candidate(path: str) -> bool:
+    """True when a changed path belongs to the export glossary surface."""
+    if not (path == GLOSSARY_FILE or path.endswith("/" + GLOSSARY_FILE)):
+        return False
+    parts = path.split("/")
+    if len(parts) - 1 > GLOSSARY_WALK_MAX_DEPTH:
+        return False
+    if any(part in _EXPORT_GLOSSARY_SKIP_DIRS for part in parts[:-1]):
+        return False
+    return not (
+        path.startswith("plugins/flow-next/codex/")
+        or path.startswith(".flow/memory/")
     )
-    if rc != 0:
-        return []
-    skip_dirs = {".git", "node_modules", "vendor", "third_party", "dist", "build", ".next"}
-    found: list[str] = []
-    for line in out.splitlines():
-        rel = line.strip()
-        if not rel:
-            continue
-        # Filename must be GLOSSARY.md (root or any subdir).
-        if not (rel == GLOSSARY_FILE or rel.endswith("/" + GLOSSARY_FILE)):
-            continue
-        parts = rel.split("/")
-        # Depth cap mirrors the HEAD walk (parts include filename).
-        if len(parts) - 1 > GLOSSARY_WALK_MAX_DEPTH:
-            continue
-        if any(part in skip_dirs for part in parts[:-1]):
-            continue
-        if rel.startswith("plugins/flow-next/codex/"):
-            continue
-        if rel.startswith(".flow/memory/"):
-            continue
-        found.append(rel)
-    found.sort()
-    return found
 
 
-def _export_glossary_diff(base_ref: str, merge_base_sha: str, repo_root: Path) -> dict[str, Any]:
+def _export_changed_glossary_paths(name_status: str) -> list[str]:
+    """Extract the sorted old/new glossary-path union from name-status."""
+    paths: set[str] = set()
+    for line in name_status.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0][:1]
+        candidates = parts[1:3] if status in ("R", "C") else parts[1:2]
+        for path in candidates:
+            if _export_is_glossary_candidate(path):
+                paths.add(path)
+    return sorted(paths)
+
+
+def _export_read_base_blobs(
+    merge_base_sha: str,
+    paths: list[str],
+    repo_root: Path,
+) -> dict[str, str]:
+    """Read base-side blobs in one ``git cat-file --batch`` process."""
+    if not paths:
+        return {}
+    request = "".join(f"{merge_base_sha}:{path}\n" for path in paths).encode()
+    try:
+        proc = subprocess.run(
+            ["git", "cat-file", "--batch"],
+            cwd=str(repo_root),
+            input=request,
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+
+    stream = io.BytesIO(proc.stdout or b"")
+    blobs: dict[str, str] = {}
+    for path in paths:
+        header = stream.readline()
+        if not header:
+            break
+        if header.rstrip().endswith(b" missing"):
+            continue
+        header_parts = header.rstrip(b"\n").rsplit(b" ", 2)
+        if len(header_parts) != 3:
+            break
+        try:
+            size = int(header_parts[2])
+        except ValueError:
+            break
+        body = stream.read(size)
+        if len(body) != size:
+            break
+        stream.read(1)  # git's record-separating newline
+        # Match the former ``git show(..., text=True, encoding="utf-8")``
+        # contract: an invalid glossary is an export error, never a silently
+        # missing base file that could erase the removed-term delta.
+        blobs[path] = body.decode("utf-8")
+    return blobs
+
+
+def _export_glossary_diff(
+    merge_base_sha: str,
+    repo_root: Path,
+    name_status: Optional[str] = None,
+    name_status_rc: Optional[int] = None,
+) -> dict[str, Any]:
     """Compute glossary added/removed terms vs the merge base.
 
-    Iterates the **union** of (HEAD-walk glossaries via
-    `_export_find_glossaries_downward`) and (base-tree glossaries via
-    `_export_find_glossaries_at_base`). For each repo-relative path:
-    reads HEAD text (empty if path doesn't exist in HEAD — covers
-    whole-file deletion), reads base text via `git show
-    <merge_base>:<rel_path>` (empty if path didn't exist at base — covers
-    new files), then diffs term sets. Empty diff or missing files →
+    Iterates only the old/new glossary path union in the branch diff. For each
+    repo-relative path:
+    reads HEAD text (empty if path doesn't exist in HEAD — covers whole-file
+    deletion), batch-reads base blobs with ``git cat-file`` (missing means the
+    path was added), then diffs term sets. Empty diff or missing files →
     `{"added": [], "removed": [], "renamed": []}`.
     """
     result: dict[str, Any] = {"added": [], "removed": [], "renamed": []}
-
-    # Build union of HEAD-walk and base-tree glossary paths (repo-relative POSIX).
-    head_glossaries = _export_find_glossaries_downward(repo_root)
-    head_rel_paths: dict[str, Path] = {}
-    for p in head_glossaries:
-        try:
-            head_rel_paths[p.relative_to(repo_root).as_posix()] = p
-        except ValueError:
-            continue
-    base_rel_paths = _export_find_glossaries_at_base(merge_base_sha, repo_root)
-    union_rel = sorted(set(head_rel_paths.keys()) | set(base_rel_paths))
-    if not union_rel:
+    if name_status is None:
+        name_status_rc, name_status, _ = _export_run_git(
+            ["diff", "--name-status", "-M", f"{merge_base_sha}..HEAD"],
+            cwd=repo_root,
+        )
+    if name_status_rc not in (None, 0):
         return result
 
-    for rel_posix in union_rel:
+    candidates = _export_changed_glossary_paths(name_status or "")
+    if not candidates:
+        return result
+    base_text_by_path = _export_read_base_blobs(
+        merge_base_sha, candidates, repo_root
+    )
+
+    for rel_posix in candidates:
         # HEAD content: read from disk if present; empty for whole-file deletion.
         head_text = ""
-        head_path = head_rel_paths.get(rel_posix)
-        if head_path is not None:
+        head_path = repo_root / rel_posix
+        try:
+            head_exists = head_path.is_file()
+        except OSError:
+            head_exists = False
+        if head_exists:
             try:
                 head_text = head_path.read_text(encoding="utf-8")
             except OSError:
                 head_text = ""
 
-        # Base content: empty for files added on the feature branch.
-        rc, base_text, _ = _export_run_git(
-            ["show", f"{merge_base_sha}:{rel_posix}"],
-            cwd=repo_root,
-        )
+        base_text = base_text_by_path.get(rel_posix, "")
         head_entries = parse_glossary_file(head_text) if head_text else []
-        base_entries = parse_glossary_file(base_text) if rc == 0 else []
+        base_entries = parse_glossary_file(base_text) if base_text else []
 
         head_terms = {
             re.sub(r"\s+", " ", e["term"].strip().lower()): e
@@ -16636,7 +18248,10 @@ def _export_memory_during_epic(
 
     # Decisions: knowledge/decisions/*
     for entry in _memory_iter_entries(
-        memory_dir, track="knowledge", category="decisions"
+        memory_dir,
+        track="knowledge",
+        category="decisions",
+        include_body=True,
     ):
         if not _within_window(entry["date"]):
             continue
@@ -16655,7 +18270,9 @@ def _export_memory_during_epic(
         )
 
     # Bugs: every bug-track category.
-    for entry in _memory_iter_entries(memory_dir, track="bug"):
+    for entry in _memory_iter_entries(
+        memory_dir, track="bug", include_body=True
+    ):
         if not _within_window(entry["date"]):
             continue
         body_first = _export_first_sentence(entry.get("body", ""))
@@ -16670,7 +18287,10 @@ def _export_memory_during_epic(
 
     # Architecture-patterns: knowledge/architecture-patterns/*
     for entry in _memory_iter_entries(
-        memory_dir, track="knowledge", category="architecture-patterns"
+        memory_dir,
+        track="knowledge",
+        category="architecture-patterns",
+        include_body=True,
     ):
         if not _within_window(entry["date"]):
             continue
@@ -16988,18 +18608,35 @@ def cmd_spec_export_cognitive_aid(args: argparse.Namespace) -> None:
         base_ref=base_ref,
     )
 
+    # Materialize all diff representations once. The parsed unified event
+    # stream is shared by summary/symbol/export/removed-reference analyses;
+    # name-status also bounds glossary work to changed candidates.
+    materialized_diff = _export_materialize_diff(merge_base_sha, repo_root)
+
     # --- Glossary diff ---
-    glossary_changes = _export_glossary_diff(base_ref, merge_base_sha, repo_root)
+    glossary_changes = _export_glossary_diff(
+        merge_base_sha,
+        repo_root,
+        name_status=materialized_diff.name_status,
+        name_status_rc=materialized_diff.name_status_rc,
+    )
 
     # --- Strategy alignment ---
     strategy_alignment = _export_strategy_alignment(spec_text)
 
     # --- Diff summary ---
-    diff_summary = _export_diff_summary(base_ref, merge_base_sha, repo_root)
+    diff_summary = _export_diff_summary(
+        base_ref,
+        merge_base_sha,
+        repo_root,
+        materialized=materialized_diff,
+    )
 
     # --- Removed-export references (fn-86 R3) ---
     removed_export_refs = _export_removed_export_refs(
-        merge_base_sha, repo_root, diff_summary["files"]
+        merge_base_sha,
+        repo_root,
+        unified_diff=materialized_diff.events,
     )
 
     # --- Deferred findings ---
@@ -17156,6 +18793,219 @@ def cmd_task_set_backend(args: argparse.Namespace) -> None:
         print(f"Task {task_id} backend specs updated: {', '.join(updated)}")
 
 
+def _iter_task_h1_candidates(content: str):
+    """Yield (index, line) for lines eligible to be the task markdown H1.
+
+    A task body's `# ` lines are not all headings. Three places produce
+    look-alikes, and each one was found in production separately (PR #241),
+    so they are handled by ONE rule rather than three patches:
+
+      * YAML frontmatter - `# fn-1.1 metadata example` inside the opening
+        `---` block
+      * fenced code - a bash block whose comments start with `#`
+      * indented code - a four-space block, which is markdown code too
+
+    Eligible means: outside the opening frontmatter block, outside any fence,
+    and starting at column zero.
+    """
+    # Bare CR is a valid Markdown line ending. Splitting on "\n" alone treats a
+    # CR-delimited file as ONE line, so a `# <id> ...` sequence inside it could
+    # be imported as the title.
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    start = 0
+    # Column zero for BOTH delimiters: an indented `---` inside a block scalar
+    # is scalar content, not the closing delimiter.
+    if lines and lines[0] == "---":
+        for i in range(1, len(lines)):
+            if lines[i] == "---":
+                start = i + 1
+                break
+    # Track fences over the BODY ONLY. Frontmatter is YAML, not markdown, so a
+    # stray fence marker inside it (an indented ``` in a block scalar) must not
+    # leak fence state into the body and hide the real heading.
+    body = lines[start:]
+    fenced = [f for _, f in _iter_fence_aware(body)]
+    for offset, line in enumerate(body):
+        if offset < len(fenced) and fenced[offset]:
+            continue
+        if line.startswith("# "):
+            yield start + offset, line
+
+
+def _task_h1_title(content: str, task_id: str) -> Optional[str]:
+    """Extract the title from a task markdown H1 (`# <id> <title>`).
+
+    Returns None when no H1 is present or the H1 does not start with the
+    task id. Title is the remainder after `# <id>` (may be empty).
+
+    Candidate lines come from `_iter_task_h1_candidates`, which skips YAML
+    frontmatter, fenced code, and indented code. Reading a look-alike as the
+    H1 would sync the JSON title from an example while leaving the real
+    heading untouched - exactly the divergence this command exists to prevent.
+    """
+    # Scan for THIS task's heading rather than bailing on the first eligible
+    # one - `_task_rewrite_h1` targets the task's own H1, and the read and
+    # write paths must agree or set-spec reports None while set-title rewrites.
+    prefix = f"{task_id} "
+    for _, line in _iter_task_h1_candidates(content):
+        body = line[2:].strip()
+        if body == task_id:
+            return ""
+        if body.startswith(prefix):
+            return body[len(prefix) :].strip()
+    return None
+
+
+def _task_rewrite_h1(content: str, task_id: str, title: str) -> str:
+    """Rewrite (or insert) the task markdown H1 to `# <id> <title>`.
+
+    Uses the same candidate rule as `_task_h1_title`, and here the cost of
+    getting it wrong is higher: rewriting a `# ...` line inside frontmatter or
+    a code block would corrupt content the task body is documenting.
+    """
+    lines = content.splitlines(keepends=True)
+    new_h1 = f"# {task_id} {title}\n"
+    for i, cand in _iter_task_h1_candidates(content):
+        # Rewrite the H1 that BELONGS to this task. `_task_h1_title` only
+        # accepts a heading whose text starts with the task id, so targeting
+        # the first eligible heading here would let an unrelated leading H1 be
+        # overwritten while the read path reported None - the two must agree.
+        body_text = cand[2:].strip()
+        if body_text != task_id and not body_text.startswith(f"{task_id} "):
+            continue
+        if i < len(lines):
+            line = lines[i]
+            # Preserve the ORIGINAL terminator. `splitlines(keepends=True)`
+            # keeps bare "\r" and "\r\n" too; recognizing only "\n" would strip
+            # the separator and glue the heading onto the next line.
+            if line.endswith("\r\n"):
+                newline = "\r\n"
+            elif line.endswith("\n"):
+                newline = "\n"
+            elif line.endswith("\r"):
+                newline = "\r"
+            else:
+                newline = ""
+            lines[i] = f"# {task_id} {title}{newline}"
+            return "".join(lines)
+    # No H1 — insert after optional YAML frontmatter, else at the top.
+    # Delimiters must be column-zero here for the SAME reason as in
+    # `_iter_task_h1_candidates`: an indented `---` inside a block scalar is
+    # scalar content, and treating it as the close inserts the heading INTO the
+    # frontmatter. (The two paths were fixed separately, which is how this one
+    # kept its own strip-based check - hence the explicit note.)
+    # Exact delimiter line only: content beginning `---text` (a setext rule, a
+    # sentence with a leading dash run) is BODY, not frontmatter.
+    # Normalize bare CR first, exactly as `_iter_task_h1_candidates` does -
+    # splitting on "\n" alone makes a CR-delimited document ONE line, the
+    # delimiter check fails, and the heading is prepended before `---`,
+    # breaking frontmatter recognition for every Markdown tool downstream.
+    _norm = content.replace("\r\n", "\n").replace("\r", "\n")
+    first_line = _norm.split("\n", 1)[0]
+    if first_line == "---":
+        parts = content.splitlines(keepends=True)
+        close_idx = None
+        for i in range(1, len(parts)):
+            if parts[i].rstrip("\r\n") == "---":
+                close_idx = i
+                break
+        if close_idx is not None:
+            insert_at = close_idx + 1
+            # Skip a single blank line after the closing --- so we don't
+            # stack empties; always leave exactly one blank if the body
+            # already had separation.
+            while insert_at < len(parts) and parts[insert_at].strip() == "":
+                insert_at += 1
+            # Match the document's own terminator so a CR- or CRLF-delimited
+            # file does not end up with mixed line endings.
+            close_line = parts[close_idx]
+            if close_line.endswith("\r\n"):
+                term = "\r\n"
+            elif close_line.endswith("\r"):
+                term = "\r"
+            else:
+                term = "\n"
+            h1 = f"# {task_id} {title}{term}"
+            return "".join(parts[: close_idx + 1] + [term, h1] + parts[insert_at:])
+    if content and not content.endswith("\n"):
+        return new_h1 + content + "\n"
+    return new_h1 + content
+
+
+def _reject_multiline_title(title: str, *, use_json: bool = False) -> None:
+    """A task title must be one line, at EVERY entry point that sets one.
+
+    The H1 can only carry the first line while the JSON keeps the whole string,
+    so a newline splits the two representations apart and a later
+    `task set-spec --file` silently truncates the JSON title to that first
+    line. `set-title` guarded this first; `task create` did not, which left the
+    same bad state reachable one command earlier (PR #241).
+    """
+    if any(c in (title or "") for c in "\r\n"):
+        error_exit(
+            "Title must be a single line (no CR/LF) - the markdown H1 cannot "
+            "represent a multiline title, so the JSON and H1 would disagree.",
+            use_json=use_json,
+        )
+
+
+def cmd_task_set_title(args: argparse.Namespace) -> None:
+    """Rename a task: update JSON ``title`` and markdown H1 together (R21).
+
+    Title lives in exactly two places — the task JSON and the markdown H1.
+    This command writes both so they cannot disagree. Task ids are permanent
+    (unlike unlinked ``fn-*`` specs); only the display title changes.
+    """
+    if not ensure_flow_exists():
+        error_exit(
+            ".flow/ does not exist. Run 'flowctl init' first.", use_json=args.json
+        )
+
+    task_id = casefold_handle(args.id)
+    if not is_task_id(task_id):
+        error_exit(
+            f"Invalid task ID: {task_id}. Expected format: fn-N.M or fn-N-slug.M "
+            f"(e.g., fn-1.2, fn-1-add-auth.2)",
+            use_json=args.json,
+        )
+
+    flow_dir = get_flow_dir()
+    task_id = resolve_task_arg(flow_dir, task_id, use_json=args.json)
+    task_json_path = flow_dir / TASKS_DIR / f"{task_id}.json"
+    task_spec_path = flow_dir / TASKS_DIR / f"{task_id}.md"
+
+    if not task_json_path.exists():
+        error_exit(f"Task {task_id} not found", use_json=args.json)
+
+    title = (args.title or "").strip()
+    if not title:
+        error_exit("Title must be non-empty", use_json=args.json)
+    _reject_multiline_title(title, use_json=args.json)
+
+    task_data = load_json_or_exit(task_json_path, f"Task {task_id}", use_json=args.json)
+    task_data["title"] = title
+    task_data["updated_at"] = now_iso()
+    canonicalize_task_for_write(task_data)
+
+    if task_spec_path.exists():
+        current = read_text_or_exit(
+            task_spec_path, f"Task {task_id} spec", use_json=args.json
+        )
+        atomic_write(task_spec_path, _task_rewrite_h1(current, task_id, title))
+    atomic_write_json(task_json_path, task_data)
+
+    if args.json:
+        json_output(
+            {
+                "id": task_id,
+                "title": title,
+                "message": f"Task {task_id} title updated",
+            }
+        )
+    else:
+        print(f"Task {task_id} title updated: {title}")
+
+
 def cmd_task_set_description(args: argparse.Namespace) -> None:
     """Set task description section."""
     _task_set_section(args.id, "## Description", args.file, args.json)
@@ -17171,6 +19021,10 @@ def cmd_task_set_spec(args: argparse.Namespace) -> None:
 
     Full replacement mode: --file replaces entire spec content (like epic set-plan).
     Section patch mode: --description and/or --acceptance update specific sections.
+
+    fn-134.7 / R21: on ``--file``, the markdown H1 title is synced into the
+    JSON ``title`` field so the two representations cannot disagree. A missing
+    or malformed H1 is rejected rather than leaving JSON stale.
     """
     if not ensure_flow_exists():
         error_exit(
@@ -17229,13 +19083,43 @@ def cmd_task_set_spec(args: argparse.Namespace) -> None:
             }
             content = content.rstrip("\n") + "\n\n" + "\n".join(
                 _stubs[h] for h in _missing)
+        # R21: keep JSON title and markdown H1 agreed after --file replace.
+        # Prefer the H1 when present and well-formed; otherwise pin the H1 to
+        # the current JSON title (refuse to leave the two out of sync). Empty
+        # H1 titles are rejected.
+        h1_title = _task_h1_title(content, task_id)
+        if h1_title is not None and not h1_title:
+            error_exit(
+                f"Task {task_id} H1 title must be non-empty "
+                f"(`# {task_id} <title>`)",
+                use_json=args.json,
+            )
+        if h1_title:
+            task_data["title"] = h1_title
+        else:
+            # Missing/malformed H1 — rewrite from JSON so dual-rep agrees.
+            existing_title = (task_data.get("title") or "").strip()
+            if not existing_title:
+                error_exit(
+                    f"Task {task_id} --file content needs H1 "
+                    f"`# {task_id} <title>` (JSON title is empty)",
+                    use_json=args.json,
+                )
+            content = _task_rewrite_h1(content, task_id, existing_title)
+            h1_title = existing_title
         atomic_write(task_spec_path, content)
         task_data["updated_at"] = now_iso()
         canonicalize_task_for_write(task_data)
         atomic_write_json(task_json_path, task_data)
 
         if args.json:
-            json_output({"id": task_id, "message": f"Task {task_id} spec replaced"})
+            json_output(
+                {
+                    "id": task_id,
+                    "title": h1_title,
+                    "message": f"Task {task_id} spec replaced",
+                }
+            )
         else:
             print(f"Task {task_id} spec replaced")
         return
@@ -17584,6 +19468,7 @@ def cmd_ready(args: argparse.Namespace) -> None:
 
     # MU-2: Get current actor for display (marks your tasks)
     current_actor = get_actor()
+    tasks_dir = flow_dir / TASKS_DIR
 
     # Spec-level dependency gate (GH PR #95): a spec blocked by unfinished
     # depends_on_epics must not report its tasks as ready. Same dep rule as
@@ -17620,22 +19505,21 @@ def cmd_ready(args: argparse.Namespace) -> None:
             print(f"Spec {spec_id} is blocked by: {', '.join(blocked_by_specs)}")
         return
 
-    # Get all tasks for spec (with merged runtime state)
-    tasks_dir = flow_dir / TASKS_DIR
+    # Get all tasks for spec from the command-scoped inventory.
     if not tasks_dir.exists():
         error_exit(
             f"{TASKS_DIR}/ missing. Run 'flowctl init' or fix repo state.",
             use_json=args.json,
         )
-    tasks = {}
-    for task_file in tasks_dir.glob(f"{spec_id}.*.json"):
-        task_id = task_file.stem
-        if not is_task_id(task_id):
-            continue  # Skip non-task files (e.g., fn-1.2-review.json)
-        task_data = load_task_with_state(task_id, use_json=args.json)
-        if "id" not in task_data:
-            continue  # Skip artifact files (GH-21)
-        tasks[task_data["id"]] = task_data
+    inventory = TaskInventory.load(
+        flow_dir,
+        use_json=args.json,
+        spec_id=spec_id,
+    )
+    tasks = {
+        task["id"]: task
+        for task in inventory.by_spec.get(spec_id, [])
+    }
 
     # Find ready tasks (status=todo, all deps done)
     ready = []
@@ -17764,6 +19648,8 @@ def cmd_next(args: argparse.Namespace) -> None:
         epic_ids.sort(key=id_sort_key)
 
     current_actor = get_actor()
+    tasks_dir = flow_dir / TASKS_DIR
+    inventory = None
 
     def sort_key(t: dict) -> tuple[int, int]:
         # fn-52.10: tracker-aware task suffix (parse_id is fn-only).
@@ -17816,23 +19702,28 @@ def cmd_next(args: argparse.Namespace) -> None:
                 print(f"plan {epic_id} needs_plan_review")
             return
 
-        tasks_dir = flow_dir / TASKS_DIR
         if not tasks_dir.exists():
             error_exit(
                 f"{TASKS_DIR}/ missing. Run 'flowctl init' or fix repo state.",
                 use_json=args.json,
             )
+        if inventory is None:
+            inventory = TaskInventory.load(
+                flow_dir,
+                use_json=args.json,
+                spec_ids=set(epic_ids),
+                collect_consistency_errors=True,
+                collect_load_errors=True,
+            )
 
-        tasks: dict[str, dict] = {}
-        for task_file in tasks_dir.glob(f"{epic_id}.*.json"):
-            task_id = task_file.stem
-            if not is_task_id(task_id):
-                continue  # Skip non-task files (e.g., fn-1.2-review.json)
-            # Load task with merged runtime state
-            task_data = load_task_with_state(task_id, use_json=args.json)
-            if "id" not in task_data:
-                continue  # Skip artifact files (GH-21)
-            tasks[task_data["id"]] = task_data
+        task_issues = inventory.issues_by_spec.get(epic_id, [])
+        if task_issues:
+            error_exit(task_issues[0], use_json=args.json)
+
+        tasks = {
+            task["id"]: task
+            for task in inventory.by_spec.get(epic_id, [])
+        }
 
         # Resume in_progress tasks owned by current actor
         in_progress = [
@@ -18331,7 +20222,10 @@ def validate_flow_root(flow_dir: Path) -> list[str]:
 
 
 def validate_epic(
-    flow_dir: Path, epic_id: str, use_json: bool = True
+    flow_dir: Path,
+    epic_id: str,
+    use_json: bool = True,
+    inventory: Optional[TaskInventory] = None,
 ) -> tuple[list[str], list[str], int]:
     """Validate a single epic. Returns (errors, warnings, task_count)."""
     errors = []
@@ -18370,19 +20264,19 @@ def validate_epic(
             if not dep_path.exists():
                 errors.append(f"Spec {epic_id}: depends_on_epics missing spec {dep}")
 
-    # Get all tasks (with merged runtime state for accurate status)
-    tasks_dir = flow_dir / TASKS_DIR
-    tasks = {}
-    if tasks_dir.exists():
-        for task_file in tasks_dir.glob(f"{epic_id}.*.json"):
-            task_id = task_file.stem
-            if not is_task_id(task_id):
-                continue  # Skip non-task files (e.g., fn-1.2-review.json)
-            # Use merged state to get accurate status
-            task_data = load_task_with_state(task_id, use_json=use_json)
-            if "id" not in task_data:
-                continue  # Skip artifact files (GH-21)
-            tasks[task_data["id"]] = task_data
+    # Get all tasks from one command-scoped task/runtime snapshot.
+    if inventory is None:
+        inventory = TaskInventory.load(
+            flow_dir,
+            use_json=use_json,
+            spec_id=epic_id,
+            collect_consistency_errors=True,
+        )
+    tasks = {
+        task["id"]: task
+        for task in inventory.by_spec.get(epic_id, [])
+    }
+    errors.extend(inventory.issues_by_spec.get(epic_id, []))
 
     # Validate each task
     for task_id, task in tasks.items():
@@ -18525,7 +20419,9 @@ def cmd_rp_chat_send(args: argparse.Namespace) -> None:
     if res.returncode != 0:
         oracle_error = (res.stderr or res.stdout or "").strip()
         if not is_rp_tool_missing_error(oracle_error, "oracle_send"):
-            error_exit(f"rp-cli failed: {oracle_error}", use_json=False, code=2)
+            error_exit(
+                f"RepoPrompt CLI failed: {oracle_error}", use_json=False, code=2
+            )
         res = run_rp_cli(legacy_cmd)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
     chat_id = parse_chat_id(output)
@@ -18563,7 +20459,9 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
 
     # Step 1: pick-window
     roots = normalize_repo_root(repo_root)
-    win_id = bind_context_window(repo_root)
+    win_id = bind_context_window(
+        repo_root, create_if_missing=bool(getattr(args, "create", False))
+    )
     windows: list[dict[str, Any]] = []
     if win_id is None:
         result = run_rp_cli(["--raw-json", "-e", "windows"])
@@ -20787,6 +22685,7 @@ PILOT_RUNS_DIR_REL = ".flow/pilot-runs"
 # pilot skill records exactly one of these per tick; flowctl validates the
 # token but applies NO judgment about which is correct.
 PILOT_LOG_ACTIONS = ("triaged", "advanced", "asked", "blocked", "needs-human")
+PILOT_LOG_COUNTER_VERSION = 1
 
 
 def _pilot_log_id_slug(raw_id: str) -> str:
@@ -20885,6 +22784,99 @@ def _pilot_log_now() -> float:
     import time as _time
 
     return _time.time()
+
+
+def _pilot_log_recover_next_tick(
+    run_dir: Path,
+    id_slug: str,
+    raw_id: str,
+    state_hash: str,
+) -> int:
+    """Reconstruct next tick and backfill deterministic committed slots."""
+    max_tick = 0
+    for candidate in run_dir.glob(f"pilot-{id_slug}-*.json"):
+        try:
+            row = json.loads(candidate.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(row, dict) or row.get("id") != raw_id:
+            continue
+        tick = row.get("tick")
+        if not isinstance(tick, int) or isinstance(tick, bool) or tick < 1:
+            continue
+        max_tick = max(max_tick, tick)
+        slot_path = _pilot_log_tick_slot_path(run_dir, state_hash, tick)
+        if not slot_path.exists():
+            atomic_write_json(
+                slot_path,
+                {
+                    "version": PILOT_LOG_COUNTER_VERSION,
+                    "id": raw_id,
+                    "tick": tick,
+                    "row": candidate.name,
+                },
+            )
+    # Orphaned reservations (crash after slot, before row) remain consumed so
+    # recovery never reuses a tick that may have been observed by a caller.
+    slot_prefix = f".pilot-{state_hash}.tick-"
+    for slot_path in run_dir.glob(f"{slot_prefix}*.json"):
+        match = re.fullmatch(
+            re.escape(slot_prefix) + r"(\d+)\.json", slot_path.name
+        )
+        if match:
+            max_tick = max(max_tick, int(match.group(1)))
+    return max_tick + 1
+
+
+def _pilot_log_tick_slot_path(
+    run_dir: Path,
+    state_hash: str,
+    tick: int,
+) -> Path:
+    """Return the deterministic hidden reservation path for one tick."""
+    return run_dir / f".pilot-{state_hash}.tick-{tick}.json"
+
+
+def _pilot_log_read_next_tick(
+    counter_path: Path,
+    run_dir: Path,
+    raw_id: str,
+    state_hash: str,
+) -> Optional[int]:
+    """Read and validate counter state plus its one-row commit witness."""
+    try:
+        state = json.loads(counter_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(state, dict):
+        return None
+    next_tick = state.get("nextTick")
+    last_row_name = state.get("lastRow")
+    if (
+        state.get("version") != PILOT_LOG_COUNTER_VERSION
+        or state.get("id") != raw_id
+        or not isinstance(next_tick, int)
+        or isinstance(next_tick, bool)
+        or next_tick < 2
+        or not isinstance(last_row_name, str)
+        or Path(last_row_name).name != last_row_name
+    ):
+        return None
+    try:
+        last_row = json.loads(
+            (run_dir / last_row_name).read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(last_row, dict):
+        return None
+    if last_row.get("id") != raw_id or last_row.get("tick") != next_tick - 1:
+        return None
+    # A committed/orphaned deterministic slot means this counter is stale even
+    # when its last-row witness is internally valid. Never reuse that tick.
+    if _pilot_log_tick_slot_path(run_dir, state_hash, next_tick).exists():
+        return None
+    return next_tick
 
 
 def _branch_slug(branch: Optional[str] = None) -> str:
@@ -21199,6 +23191,14 @@ def cmd_sync_set_tracker_id(args: argparse.Namespace) -> None:
         use_json=args.json,
         allow_reference=True,
     )
+    # fn-134.2: while tracker.type is github/gitlab, an explicit native
+    # GH-N / GL-N key is reserved for synthesis — reject at link time too.
+    if validated_identifier is not None and validated_identifier[0]:
+        reject_synthetic_prefix_reservation(
+            validated_identifier[0],
+            validated_identifier[2],
+            use_json=args.json,
+        )
 
     spec_json_path, spec_data = _resolve_sync_spec(args)
 
@@ -21673,6 +23673,239 @@ def _read_optional_arg_or_file(file_arg: Optional[str], inline_arg: Optional[str
     return None
 
 
+CREATE_FIRST_DIR = "create-first"
+
+
+def _flow_path_is_contained(flow_dir: Path, target: Path) -> bool:
+    """True when `target` cannot escape `.flow/` through a symlinked component.
+
+    A repository is untrusted input. A checkout can ship `.flow/create-first`
+    or `.flow/.gitignore` as a symlink pointing outside the workspace; a
+    following `mkdir` + write then performs an arbitrary same-user file write
+    outside the repo. Both were reproduced before this guard existed.
+
+    `.flow` ITSELF being a symlink is legitimate and common (worktrees, shared
+    checkouts), so the resolved `.flow` is the root - only escapes from WITHIN
+    it are refused. Resolution walks to the deepest existing ancestor so the
+    check works before the leaf is created.
+    """
+    try:
+        root = flow_dir.resolve()
+        probe = target
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        real = probe.resolve()
+        return real == root or root in real.parents
+    except OSError:
+        return False
+
+
+def _flow_leaf_is_safe(flow_dir: Path, target: Path) -> bool:
+    """Containment PLUS: the leaf itself must not be a symlink.
+
+    Containment alone is insufficient. `.flow/.gitignore` symlinked to
+    `.flow/config.json` stays inside `.flow` and still clobbers the config
+    (reproduced: 1682 -> 1973 bytes of ignore rules). flowctl's own managed
+    runtime artifacts are never legitimately symlinks, so refuse the leaf
+    outright - `.flow` itself may still be a symlink, which is what
+    `_flow_path_is_contained` allows.
+    """
+    if not _flow_path_is_contained(flow_dir, target):
+        return False
+    # Walk EVERY component between .flow and the leaf. Checking only the leaf
+    # left an in-tree symlinked DIRECTORY open: `.flow/create-first` -> `specs`
+    # passes containment and writes records straight into `.flow/specs/`
+    # (reproduced). `.flow` itself may still be a symlink - the walk starts
+    # below it.
+    try:
+        root = flow_dir.resolve()
+        probe = target
+        while True:
+            if probe.is_symlink():
+                return False
+            parent = probe.parent
+            if parent == probe or parent.resolve() == root:
+                return True
+            probe = parent
+    except OSError:
+        return False
+
+
+CREATE_FIRST_KEY_RE = re.compile(r"[0-9a-f]{16}")
+
+
+def _create_first_dir(flow_dir: Path) -> Path:
+    return flow_dir / CREATE_FIRST_DIR
+
+
+def compute_create_first_key(tracker_type: str, title: str, body: str) -> str:
+    """Stable retry lookup key for a pre-spec create-first attempt (fn-134).
+
+    First 16 hex chars of sha256(type NUL title NUL body). Same inputs always
+    yield the same key, so a resumed run finds the record written by the
+    interrupted one and LINKS instead of creating a second issue. Must stay
+    identical to the definition in the tracker-sync skill's steps.md Phase 2d.
+    """
+    # Normalize the tracker type with the SAME strip/lower semantics as
+    # `_tracker_type_for_synthesis`. An interrupted run that started from an
+    # accepted spelling (`GitHub`, ` github `) must recompute the identical key
+    # after the config is normalized, or `create-first-get` misses the record
+    # and the workflow creates a second remote issue.
+    normalized_type = (tracker_type or "").strip().lower()
+    payload = "\0".join([normalized_type, title or "", body or ""])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def cmd_sync_create_first_recovery(args: argparse.Namespace) -> None:
+    """Atomic pre-spec recovery records for tracker-sync `create-first`.
+
+    create-first creates a tracker issue BEFORE any local spec exists, so
+    `sync receipt` (which resolves a local spec id) cannot be used. This is the
+    thin, judgment-free file layer that makes "a retry links, never re-creates"
+    MECHANICAL rather than a promise the caller has to keep by hand.
+
+    Records live at `.flow/create-first/<key>.json` (gitignored - a committed
+    record would let a teammate computing the same key resume onto someone
+    else's issue). No tracker transport, no issue creation, no decisions.
+    """
+    use_json = getattr(args, "json", False)
+    if not ensure_flow_exists():
+        error_exit(".flow/ does not exist. Run 'flowctl init' first.", use_json=use_json)
+    flow_dir = get_flow_dir()
+    action = args.recovery_action
+
+    if action == "key":
+        body = ""
+        body_file = getattr(args, "body_file", None)
+        if body_file:
+            try:
+                body = Path(body_file).read_text(encoding="utf-8")
+            except OSError as exc:
+                error_exit(f"Cannot read --body-file: {exc}", use_json=use_json)
+        key = compute_create_first_key(args.type, args.title, body)
+        if use_json:
+            json_output({"key": key})
+        else:
+            print(key)
+        return
+
+    # The key is interpolated into a filesystem path, so it must be validated
+    # BEFORE the join, not trusted because callers normally pass
+    # `create-first-key` output. An unvalidated `--key ../config` resolves to
+    # `.flow/config.json`: `put` would overwrite it and `clear` would delete it.
+    if not CREATE_FIRST_KEY_RE.fullmatch(args.key or ""):
+        error_exit(
+            f"Invalid --key {args.key!r}: expected 16 lowercase hex characters "
+            "(the output of `flowctl sync create-first-key`).",
+            use_json=use_json,
+        )
+
+    path = _create_first_dir(flow_dir) / f"{args.key}.json"
+    if not _flow_leaf_is_safe(flow_dir, path):
+        error_exit(
+            "Refusing to touch a create-first record outside .flow/ - "
+            f"{path} resolves out of the workspace (symlinked component). "
+            "Remove the symlink; flowctl never writes through it.",
+            use_json=use_json,
+        )
+
+    if action == "get":
+        if not path.exists():
+            # Absent is a normal branch, not a crash: the caller uses the exit
+            # status to decide create-vs-link.
+            if use_json:
+                print("{}")
+            sys.exit(1)
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            error_exit(f"Unreadable recovery record: {exc}", use_json=use_json)
+        if use_json:
+            json_output(record)
+        else:
+            for field in ("id", "identifier", "url", "title", "transport", "createdAt"):
+                if record.get(field):
+                    print(f"{field}: {record[field]}")
+        return
+
+    if action == "put":
+        record = {
+            "retryKey": args.key,
+            "id": args.id,
+            "identifier": args.identifier,
+            "url": args.url,
+            "title": args.title,
+            "createdAt": now_iso(),
+            "transport": args.transport,
+        }
+        # Recorded only once the mint succeeds. A resumed run reads this instead
+        # of rebuilding `<key>-<number>-<slug>`, which is not reconstructible
+        # when the title slugifies to empty (CJK- or emoji-only titles get a
+        # random suffix from `spec create`).
+        spec_id = getattr(args, "spec_id", None)
+        if spec_id:
+            record["specId"] = spec_id
+        existing = None
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = None
+        if existing and existing.get("createdAt"):
+            # Idempotent: a second put keeps the ORIGINAL creation time so the
+            # record still describes when the remote issue was actually made.
+            record["createdAt"] = existing["createdAt"]
+        if existing and existing.get("specId") and not record.get("specId"):
+            # A later put (e.g. re-recording transport) must not drop a specId
+            # an earlier post-mint put already established.
+            record["specId"] = existing["specId"]
+        # Reconcile the ignore block AT WRITE TIME, not on some future `init`.
+        # A project whose auto-managed .flow/.gitignore predates this release
+        # would otherwise get an untracked-but-unignored recovery record, and a
+        # `git add -A` would commit it - letting another checkout computing the
+        # same retry key resume onto the first developer's issue.
+        # NOTE: `_ensure_flow_gitignore` returns False for a NO-OP (already
+        # current) as well as for a refusal, so its return value cannot be the
+        # safety signal - check the leaf explicitly.
+        if not _flow_leaf_is_safe(flow_dir, flow_dir / ".gitignore"):
+            # The ignore block cannot be ensured, so a record written now would
+            # be committable - and a committed record lets another checkout
+            # computing the same key resume onto someone else's issue. That is
+            # the exact failure the ignore prevents, so refuse rather than write
+            # an unprotected record.
+            error_exit(
+                "Refusing to write a recovery record: .flow/.gitignore could not "
+                "be ensured (unsafe or symlinked). An unignored record can be "
+                "committed and let another checkout resume onto someone else's "
+                "issue. Restore .flow/.gitignore as a regular file.",
+                use_json=use_json,
+            )
+        _ensure_flow_gitignore(flow_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(path, record)
+        if use_json:
+            json_output({"recorded": True, **record})
+        else:
+            print(f"Recovery record written: {path}")
+        return
+
+    if action == "clear":
+        removed = False
+        if path.exists():
+            try:
+                path.unlink()
+                removed = True
+            except OSError as exc:
+                error_exit(f"Cannot clear recovery record: {exc}", use_json=use_json)
+        if use_json:
+            json_output({"cleared": removed, "key": args.key})
+        else:
+            print("cleared" if removed else "nothing to clear")
+        return
+
+    error_exit(f"Unknown recovery action '{action}'", use_json=use_json)
+
+
 def cmd_sync_receipt(args: argparse.Namespace) -> None:
     """Write a sync run receipt (R12) at a guard-safe path.
 
@@ -21791,10 +24024,11 @@ def cmd_pilot_log_append(args: argparse.Namespace) -> None:
     # Filename hash of the RAW id: stamped into both the lock-file name and the
     # row-file name so two distinct ids that normalize to the same slug never
     # share a lock OR clobber each other's path (review finding #1).
-    id_hash = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()[:8]
+    full_id_hash = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()
+    id_hash = full_id_hash[:8]
 
-    # The count+write is serialized under a per-id exclusive CROSS-PLATFORM lock
-    # so two concurrent same-id appends can't both read N rows and both write
+    # Tick reservation + write is serialized under a per-id CROSS-PLATFORM lock
+    # so two concurrent same-id appends can't both reserve N+1 and both write
     # tick=N+1 (review finding #1 follow-up — duplicate-tick race). The lock is a
     # `.pilot-<id-hash>.lock` DIRECTORY: `os.mkdir` is atomic on POSIX AND Windows
     # (raw `fcntl.flock` is Unix-only and a no-op on Windows, so it failed to
@@ -21804,20 +24038,31 @@ def cmd_pilot_log_append(args: argparse.Namespace) -> None:
     # the summary glob ever sees it (and it still matches the `.pilot-*.lock`
     # glob a caller may use to spot the lock).
     lock_path = run_dir / f".pilot-{id_hash}.lock"
+    counter_path = run_dir / f".pilot-{full_id_hash}.counter.json"
     with _pilot_log_lock(lock_path):
-        # Per-id monotonic tick = (#existing rows whose STORED id == this raw
-        # id) + 1. The slug glob is a cheap pre-filter; we then read each
-        # candidate's `id` and count EXACT raw-id matches so two distinct ids
-        # that normalize to the same slug never share a counter. A row whose
-        # JSON can't be read is skipped — it can't belong to this id.
-        tick = 1
-        for cand in run_dir.glob(f"pilot-{id_slug}-*.json"):
-            try:
-                cand_data = json.loads(cand.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                continue
-            if isinstance(cand_data, dict) and cand_data.get("id") == raw_id:
-                tick += 1
+        # Steady state reads one counter + its one-row commit witness. Missing,
+        # malformed, mismatched, or crash-ahead state reconstructs once from
+        # historical rows, then self-heals the counter below.
+        tick = _pilot_log_read_next_tick(
+            counter_path, run_dir, raw_id, full_id_hash
+        )
+        if tick is None:
+            tick = _pilot_log_recover_next_tick(
+                run_dir, id_slug, raw_id, full_id_hash
+            )
+
+        slot_path = _pilot_log_tick_slot_path(run_dir, full_id_hash, tick)
+        if slot_path.exists():
+            tick = _pilot_log_recover_next_tick(
+                run_dir, id_slug, raw_id, full_id_hash
+            )
+            slot_path = _pilot_log_tick_slot_path(
+                run_dir, full_id_hash, tick
+            )
+
+        timestamp = now_iso()
+        ts_slug = timestamp.replace(":", "").replace("-", "").replace(".", "")
+        row_path = run_dir / f"pilot-{id_slug}-{tick}-{ts_slug}-{id_hash}.json"
 
         row = {
             "tick": tick,
@@ -21825,14 +24070,32 @@ def cmd_pilot_log_append(args: argparse.Namespace) -> None:
             "action": action,
             "stage": stage,
             "costTokens": getattr(args, "cost_tokens", None),
-            "timestamp": now_iso(),
+            "timestamp": timestamp,
         }
 
-        # Filename: slug + tick + timestamp + id-hash, unique per write even
-        # for slug-colliding ids or two appends in the same timestamp tick.
-        ts_slug = now_iso().replace(":", "").replace("-", "").replace(".", "")
-        row_path = run_dir / f"pilot-{id_slug}-{tick}-{ts_slug}-{id_hash}.json"
+        # Reserve the deterministic tick slot before publishing the row. A
+        # crash leaves an occupied slot, so recovery skips rather than reuses
+        # a possibly observed tick. Counter publication comes last: it is only
+        # a fast pointer to a fully committed slot+row pair.
+        atomic_write_json(
+            slot_path,
+            {
+                "version": PILOT_LOG_COUNTER_VERSION,
+                "id": raw_id,
+                "tick": tick,
+                "row": row_path.name,
+            },
+        )
         atomic_write_json(row_path, row)
+        atomic_write_json(
+            counter_path,
+            {
+                "version": PILOT_LOG_COUNTER_VERSION,
+                "id": raw_id,
+                "nextTick": tick + 1,
+                "lastRow": row_path.name,
+            },
+        )
 
     if args.json:
         json_output(
@@ -22558,6 +24821,92 @@ def cmd_backend_review(
         )
 
 
+def _dispatch_backend_review(
+    *,
+    backend: str,
+    reg: dict,
+    args: argparse.Namespace,
+    prompt: str,
+    session_id: Optional[str],
+    repo_root: Path,
+    resolved_spec: "BackendSpec",
+    resolution_out: dict,
+    receipt_path: Optional[str],
+    spec_id: Optional[str],
+    review_kind: Optional[str],
+    review_type: str,
+    task_id: Optional[str] = None,
+) -> tuple[str, Optional[str], int, str]:
+    """Run a backend and refund if dispatch itself terminates before a result."""
+    try:
+        return reg["run_exec"](
+            prompt,
+            session_id=session_id,
+            repo_root=repo_root,
+            spec=resolved_spec,
+            resolution_out=resolution_out,
+            args=args,
+        )
+    except SystemExit:
+        attempt: dict = {}
+        if spec_id and review_kind:
+            attempt = record_review_attempt(
+                spec_id,
+                review_kind,
+                backend=backend,
+                output="backend dispatch terminated before returning output",
+                failure_class="dispatch_error",
+                task_id=task_id,
+                review_type=review_type,
+                use_json=args.json,
+            )
+        _clear_stale_review_receipt(receipt_path)
+        if attempt.get("transport_unhealthy"):
+            error_exit(
+                f"TRANSPORT_UNHEALTHY: {backend} {review_type} review failed "
+                f"before returning output "
+                f"{attempt['consecutive_transport_failures']} consecutive "
+                f"times (budget {attempt['transport_failure_cap']}). The "
+                f"reserved review round was refunded; repair the backend.",
+                use_json=args.json,
+                code=REVIEW_TRANSPORT_EXIT_CODE,
+            )
+        raise
+    except Exception as exc:
+        attempt = {}
+        detail = f"{type(exc).__name__}: {exc}"
+        if spec_id and review_kind:
+            attempt = record_review_attempt(
+                spec_id,
+                review_kind,
+                backend=backend,
+                output=detail,
+                failure_class="dispatch_exception",
+                task_id=task_id,
+                review_type=review_type,
+                use_json=args.json,
+            )
+        _clear_stale_review_receipt(receipt_path)
+        if attempt.get("transport_unhealthy"):
+            error_exit(
+                f"TRANSPORT_UNHEALTHY: {backend} {review_type} review failed "
+                f"before returning output "
+                f"{attempt['consecutive_transport_failures']} consecutive "
+                f"times (budget {attempt['transport_failure_cap']}). The "
+                f"reserved review round was refunded; repair the backend.",
+                use_json=args.json,
+                code=REVIEW_TRANSPORT_EXIT_CODE,
+            )
+        error_exit(
+            f"{reg['cli_label']} dispatch failed before returning output: "
+            f"{detail}. The reserved review round was refunded and the "
+            f"transport attempt recorded.",
+            use_json=args.json,
+            code=2,
+        )
+        raise AssertionError("error_exit must terminate")
+
+
 
 def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
     """Shared impl-review pipeline; per-backend variance via registry hooks."""
@@ -22662,13 +25011,20 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
         )
 
     _resolution: dict = {}
-    output, returned_session_id, exit_code, stderr = reg["run_exec"](
-        prompt,
+    output, returned_session_id, exit_code, stderr = _dispatch_backend_review(
+        backend=backend,
+        reg=reg,
+        args=args,
+        prompt=prompt,
         session_id=session_id,
         repo_root=repo_root,
-        spec=resolved_spec,
+        resolved_spec=resolved_spec,
         resolution_out=_resolution,
-        args=args,
+        receipt_path=receipt_path,
+        spec_id=None if standalone else spec_id_from_task(task_id),
+        review_kind=None if standalone else "impl",
+        review_type="impl",
+        task_id=None if standalone else task_id,
     )
 
     resolved_spec, effective_model, effective_effort = _bind_receipt_model_effort(
@@ -22679,6 +25035,10 @@ def _backend_impl_review(args: argparse.Namespace, backend: str) -> None:
     verdict = _finish_backend_exec(
         backend=backend, reg=reg, args=args, receipt_path=receipt_path,
         output=output, stderr=stderr, exit_code=exit_code,
+        spec_id=None if standalone else spec_id_from_task(task_id),
+        review_kind=None if standalone else "impl",
+        review_type="impl",
+        task_id=None if standalone else task_id,
     )
 
     if verdict == "SHIP" and not standalone:
@@ -22772,13 +25132,74 @@ def _finish_backend_exec(
     output: str,
     stderr: str,
     exit_code: int,
+    spec_id: Optional[str] = None,
+    review_kind: Optional[str] = None,
+    review_type: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> str:
-    """Shared post-exec gates: sandbox / nonzero / missing-verdict cleanup.
+    """Shared post-exec gates and verdict-aware round finalization.
 
-    Returns the parsed verdict string. Byte-compatible error messages and
-    exit codes with the pre-migration handlers.
+    A terminal verdict always consumes the reserved round, even if the process
+    also returned nonzero. Without a verdict, the reservation is refunded and
+    the transport attempt is recorded before the existing error is surfaced.
     """
-    if reg["has_sandbox"] and is_sandbox_failure(exit_code, output, stderr):
+    verdict = parse_codex_verdict(output)
+    if verdict:
+        if spec_id and review_kind:
+            record_review_attempt(
+                spec_id,
+                review_kind,
+                backend=backend,
+                output=output,
+                verdict=verdict,
+                task_id=task_id,
+                review_type=review_type,
+                use_json=args.json,
+            )
+        return verdict
+
+    sandbox_failure = (
+        reg["has_sandbox"] and is_sandbox_failure(exit_code, output, stderr)
+    )
+    combined = f"{stderr}\n{output}".lower()
+    if sandbox_failure:
+        failure_class = "sandbox"
+    elif "timed out" in combined or "timeout" in combined:
+        failure_class = "timeout"
+    elif exit_code != 0:
+        failure_class = "nonzero_exit"
+    elif not (output or "").strip():
+        failure_class = "empty_output"
+    else:
+        failure_class = "missing_verdict"
+
+    attempt: dict = {}
+    if spec_id and review_kind:
+        attempt = record_review_attempt(
+            spec_id,
+            review_kind,
+            backend=backend,
+            output=output,
+            failure_class=failure_class,
+            task_id=task_id,
+            review_type=review_type,
+            use_json=args.json,
+        )
+    if attempt.get("transport_unhealthy"):
+        _clear_stale_review_receipt(receipt_path)
+        count = attempt["consecutive_transport_failures"]
+        cap = attempt["transport_failure_cap"]
+        error_exit(
+            f"TRANSPORT_UNHEALTHY: {backend} {review_type or review_kind} "
+            f"review produced no verdict {count} consecutive times "
+            f"(budget {cap}). The reserved review round was refunded; repair "
+            f"the backend/environment before retrying. This is not review "
+            f"non-convergence and does not require review-rounds reset.",
+            use_json=args.json,
+            code=REVIEW_TRANSPORT_EXIT_CODE,
+        )
+
+    if sandbox_failure:
         _clear_stale_review_receipt(receipt_path)
         msg = (
             "Codex sandbox blocked operations. "
@@ -22792,17 +25213,16 @@ def _finish_backend_exec(
         msg = (stderr or output or f"{reg['cli_label']} failed").strip()
         error_exit(f"{reg['cli_label']} failed: {msg}", use_json=args.json, code=2)
 
-    verdict = parse_codex_verdict(output)
-    if not verdict:
-        _clear_stale_review_receipt(receipt_path)
-        error_exit(
-            f"{reg['no_verdict_label']} review completed but no verdict found "
-            f"in output. Expected <verdict>SHIP</verdict> or "
-            f"<verdict>NEEDS_WORK</verdict>",
-            use_json=args.json,
-            code=2,
-        )
-    return verdict
+    _clear_stale_review_receipt(receipt_path)
+    error_exit(
+        f"{reg['no_verdict_label']} review completed but no verdict found "
+        f"in output. Expected <verdict>SHIP</verdict> or "
+        f"<verdict>NEEDS_WORK</verdict>. The reserved review round was "
+        f"refunded and the transport attempt recorded.",
+        use_json=args.json,
+        code=2,
+    )
+    raise AssertionError("error_exit must terminate")
 
 
 def _bind_receipt_model_effort(
@@ -22895,13 +25315,19 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
     enforce_and_increment_review_cap(epic_id, "plan", use_json=args.json)
 
     _resolution: dict = {}
-    output, returned_session_id, exit_code, stderr = reg["run_exec"](
-        prompt,
+    output, returned_session_id, exit_code, stderr = _dispatch_backend_review(
+        backend=backend,
+        reg=reg,
+        args=args,
+        prompt=prompt,
         session_id=session_id,
         repo_root=repo_root,
-        spec=resolved_spec,
+        resolved_spec=resolved_spec,
         resolution_out=_resolution,
-        args=args,
+        receipt_path=receipt_path,
+        spec_id=epic_id,
+        review_kind="plan",
+        review_type="plan",
     )
 
     resolved_spec, effective_model, effective_effort = _bind_receipt_model_effort(
@@ -22912,6 +25338,9 @@ def _backend_plan_review(args: argparse.Namespace, backend: str) -> None:
     verdict = _finish_backend_exec(
         backend=backend, reg=reg, args=args, receipt_path=receipt_path,
         output=output, stderr=stderr, exit_code=exit_code,
+        spec_id=epic_id,
+        review_kind="plan",
+        review_type="plan",
     )
 
     if verdict == "SHIP":
@@ -23050,13 +25479,19 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
     enforce_and_increment_review_cap(epic_id, "plan", use_json=args.json)
 
     _resolution: dict = {}
-    output, returned_session_id, exit_code, stderr = reg["run_exec"](
-        prompt,
+    output, returned_session_id, exit_code, stderr = _dispatch_backend_review(
+        backend=backend,
+        reg=reg,
+        args=args,
+        prompt=prompt,
         session_id=session_id,
         repo_root=repo_root,
-        spec=resolved_spec,
+        resolved_spec=resolved_spec,
         resolution_out=_resolution,
-        args=args,
+        receipt_path=receipt_path,
+        spec_id=epic_id,
+        review_kind="plan",
+        review_type="completion",
     )
 
     resolved_spec, effective_model, effective_effort = _bind_receipt_model_effort(
@@ -23067,6 +25502,9 @@ def _backend_completion_review(args: argparse.Namespace, backend: str) -> None:
     verdict = _finish_backend_exec(
         backend=backend, reg=reg, args=args, receipt_path=receipt_path,
         output=output, stderr=stderr, exit_code=exit_code,
+        spec_id=epic_id,
+        review_kind="plan",
+        review_type="completion",
     )
 
     if verdict == "SHIP":
@@ -23210,7 +25648,14 @@ def build_completion_review_prompt(
         review_json_tally_block=REVIEW_JSON_TALLY_BLOCK,
     )
 
-    parts = []
+    parts = [
+        """## TERMINAL REVIEWER ROLE — execute this review directly
+
+You are the terminal reviewer, not a workflow coordinator. Review the supplied
+spec and implementation yourself. Do not invoke Flow-Next skills, run any
+`flowctl *-review` command, delegate the review, or launch another reviewer.
+Follow only the review contract below and end with exactly one verdict tag."""
+    ]
 
     parts.append(f"<spec>\n{epic_spec}\n</spec>")
 
@@ -23225,7 +25670,7 @@ def build_completion_review_prompt(
 
     parts.append(f"<review_instructions>\n{instruction}\n</review_instructions>")
 
-    return "\n\n".join(parts)
+    return "\n\n".join(parts) + "\n"
 
 def cmd_codex_completion_review(args: argparse.Namespace) -> None:
     """Run epic completion review via codex exec."""
@@ -24906,17 +27351,22 @@ def cmd_validate(args: argparse.Namespace) -> None:
             if num is not None:
                 epic_nums.setdefault(num, []).append(spec_id)
 
-        # Start with root errors
-        all_errors = list(root_errors)
-
-        # Detect spec ID collisions (multiple native specs with same fn-N prefix)
-        for num, ids in epic_nums.items():
+        # fn-134.2 / R13: duplicate ordinal with distinct full ids is untidy,
+        # not broken — a machine-readable WARNING via top-level root_warnings
+        # (not root_errors). validate --all --json previously had no root-warning
+        # collection, so moving the text into the warning count alone would
+        # print/count it while dropping it from JSON.
+        root_warnings: list[str] = []
+        for num in sorted(epic_nums):
+            ids = epic_nums[num]
             if len(ids) > 1:
-                all_errors.append(
+                root_warnings.append(
                     f"Spec ID collision: fn-{num} used by multiple specs: {', '.join(sorted(ids))}"
                 )
 
-        all_warnings = []
+        # One combined inventory drives validity, totals, and text rendering.
+        all_errors = list(root_errors)
+        all_warnings = list(root_warnings)
 
         # Detect orphaned spec markdown (md exists but no spec JSON)
         specs_dir = flow_dir / SPECS_DIR
@@ -24932,10 +27382,19 @@ def cmd_validate(args: argparse.Namespace) -> None:
                         )
         total_tasks = 0
         epic_results = []
+        inventory = TaskInventory.load(
+            flow_dir,
+            use_json=args.json,
+            spec_ids=set(epic_ids),
+            collect_consistency_errors=True,
+        )
 
         for epic_id in epic_ids:
             errors, warnings, task_count = validate_epic(
-                flow_dir, epic_id, use_json=args.json
+                flow_dir,
+                epic_id,
+                use_json=args.json,
+                inventory=inventory,
             )
             all_errors.extend(errors)
             all_warnings.extend(warnings)
@@ -24957,6 +27416,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
                 {
                     "valid": valid,
                     "root_errors": root_errors,
+                    "root_warnings": root_warnings,
                     "specs": epic_results,
                     "total_specs": len(epic_ids),
                     "total_epics": len(epic_ids),
@@ -25084,6 +27544,12 @@ _PRIME_SIZE_SMALL = 100_000
 _PRIME_SIZE_MEDIUM = 400_000
 _PRIME_SIZE_LARGE = 2_000_000
 _PRIME_HUGE_FILES = 20000
+
+# Root containment is checked for thousands of tracked files. Cache only the
+# root's realpath (targets still resolve independently) and fingerprint the
+# lexical root so a replaced/retargeted symlink invalidates safely.
+_PRIME_ROOT_REAL_CACHE: dict[str, tuple[tuple[int, int, int], str]] = {}
+_PRIME_ROOT_REAL_CACHE_MAX = 32
 
 # Path-based exclusion sets (content-hash dedup handled separately). Matched on
 # any path SEGMENT (POSIX-split) so nested occurrences are caught.
@@ -25224,6 +27690,54 @@ def _prime_git(
         return (1, "", str(exc))
 
 
+def _prime_git_many(
+    root: Path,
+    commands: "list[list[str]]",
+    collector: "_PrimeCollector",
+    timeout: int = _PRIME_GIT_TIMEOUT,
+) -> "list[tuple[int, str, str]]":
+    """Run independent Git probes concurrently; preserve result/error order."""
+    if not commands:
+        return []
+    if len(commands) == 1:
+        return [_prime_git(root, commands[0], collector, timeout=timeout)]
+
+    private_collectors = [
+        _PrimeCollector(f"{collector.name}-git-{index}")
+        for index in range(len(commands))
+    ]
+
+    def run(item: "tuple[list[str], _PrimeCollector]") -> "tuple[int, str, str]":
+        args, private = item
+        try:
+            return _prime_git(root, args, private, timeout=timeout)
+        except Exception as exc:
+            private.fail(exc)
+            return (1, "", str(exc))
+
+    try:
+        # Lazy import: Prime is specialized; ordinary flowctl startup must not
+        # pay concurrent.futures import cost.
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(4, len(commands))) as pool:
+            results = list(pool.map(run, zip(commands, private_collectors)))
+    except Exception:
+        # Thread/resource exhaustion must not turn the fail-soft classifier
+        # into a crash. Re-run in stable command order; read-only probes may
+        # repeat if executor submission failed partway through.
+        return [
+            _prime_git(root, args, collector, timeout=timeout)
+            for args in commands
+        ]
+
+    collector.op(len(commands))
+    for private in private_collectors:
+        for error in private.errors:
+            collector.fail(error)
+    return results
+
+
 def _prime_read_text(path: Path, cap: int = _PRIME_MAX_FILE_BYTES) -> Optional[str]:
     """Bounded, defensive text read (never raises; None on any failure)."""
     try:
@@ -25237,6 +27751,31 @@ def _prime_read_text(path: Path, cap: int = _PRIME_MAX_FILE_BYTES) -> Optional[s
         return None
 
 
+def _prime_root_real(root: Path) -> str:
+    """Resolve a classifier root once while detecting path retargeting."""
+    lexical = os.path.abspath(os.fspath(root))
+    try:
+        info = os.stat(lexical, follow_symlinks=False)
+        fingerprint = (info.st_dev, info.st_ino, info.st_mtime_ns)
+    except (OSError, ValueError):
+        return os.path.realpath(lexical)
+
+    cached = _PRIME_ROOT_REAL_CACHE.get(lexical)
+    if cached is not None and cached[0] == fingerprint:
+        return cached[1]
+
+    resolved = os.path.realpath(lexical)
+    if resolved != lexical:
+        # A symlinked root (including a symlinked parent) may retarget below
+        # the leaf fingerprint. Resolve it every time; containment beats cache.
+        _PRIME_ROOT_REAL_CACHE.pop(lexical, None)
+        return resolved
+    if len(_PRIME_ROOT_REAL_CACHE) >= _PRIME_ROOT_REAL_CACHE_MAX:
+        _PRIME_ROOT_REAL_CACHE.clear()
+    _PRIME_ROOT_REAL_CACHE[lexical] = (fingerprint, resolved)
+    return resolved
+
+
 def _prime_contained(root: Path, rel: str) -> Optional[Path]:
     """Join a git-tracked relative path onto `root` and confirm (via realpath)
     it stays inside `root`. Returns None on ANY escape - a `..` traversal, an
@@ -25245,7 +27784,7 @@ def _prime_contained(root: Path, rel: str) -> Optional[Path]:
     None sentinel as a skip. Does NOT open the file.
     """
     try:
-        base = os.path.realpath(str(root))
+        base = _prime_root_real(root)
         target = os.path.realpath(os.path.join(base, rel))
     except (OSError, ValueError):
         return None
@@ -25383,6 +27922,18 @@ def _prime_parse_ls_files_staged(
             pass
         if not entries:
             return ([], False)
+    finally:
+        if proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+        try:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=_PRIME_GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            pass
     if truncated:
         collector.note_truncated()
     return (entries, truncated)
@@ -25503,14 +28054,25 @@ def _prime_collect_lifecycle(
     c = _PrimeCollector("lifecycle", budget=16)
     evidence: list[str] = []
 
-    rc, out, _err = _prime_git(root, ["rev-list", "--count", "HEAD"], c)
+    commit_result, tags_result, first_result, authors_result = _prime_git_many(
+        root,
+        [
+            ["rev-list", "--count", "HEAD"],
+            ["tag"],
+            ["log", "--reverse", "--max-parents=0", "--format=%ct"],
+            ["shortlog", "-sne", "HEAD"],
+        ],
+        c,
+    )
+
+    rc, out, _err = commit_result
     commit_count = int(out.strip()) if rc == 0 and out.strip().isdigit() else 0
     if rc != 0:
         evidence.append("no commits (unborn HEAD)")
     else:
         evidence.append(f"{commit_count} commits")
 
-    rc, out, _err = _prime_git(root, ["tag"], c)
+    rc, out, _err = tags_result
     tags = len([ln for ln in out.splitlines() if ln.strip()]) if rc == 0 else 0
 
     # Reuse the CAPPED streamed inventory count instead of re-materializing
@@ -25559,9 +28121,7 @@ def _prime_collect_lifecycle(
     c.op()
 
     first_commit_days = 0
-    rc, out, _err = _prime_git(
-        root, ["log", "--reverse", "--max-parents=0", "--format=%ct"], c
-    )
+    rc, out, _err = first_result
     if rc == 0 and out.strip():
         first_ts = out.strip().splitlines()[0].strip()
         if first_ts.isdigit():
@@ -25570,7 +28130,7 @@ def _prime_collect_lifecycle(
             first_commit_days = max(0, int((time.time() - int(first_ts)) / 86400))
 
     single_contributor = False
-    rc, out, _err = _prime_git(root, ["shortlog", "-sne", "HEAD"], c)
+    rc, out, _err = authors_result
     if rc == 0:
         authors = [ln for ln in out.splitlines() if ln.strip()]
         single_contributor = len(authors) == 1
@@ -25859,7 +28419,7 @@ def _prime_collect_topology(
     prose_cross_repo_refs: list[str] = []
     seen_refs: set[str] = set()
     try:
-        root_real = os.path.realpath(str(root))
+        root_real = _prime_root_real(root)
     except (OSError, ValueError):
         root_real = str(root)
 
@@ -26963,6 +29523,7 @@ def _prime_collect_atomic_pairs(
     if pre_dedup is not None:
         deduped = pre_dedup
     tracked = set(deduped)
+    tracked_lower = {path.lower() for path in tracked}
     pairs: list[dict[str, Any]] = []
 
     def _add(kind: str, a: str, b: str) -> None:
@@ -26973,7 +29534,7 @@ def _prime_collect_atomic_pairs(
         low = rel.lower()
         if low.endswith(".pas"):
             dfm = rel[:-4] + ".dfm"
-            if dfm in tracked or (rel[:-4] + ".dfm").lower() in {t.lower() for t in tracked}:
+            if dfm in tracked or dfm.lower() in tracked_lower:
                 _add("delphi-form", rel, dfm)
         if low.endswith(".designer.cs"):
             base = rel[: -len(".designer.cs")] + ".cs"
@@ -27047,19 +29608,27 @@ def _prime_collect_docs_freshness(
     """FH1: last-commit timestamps for instruction/docs files vs src churn."""
     c = _PrimeCollector("substance-docs-freshness", budget=30)
     instruction_files: list[dict[str, Any]] = []
-    for doc in ("CLAUDE.md", "AGENTS.md", "README.md"):
-        rc, out, _err = _prime_git(root, ["log", "-1", "--format=%ct", "--", doc], c)
-        ts = int(out.strip()) if rc == 0 and out.strip().isdigit() else None
-        if ts is not None:
-            instruction_files.append({"path": doc, "last_commit_ts": ts})
+    docs = ("CLAUDE.md", "AGENTS.md", "README.md")
     # Newest source-file commit timestamp (pathspec-restricted to source exts).
     src_exts = sorted({os.path.splitext(p)[1] for p in _prime_iter_source(deduped)})
     src_pathspecs = [f"*{ext}" for ext in src_exts[:12]]
+    commands = [
+        ["log", "-1", "--format=%ct", "--", doc]
+        for doc in docs
+    ]
+    if src_pathspecs:
+        commands.append(
+            ["log", "-1", "--format=%ct", "--", *src_pathspecs]
+        )
+    results = _prime_git_many(root, commands, c)
+
+    for doc, (rc, out, _err) in zip(docs, results[: len(docs)]):
+        ts = int(out.strip()) if rc == 0 and out.strip().isdigit() else None
+        if ts is not None:
+            instruction_files.append({"path": doc, "last_commit_ts": ts})
     src_last_ts: Optional[int] = None
     if src_pathspecs:
-        rc, out, _err = _prime_git(
-            root, ["log", "-1", "--format=%ct", "--", *src_pathspecs], c
-        )
+        rc, out, _err = results[-1]
         if rc == 0 and out.strip().isdigit():
             src_last_ts = int(out.strip())
     return (
@@ -28557,6 +31126,49 @@ def main() -> None:
     p_sync_setdep.add_argument("--json", action="store_true", help="JSON output")
     p_sync_setdep.set_defaults(func=cmd_sync_set_dep_relation)
 
+    # fn-134: pre-spec recovery for tracker-sync `create-first`. Thin atomic file
+    # layer only - it makes "a retry links, never re-creates" mechanical instead
+    # of a prose promise. No transport, no issue creation, no judgment.
+    # fn-134: pre-spec recovery for tracker-sync `create-first`. Thin atomic file
+    # layer only - it makes "a retry links, never re-creates" mechanical instead
+    # of a prose promise. Flat two-token names match every other sync subcommand
+    # (set-tracker-id, check-collisions, list-dep-relations); no 3-level nesting.
+    p_cfk = sync_sub.add_parser("create-first-key", help="Compute the create-first retry lookup key")
+    p_cfk.add_argument("--type", required=True, help="tracker.type (linear|github|gitlab|jira)")
+    p_cfk.add_argument("--title", required=True, help="Issue title")
+    p_cfk.add_argument("--body-file", dest="body_file", default=None, help="File holding the issue body")
+    p_cfk.add_argument("--json", action="store_true", help="JSON output")
+    p_cfk.set_defaults(func=cmd_sync_create_first_recovery, recovery_action="key")
+
+    p_cfg = sync_sub.add_parser("create-first-get", help="Read a create-first recovery record (exit 1 when absent)")
+    p_cfg.add_argument("--key", required=True, help="Retry lookup key")
+    p_cfg.add_argument("--json", action="store_true", help="JSON output")
+    p_cfg.set_defaults(func=cmd_sync_create_first_recovery, recovery_action="get")
+
+    p_cfp = sync_sub.add_parser("create-first-put", help="Record a created-but-unminted issue")
+    for _flag, _hlp in (
+        ("--id", "Tracker issue id"),
+        ("--identifier", "Tracker display identifier"),
+        ("--url", "Issue url"),
+        ("--title", "Issue title"),
+        ("--transport", "Transport used"),
+    ):
+        p_cfp.add_argument(_flag, required=True, help=_hlp)
+    p_cfp.add_argument("--key", required=True, help="Retry lookup key")
+    p_cfp.add_argument(
+        "--spec-id",
+        default=None,
+        help="Minted spec id, recorded after a successful mint so a resumed run "
+        "finds it instead of reconstructing it from key/number/slug",
+    )
+    p_cfp.add_argument("--json", action="store_true", help="JSON output")
+    p_cfp.set_defaults(func=cmd_sync_create_first_recovery, recovery_action="put")
+
+    p_cfc = sync_sub.add_parser("create-first-clear", help="Remove a recovery record after mint+attach")
+    p_cfc.add_argument("--key", required=True, help="Retry lookup key")
+    p_cfc.add_argument("--json", action="store_true", help="JSON output")
+    p_cfc.set_defaults(func=cmd_sync_create_first_recovery, recovery_action="clear")
+
     p_sync_receipt = sync_sub.add_parser(
         "receipt", help="Write a sync run receipt (guard-safe path, type: sync)"
     )
@@ -28737,6 +31349,69 @@ def main() -> None:
     p_rr_reset.add_argument("--json", action="store_true", help="JSON output")
     p_rr_reset.set_defaults(func=cmd_review_rounds_reset)
 
+    p_rr_record = review_rounds_sub.add_parser(
+        "record",
+        help="Record an RP response; refund the reserved round when no verdict exists",
+    )
+    p_rr_record.add_argument("id", help="Spec ID (e.g., fn-1, fn-1-add-auth)")
+    p_rr_record.add_argument(
+        "--kind",
+        required=True,
+        choices=["plan", "impl"],
+        help="Counter kind (completion reviews use plan)",
+    )
+    p_rr_record.add_argument(
+        "--review-type",
+        required=True,
+        choices=["plan", "impl", "completion"],
+        help="Actual review workflow (completion shares the plan counter)",
+    )
+    p_rr_record.add_argument(
+        "--task", help="Task ID (required with --kind impl; counter is per-task)"
+    )
+    p_rr_record.add_argument("--backend", default="rp", help="Review backend")
+    p_rr_record.add_argument(
+        "--output-file", required=True, help="File containing reviewer output"
+    )
+    p_rr_record.add_argument(
+        "--exit-code", type=int, default=0, help="Transport process exit code"
+    )
+    p_rr_record.add_argument(
+        "--failure-class",
+        choices=[
+            "sandbox",
+            "timeout",
+            "nonzero_exit",
+            "empty_output",
+            "missing_verdict",
+        ],
+        help="Explicit no-verdict failure class",
+    )
+    p_rr_record.add_argument("--json", action="store_true", help="JSON output")
+    p_rr_record.set_defaults(func=cmd_review_rounds_record)
+
+    p_rr_attempts = review_rounds_sub.add_parser(
+        "attempts", help="Show verdict-bearing and refunded review attempts"
+    )
+    p_rr_attempts.add_argument("id", help="Spec ID (e.g., fn-1, fn-1-add-auth)")
+    p_rr_attempts.add_argument(
+        "--kind",
+        required=True,
+        choices=["plan", "impl"],
+        help="Counter kind (completion reviews use plan)",
+    )
+    p_rr_attempts.add_argument(
+        "--review-type",
+        required=True,
+        choices=["plan", "impl", "completion"],
+        help="Actual review workflow to report",
+    )
+    p_rr_attempts.add_argument(
+        "--task", help="Task ID (required with --kind impl; counter is per-task)"
+    )
+    p_rr_attempts.add_argument("--json", action="store_true", help="JSON output")
+    p_rr_attempts.set_defaults(func=cmd_review_rounds_attempts)
+
     # memory
     p_memory = subparsers.add_parser("memory", help="Memory commands")
     memory_sub = p_memory.add_subparsers(dest="memory_cmd", required=True)
@@ -28867,9 +31542,9 @@ def main() -> None:
     p_memory_list.add_argument("--category", help="Filter by category")
     p_memory_list.add_argument(
         "--status",
-        choices=["active", "stale", "all"],
+        choices=["active", "stale", "hardened", "all"],
         default="active",
-        help="Filter by status (default: active)",
+        help="Filter by status (default: active — excludes stale + hardened)",
     )
     p_memory_list.add_argument("--json", action="store_true", help="JSON output")
     p_memory_list.set_defaults(func=cmd_memory_list)
@@ -28897,9 +31572,9 @@ def main() -> None:
     )
     p_memory_search.add_argument(
         "--status",
-        choices=["active", "stale", "all"],
+        choices=["active", "stale", "hardened", "all"],
         default="active",
-        help="Filter by status (default: active)",
+        help="Filter by status (default: active — excludes stale + hardened)",
     )
     p_memory_search.add_argument("--json", action="store_true", help="JSON output")
     p_memory_search.set_defaults(func=cmd_memory_search)
@@ -28951,6 +31626,40 @@ def main() -> None:
         "--json", action="store_true", help="JSON output"
     )
     p_memory_mark_fresh.set_defaults(func=cmd_memory_mark_fresh)
+
+    # memory mark-hardened (fn-122 task 1)
+    p_memory_mark_hardened = memory_sub.add_parser(
+        "mark-hardened",
+        help=(
+            "Demote a memory entry to a pointer at an enforced gate "
+            "(sets status: hardened, hardened_into, last_audited)"
+        ),
+    )
+    p_memory_mark_hardened.add_argument(
+        "id",
+        help=(
+            "Entry id — full (track/category/slug-date), slug+date, or slug "
+            "(latest date wins). Legacy ids are not supported."
+        ),
+    )
+    p_memory_mark_hardened.add_argument(
+        "--gate-ref",
+        dest="gate_ref",
+        required=True,
+        help=(
+            "Reference to the gate the lesson graduated into, stored verbatim "
+            '(convention: "<path>#<rule-id> -- <note>")'
+        ),
+    )
+    p_memory_mark_hardened.add_argument(
+        "--audited-by",
+        dest="audited_by",
+        help="Optional auditor identifier recorded in audit_notes",
+    )
+    p_memory_mark_hardened.add_argument(
+        "--json", action="store_true", help="JSON output"
+    )
+    p_memory_mark_hardened.set_defaults(func=cmd_memory_mark_hardened)
 
     p_memory_migrate = memory_sub.add_parser(
         "migrate",
@@ -29565,6 +32274,14 @@ def main() -> None:
     )
     p_task_create.add_argument("--json", action="store_true", help="JSON output")
     p_task_create.set_defaults(func=cmd_task_create)
+
+    p_task_title = task_sub.add_parser(
+        "set-title", help="Set task title (JSON + markdown H1)"
+    )
+    p_task_title.add_argument("id", help="Task ID (e.g., fn-1.2, fn-1-add-auth.2)")
+    p_task_title.add_argument("--title", required=True, help="New task title")
+    p_task_title.add_argument("--json", action="store_true", help="JSON output")
+    p_task_title.set_defaults(func=cmd_task_set_title)
 
     p_task_desc = task_sub.add_parser("set-description", help="Set task description")
     p_task_desc.add_argument("id", help="Task ID (e.g., fn-1.2, fn-1-add-auth.2)")
@@ -30192,7 +32909,10 @@ def main() -> None:
         )
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except CrossProcessLockError as e:
+        error_exit(f"Runtime lock unavailable: {e}", use_json=args.json)
 
 
 if __name__ == "__main__":

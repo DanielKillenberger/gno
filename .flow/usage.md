@@ -15,6 +15,7 @@ Task tracking for AI agents. All state lives in `.flow/`.
 
 - Specs: `fn-N-slug` where slug is derived from title (e.g., fn-1-add-oauth, fn-2-fix-login-bug)
 - Tasks: `fn-N-slug.M` (e.g., fn-1-add-oauth.1, fn-2-fix-login-bug.2)
+- Tracker-keyed ids coexist and resolve (`wor-17-slug`, `gh-123-slug`, `gl-456-slug`). Default: `config set tracker.specIds tracker`.
 
 **Backwards compatibility**: Legacy formats `fn-N`, `fn-N-xxx`, `fn-N.M`, and `fn-N-xxx.M` still work.
 
@@ -64,13 +65,34 @@ claude -p "<self-contained prompt>" --output-format text --allowedTools "Read,Ba
 # grok: xAI's Grok Build CLI (v0.2.x alpha) - a full headless EDITING agent, same class as codex
 # exec / cursor-agent, on its own quota. FLAGS BEFORE -p: `-p/--single` consumes the NEXT token as
 # the prompt, so `grok -p --always-approve "..."` misparses (live-verified failure mode).
-grok -m grok-4.5-high -p "<self-contained prompt>" </dev/null                              # read-only one-shot: prints and exits
-grok --permission-mode acceptEdits -m grok-4.5-high -p "<self-contained prompt>" </dev/null  # WRITE mode (edits files - run inside a trusted git dir; --always-approve = blanket). Extras: --check self-verify loop, --best-of-n N parallel attempts, --json-schema structured output, --reasoning-effort. Grok 4.5 = fast + cheap first-draft; route to bulk/implementation, not UI or final taste-critical work.
+# Model + effort are separate flags: `-m grok-4.5 --reasoning-effort high` (NOT `-m grok-4.5-high`).
+grok -m grok-4.5 --reasoning-effort high -p "<self-contained prompt>" </dev/null             # read-only one-shot
+grok --permission-mode acceptEdits -m grok-4.5 --reasoning-effort high -p "<self-contained prompt>" </dev/null  # WRITE mode (edits files - run inside a trusted git dir; --always-approve = blanket). Extras: --check, --best-of-n N, --json-schema. Grok 4.5 = fast + cheap first-draft; route to bulk/implementation, not UI or final taste-critical work.
 ```
 
 The codex bridge also works FROM a Codex host (same-family self-bridge): `codex exec -m gpt-5.6-terra -c model_reasoning_effort=medium "<prompt>"` steers a different GPT tier reliably even where `spawn_agent`/Multi-Agent-V2 per-spawn model steering is broken (openai/codex#33268 and friends, Jul 2026). Keep the child prompt flat - no nested subagents.
 
+**Thin-wrapper recipe:** a quick interactive bridge call can stay raw. For a long-running, unattended, or parallel bridge, dispatch a thin fast-tier subagent that composes the self-contained prompt, runs the bridge **in the foreground**, verifies non-empty/parseable output, repairs environment or flag failures once, and returns only a digest. The wrapper never changes the task, model, or verdict and never delegates recursively; judgment stays with the host.
+
 Harness-relative: every direction works — from Claude Code the bridges are `codex exec` / `cursor-agent`; from Codex or Cursor they are `claude -p` / the other CLI. Any harness that can run Bash can conduct the others.
+
+**Cursor host** — agent-frontmatter tiering is ignored on Cursor; orchestration lives in AGENTS.md + caller-side pins (setup scaffolds both). Distinct from the headless `cursor` CLI backend below.
+
+- **Pin grammar:** Cursor slugs (e.g. `claude-opus-5-thinking-high`, `gpt-5.6-sol-high`); bracket params where the host accepts them. Slugs are volatile — enumerate via host catalog or `cursor-agent --list-models`; re-run `/flow-next:setup` to refresh.
+- **Tier degrade:** `agents/*.md` family aliases (`haiku`/`sonnet`/`opus`) resolve to **inherit** (session model) on Cursor; no alias-to-slug rewrite exists or is planned. Caller-side pins are the escape hatch.
+- **`review.backend host`:** bare only (`host:<model>` rejected). Pins live in the AGENTS.md model-routing section — **not** on the backend string. Host-native fresh-context subagent; preferred from inside Cursor.
+- **≠ `cursor` CLI backend:** `review.backend cursor:…` / `cursor-agent` is a separate headless subprocess path (multi-family reach from outside Cursor; circular from inside).
+- **Cross-family rule:** reviewer family ≠ writer family (measured from the writer).
+
+```bash
+# In-session impl + host review (cross-family pin from AGENTS.md model-routing)
+.flow/bin/flowctl config set review.backend host     # or per-run: --review=host
+# /flow-next:work fn-12  → session implements; host review pins e.g. gpt-5.6-sol-high when writer is Claude-family
+
+# Bridges FROM a Cursor host (same recipes as above, reverse direction)
+claude -p "<self-contained prompt>" --output-format text --allowedTools "Read,Bash" </dev/null
+codex exec -s read-only --skip-git-repo-check "<prompt>" </dev/null
+```
 
 **flow-next shortcuts** — the same bridges, packaged as config:
 
@@ -84,7 +106,7 @@ Harness-relative: every direction works — from Claude Code the bridges are `co
 # work.delegateEffort (default medium, passed as -c model_reasoning_effort=)
 
 # Cross-family review — the model that writes is never the model that reviews
-.flow/bin/flowctl config set review.backend codex                                 # or cursor:composer-2.5
+.flow/bin/flowctl config set review.backend codex                                 # or host | cursor:composer-2.5
 .flow/bin/flowctl task set-backend fn-1-add-oauth.3 --review cursor:composer-2.5   # per-task review: override
 ```
 

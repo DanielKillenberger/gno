@@ -10,4 +10,5 @@ sync-runs/
 locks/
 pilot-runs/
 .cache/
+create-first/
 # End of auto-managed block. User patterns below this line are preserved.

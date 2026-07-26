@@ -31,15 +31,15 @@
         "codex": "gpt-5.6-sol:medium"
       }
     },
-    "verifiedAt": "2026-07-21",
-    "verifiedWith": "codex 0.145.0; cursor-agent 2026.07.17-3e2a980; grok 0.2.109; copilot 1.0.73"
+    "verifiedAt": "2026-07-26",
+    "verifiedWith": "codex 0.145.0; cursor-agent 2026.07.23-e383d2b; grok 0.2.112; copilot 1.0.75"
   },
   "pilot": {
     "autonomy": "ready",
     "gateClasses": []
   },
   "pipeline": {
-    "qa": "off"
+    "qa": "on"
   },
   "planSync": {
     "crossEpic": true,
@@ -87,6 +87,7 @@
     },
     "provenance": "discovery ceremony 2026-06-05; confirmed by Gordon; signals: Linear MCP present, GNO team named; gh auth present from setup; LINEAR_API_KEY not required",
     "readyState": null,
+    "specIds": "tracker",
     "staleAfterHours": 24,
     "type": "linear",
     "version": 1
