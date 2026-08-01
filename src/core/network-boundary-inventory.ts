@@ -230,6 +230,46 @@ export const NETWORK_BOUNDARY_INVENTORY = [
     enforcement: "loopback_only",
   },
   {
+    // Windows-only private SPA bundle listener. Bun does not support Unix
+    // sockets on Windows, so this binds an ephemeral loopback port instead.
+    id: "serve-spa-bundle-windows-listener",
+    key: "src/serve/spa-bundle-source.ts::bun_serve#1",
+    path: "src/serve/spa-bundle-source.ts",
+    primitive: "bun_serve",
+    action: "serve",
+    enforcement: "loopback_only",
+  },
+  {
+    // Unix-only private SPA bundle listener. The generated assets are exposed
+    // through a process-owned Unix-domain socket, never a TCP interface.
+    id: "serve-spa-bundle-unix-listener",
+    key: "src/serve/spa-bundle-source.ts::bun_serve#2",
+    path: "src/serve/spa-bundle-source.ts",
+    primitive: "bun_serve",
+    action: "serve",
+    enforcement: "local_process_only",
+  },
+  {
+    // Windows-only request from the public server to its private, ephemeral
+    // loopback SPA bundle listener.
+    id: "serve-spa-bundle-windows-fetch",
+    key: "src/serve/spa-bundle-source.ts::fetch#1",
+    path: "src/serve/spa-bundle-source.ts",
+    primitive: "fetch",
+    action: "serve",
+    enforcement: "loopback_only",
+  },
+  {
+    // Unix-only request over the process-owned SPA bundle socket. The HTTP URL
+    // is a Bun fetch API requirement; the request is routed through `unix`.
+    id: "serve-spa-bundle-unix-fetch",
+    key: "src/serve/spa-bundle-source.ts::fetch#2",
+    path: "src/serve/spa-bundle-source.ts",
+    primitive: "fetch",
+    action: "serve",
+    enforcement: "local_process_only",
+  },
+  {
     id: "http-mcp-tools",
     key: "logical::http-mcp-tools",
     path: "src/mcp/http-egress.ts",
