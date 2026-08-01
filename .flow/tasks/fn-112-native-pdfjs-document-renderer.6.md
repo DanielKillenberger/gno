@@ -125,6 +125,6 @@ bun run test:package
 ## Done summary
 Closed the full PR review set for the native PDF viewer and retained reproducible browser evidence. Fixed internal annotation navigation, scroll-synchronized toolbar state, platform-safe PDF.js asset paths, mixed-page geometry, page acquisition errors, same-generation scale ownership, atomic canvas reservations, render-setup rollback, password handling, and Bun-first smoke scripts. Added an ES2026 Math.sumPrecise compatibility bootstrap for both UI and worker contexts. Moved Bun's raw HTMLBundle to a private Unix-socket source so every public SPA response receives CSP and framing headers. The browser smoke now passes its state, progressive range, virtualization, performance, teardown, and visual matrix; package smoke proves the installed bootstrap, byte-identical raw worker/cMap/font assets, HEAD parity, and unchanged real user state.
 ## Evidence
-- Commits: 936d9c3bf490f10885921b46c4fc692def26552d
+- Commits: 48f09e94
 - Tests: bun run lint:check, bunx tsc --noEmit, bun test test/serve/public/lib/math-sum-precise.test.ts test/serve/public/lib/pdf.test.ts test/serve/public/hooks/use-pdf-document.dom.test.tsx test/serve/fn112-production-routes.test.ts, bun test test/serve/spa-bundle-source.test.ts test/serve/public/hooks/use-pdf-pages.dom.test.tsx, bun run test:e2e:pdf, bun run test:package
 - PRs: https://github.com/gmickel/gno/pull/161

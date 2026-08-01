@@ -11,8 +11,8 @@
     "sol_review": "Task .7 implementation, terminal round 4 (terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
     "sol_verdict": "SHIP",
     "commits": [
-      "936d9c3bf490f10885921b46c4fc692def26552d",
-      "d5894f9b",
+      "48f09e94",
+      "77318855",
       "gmickel/gno.sh@192dead"
     ],
     "prs": [

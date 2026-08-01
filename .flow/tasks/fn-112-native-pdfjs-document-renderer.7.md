@@ -51,6 +51,6 @@ Finalization: documentation, CHANGELOG, and the full quality gate against the re
 ## Done summary
 Completed the native PDF viewer documentation and final quality gates. Corrected the fallback contract in CHANGELOG and Web UI docs, retained real hosted-site browser evidence, and implemented the public documentation in gmickel/gno.sh#26. The companion site passed check, typecheck, build, all tests, and desktop/mobile browser QA. The five GNO canonical commands passed with zero new failures against regenerated durable baseline capture cap-002; cap-002 has no tolerated pre-existing failures and its raw-log hashes were verified. Absolute PDF E2E and package-install smokes also pass. Production gno.sh deployment remains pending companion PR merge and is not claimed.
 ## Evidence
-- Commits: 936d9c3bf490f10885921b46c4fc692def26552d, d5894f9b, gmickel/gno.sh@192dead
+- Commits: 48f09e94, 77318855, gmickel/gno.sh@192dead
 - Tests: bun run lint:check, bunx tsc --noEmit, bun test, bun run test:web, bun run docs:verify, bun run test:e2e:pdf, bun run test:package, bun run build:css, .flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer, gno.sh: bun run check, gno.sh: bun run typecheck, gno.sh: bun run build, gno.sh: bun test, gno.sh: local desktop/mobile browser QA
 - PRs: https://github.com/gmickel/gno/pull/161, https://github.com/gmickel/gno.sh/pull/26
