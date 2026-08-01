@@ -6,8 +6,8 @@
   ],
   "id": "fn-112-native-pdfjs-document-renderer.5",
   "last_evidence": {
-    "repair_receipt": ".flow/reviews/fn-112-grok-implementation-task-5-repair.json",
-    "sol_review": ".flow/reviews/fn-112-sol-impl-rereview-task-5.json",
+    "repair_receipt": ".flow/reviews/fn-112-landing-record.md",
+    "sol_review": ".flow/reviews/fn-112-landing-record.md",
     "sol_verdict": "SHIP",
     "lifecycle_note": "Status corrected to done on 2026-08-01 by the fn-112 plan repair (Sol PR6-01). No implementation, test, or receipt content was altered; only lifecycle metadata was reconciled with the existing Sol SHIP receipt."
   },

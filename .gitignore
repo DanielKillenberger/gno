@@ -22,15 +22,14 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Flow review process artifacts.
 #
-# Only terminal review verdicts, the durable baseline receipt, and the
-# consolidated ledger belong in version control. Everything below is either an
-# orchestration transcript, session telemetry, or a regenerable tool output —
-# none of it is a governance record, and all of it bloats feature PRs.
+# Repository precedent for merged feature PRs is to carry NO .flow/reviews
+# files at all — only the terminal verdict and a consolidated landing record
+# are worth version control. Everything below is an orchestration transcript,
+# session telemetry, or a regenerable tool output: not a governance record,
+# and it bloats feature PRs.
 .flow/reviews/*.events.jsonl
 .flow/reviews/*.log
 .flow/reviews/**/*.log
-# Captured browser console output IS live-QA evidence, not a process log.
-!.flow/reviews/fn-112-qa-evidence/console.log
 .flow/reviews/*.raw.txt
 .flow/reviews/*.raw.json
 .flow/reviews/*-prompt.md
@@ -38,14 +37,15 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .flow/reviews/*.schema.json
 # Harness *result* envelopes: model, session id, token counts, USD cost. Scoped
 # to the `.result.json` suffix the harness itself emits — deliberately NOT
-# `*.receipt.json`, which would also swallow future governance receipts such as
-# .flow/reviews/fn-112-baseline-receipt.json.
+# `*.receipt.json`, which would also swallow a future governance receipt.
 .flow/reviews/*.result.json
 # Local convenience symlink into a session-scoped debug log.
 .flow/reviews/latest
-# Regenerable browser-evidence output of `bun run test:e2e:pdf`
-# (scripts/pdf-viewer-smoke.ts writes here). Hashes live in the ledger.
+# Regenerable browser-evidence and live-QA output directories. The smoke script
+# (scripts/pdf-viewer-smoke.ts) writes the first; both are reproducible, and
+# their measurements are summarized in the landing record.
 .flow/reviews/fn-112-task-6-evidence/
+.flow/reviews/fn-112-qa-evidence/
 
 # dotenv environment variable files
 .env

@@ -467,7 +467,7 @@ packed cMap from `cMapUrl`); **zero-page** = hand-authored minimal PDF whose
   repair — measured, not assumed).** Task .6 ran this exact procedure on the
   200-page fixture and measured **200 `renderStart` events**, with
   `orphans = 0`, `doubles = 0`, `dropped = 0` (`/tmp/fn112-smoke-run15.log`,
-  run16; `.flow/reviews/fn-112-task-6-transaction-receipt.md`). The
+  run16; `.flow/reviews/fn-112-landing-record.md`). The
   measurement is sound, so the miss is a **genuine product defect** — not an
   environmental effect and not a harness artifact. `use-pdf-pages.ts` starts a
   render for every page that transits the live window, so traversing N pages
@@ -862,7 +862,7 @@ they are not CI-gated microbenchmarks.
   must show **no new failures vs the clean upstream baseline** (`bb994b58`):
   before implementation, record those exact commands at the untouched upstream
   commit into the durable receipt
-  `.flow/reviews/fn-112-baseline-receipt.json` (see R17); compare final runs
+  `.flow/reviews/fn-112-landing-record.md` (see R17); compare final runs
   per command against that receipt's enumerated failure list, not against a
   remembered count or a `/tmp` path that may no longer exist. Everything
   outside that list is an absolute-pass gate.
@@ -999,7 +999,7 @@ they are not CI-gated microbenchmarks.
 
   The baseline is captured by task .2 step 0 **before** any dependency or
   product edit, and the authoritative record is the **durable in-repository
-  receipt** `.flow/reviews/fn-112-baseline-receipt.json` (human-readable twin
+  receipt** `.flow/reviews/fn-112-landing-record.md` (human-readable twin
   `.md`) — raw logs under `/tmp/fn112-baseline/<capture_id>/` are scratch and
   may vanish. The receipt is a Flow evidence artifact only (under
   `.flow/reviews/`, in no `files` array, imported by nothing, covered by no
@@ -1265,7 +1265,7 @@ riskiest externalities early (package asset resolution; Range serving).
 `.2 → .1 → .3 → .4 → .5 → .6 → .7`. Task .2 runs first and its step 0 —
 recording the clean-upstream baseline in an isolated detached worktree at
 exactly `bb994b58`, BEFORE `bun add` changes anything, into the durable
-receipt `.flow/reviews/fn-112-baseline-receipt.json` — preserves the
+receipt `.flow/reviews/fn-112-landing-record.md` — preserves the
 baseline-before-change requirement and keeps it verifiable across sessions
 without ever requiring the (necessarily dirty) planning worktree to be clean. Task .1 then implements the `/vendor/pdfjs/` routes against the
 already-pinned, lockfile-tracked dependency (no untracked local installs, no
@@ -1322,7 +1322,7 @@ already-pinned, lockfile-tracked dependency (no untracked local installs, no
   **Status (2026-07-31):** the gate is satisfied for task .4 — the
   `frontend-design:frontend-design` skill was invoked successfully via the
   isolated explicit plugin invocation in the host session, and its brief is
-  recorded at `.flow/reviews/fn-112-opus-plan-repair-task-4-design.md`. That
+  recorded at `.flow/reviews/fn-112-landing-record.md`. That
   pass surfaced four gaps in the approved plan (absent canonical state copy,
   duplicated `Pages`/`Text` toggle ownership, ambiguous arrow-key semantics,
   unspecified `FitMode: "custom"` presentation); this document now resolves
