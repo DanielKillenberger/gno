@@ -1,9 +1,9 @@
 {
   "schema": "fn-112-durable-mission-state",
   "schema_version": 1,
-  "updated_at": "2026-08-01T19:45:00Z",
+  "updated_at": "2026-08-01T20:02:00Z",
   "service": "fn112-pdf-build.service",
-  "major_gate": "ALL BUILD/REVIEW/QA GATES COMPLETE. Blocked at publication only: no write access to origin.",
+  "major_gate": "MISSION COMPLETE: verified cross-fork pull request open; not merged.",
   "owner": {
     "orchestrator": "/goal in canonical Claude Opus 5 session (pilot work stage would route to Grok, which frozen routing forbids; equivalent serial lifecycle run here without changing owners)",
     "writer": "Claude Opus 5 medium \u2014 task-.7 transaction (complete; no writer currently editing)",
@@ -12,13 +12,15 @@
   },
   "repository": {
     "branch": "feat/native-pdf-renderer",
-    "head": "75f1ca5f",
+    "head_at_publication_receipt": "536cbb18b484ebf862505032b560ccbd653f2b04",
     "commits_this_session": [
       "b54a8f3558907c5b6294cd99417814210fbedb14 docs: document the PDF viewer surface and close the fn-112 gates",
-      "75f1ca5f chore(flow): mark fn-112 task .7 done with gate and review evidence"
+      "75f1ca5f chore(flow): mark fn-112 task .7 done with gate and review evidence",
+      "536cbb18 chore(flow): record the fn-112 publication blocker (superseded after the authorized fork route succeeded)"
     ],
     "working_tree": "clean",
-    "pushed": false
+    "pushed": true,
+    "remote": "git@github.com:DanielKillenberger/gno.git"
   },
   "flow": {
     "spec": "fn-112-native-pdfjs-document-renderer",
@@ -74,11 +76,23 @@
     "spec_completion": "Sol gpt-5.6-sol SHIP across R1-R19",
     "live_qa": "8/8 scenarios PASS, 0 findings (P0=0 P1=0 P2=0), QA_VERDICT SHIP"
   },
-  "next_action": "OWNER DECISION REQUIRED to publish. Local work is complete, committed, and clean at 75f1ca5f on feat/native-pdf-renderer.",
+  "next_action": "PR #161 is open for owner review. Do not merge from this mission.",
   "publication": {
-    "commits": [],
-    "pushed_sha": null,
-    "pr": null,
+    "commits": [
+      "c9b828eb7bb8337dcf4ad14c6027d4fea1075ccc",
+      "b54a8f3558907c5b6294cd99417814210fbedb14",
+      "75f1ca5f",
+      "536cbb18b484ebf862505032b560ccbd653f2b04"
+    ],
+    "pushed_sha_at_receipt_start": "536cbb18b484ebf862505032b560ccbd653f2b04",
+    "pr": {
+      "number": 161,
+      "url": "https://github.com/gmickel/gno/pull/161",
+      "base": "gmickel/gno:main",
+      "head": "DanielKillenberger/gno:feat/native-pdf-renderer",
+      "state": "OPEN",
+      "draft": false
+    },
     "merged": false
   },
   "hosted_site": {
@@ -87,15 +101,5 @@
     "brief": ".flow/handoff/fn-112-gno-sh-docs-brief.md",
     "dependency": "the in-repo brief is a completion dependency; executing it in the site repo is an external post-merge owner handoff and is NOT"
   },
-  "blocker": {
-    "kind": "authentication/authorization \u2014 genuine, nonrecoverable without owner action",
-    "detail": "origin is https://github.com/gmickel/gno.git. The only available credential authenticates as GitHub user DanielKillenberger, which has permissions {admin:false, maintain:false, push:false, triage:false, pull:true} on gmickel/gno. SSH auth itself succeeds (\"Hi DanielKillenberger! You have successfully authenticated\") but `git push --dry-run git@github.com:gmickel/gno.git feat/native-pdf-renderer` returns \"ERROR: Permission to gmickel/gno.git denied to DanielKillenberger.\" HTTPS push fails earlier for lack of a credential helper. This is authorization, not transport.",
-    "not_attempted_and_why": "Creating a fork under DanielKillenberger would be an outward-facing action creating a new public repository under the user identity, and would change the deliverable from \"push feat/native-pdf-renderer to origin and open a PR\" to a cross-fork PR. Not authorized by the goal, so not done without the owner deciding.",
-    "unblock_options": [
-      "grant DanielKillenberger write access to gmickel/gno",
-      "provide a credential for an account with write access",
-      "authorize a fork + cross-fork PR",
-      "push and open the PR manually from an authorized machine"
-    ]
-  }
+  "blocker": null
 }
