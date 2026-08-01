@@ -1,0 +1,15 @@
+[qa] temp=/tmp/fn112-qa-0WdgS6 port=45742
+[qa] indexing…
+[qa] server healthy
+[qa] PASS QA-1 — PDF opens in Pages with rendered canvas + selectable text layer, no iframe/object/embed :: renderedCanvases=3 textLayerChars=218 iframe/object/embed=0
+[qa] PASS QA-10 — All viewer network traffic is same-origin; pdfjs worker/assets served from /vendor/pdfjs :: foreignRequests=0 vendorPdfjsRequests=2
+[qa] PASS QA-3 — Page navigation advances the page :: page 1 -> 2
+[qa] PASS QA-5 — Keyboard: '+' zooms, '0' resets to 100% :: scaleAfterReset=metrics-unavailable(visual check) 
+[qa] PASS QA-2 — Pages/Text toggle switches both ways :: Text: canvases=0 pre=1; back to Pages rendered=true
+[qa] PASS QA-8 — Download original resolves over /api/doc-asset :: HEAD 200 accept-ranges=bytes type=application/pdf
+[qa] PASS QA-6 — Corrupt PDF shows a designed failure state naming the reason, with a Download original action :: fallbackNotice=0 viewerErrorPanel=1 noExtractedTextState=0 cannotRenderCopy=true downloadActions=3
+[qa] PASS QA-9 — Non-PDF markdown document is unaffected (no PDF viewer, content renders) :: pdfCanvases=0 contentVisible=true
+[qa] 
+[qa] SCENARIOS: 8/8 PASS
+[qa] FINDINGS: P0=0 P1=0 P2=0
+[qa] QA_VERDICT: SHIP

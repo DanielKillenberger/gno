@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Native PDF rendering in the Web UI. PDFs now open as real pages with a
+  selectable, searchable text layer, page navigation, zoom levels, fit-width
+  and fit-page, and Download original, behind a Pages/Text toggle that keeps
+  the extracted text one click away. Only pages near the viewport render, so
+  long documents stay responsive. When a PDF is corrupt, password protected,
+  unreachable, or the viewer cannot start, GNO falls back to the extracted
+  text with a notice naming the reason.
+- `GET /api/doc-asset` for the original source file bytes, with HTTP `Range`
+  support (`206`/`416`), `HEAD`, and collection-root containment checks. The
+  endpoint backs the PDF viewer and Download original, and is now documented.
+- Same-origin `/vendor/pdfjs/*` routes serving the pinned `pdfjs-dist` worker,
+  cMaps, and standard fonts from the installed package. PDF rendering adds no
+  CDN or external network dependency, and the CSP gains an explicit
+  `worker-src 'self'`.
+
 ## [1.29.6] - 2026-07-25
 
 ### Fixed

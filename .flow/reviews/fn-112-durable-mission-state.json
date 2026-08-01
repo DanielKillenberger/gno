@@ -1,27 +1,27 @@
 {
   "schema": "fn-112-durable-mission-state",
   "schema_version": 1,
-  "updated_at": "2026-08-01T17:05:00Z",
+  "updated_at": "2026-08-01T19:05:00Z",
   "service": "fn112-pdf-build.service",
-  "major_gate": "task-.6 round-6 repair complete \u2014 awaiting fresh independent Sol round-7 review",
+  "major_gate": "task-.7 implemented; Sol round-4 SHIP on task .7; next = spec-completion Sol review, live QA, final gates, commit/push/PR",
   "owner": {
-    "orchestrator": "Hermes full process",
-    "writer": "Claude Opus 5 medium \u2014 task-.6 round-6 repair transaction (complete; no writer currently editing)",
-    "reviewer": null,
-    "claude_session": "5ff94573-c8ee-4297-96d9-f8d27360de84"
+    "orchestrator": "/goal in canonical Claude Opus 5 session (pilot work stage would route to Grok, which frozen routing forbids; equivalent serial lifecycle run here without changing owners)",
+    "writer": "Claude Opus 5 medium \u2014 task-.7 transaction (complete; no writer currently editing)",
+    "reviewer": "Sol gpt-5.6-sol via /home/claw/.npm-global/bin/codex (prompt as argument, stdin closed)",
+    "claude_session": "12f0139a-376b-48da-bffd-f5d8bac8220c"
   },
   "repository": {
     "branch": "feat/native-pdf-renderer",
-    "head": "bb994b580356a41a31093fea85b06993c1a18e4c",
+    "head": "c9b828eb7bb8337dcf4ad14c6027d4fea1075ccc",
     "base": "bb994b580356a41a31093fea85b06993c1a18e4c",
-    "working_tree": "coherent uncommitted fn-112 implementation, durable gate artifacts, browser evidence, and Flow receipts"
+    "working_tree": "task-.7 docs/CHANGELOG/features + rebuilt globals.built.css + .flow/handoff + .flow/reviews/fn-112-task-7-gates; task-.6 evidence restored to committed state"
   },
   "flow": {
     "spec": "fn-112-native-pdfjs-document-renderer",
-    "task_6": "in_progress; round-6 blockers closed by this owner; unaccepted pending Sol",
-    "task_7": "todo (untouched)"
+    "task_6": "done (Sol round-7 SHIP, commit c9b828eb)",
+    "task_7": "in_progress \u2014 Sol round-4 SHIP obtained; formal flowctl done pending the task-.7 commit"
   },
-  "latest_verified_delta": "Sol round 6 confirmed the four earliest findings RESOLVED but held SOL6-R5-IMPL-01/02 open behind two new blockers, both now closed. SOL6-R6-IMPL-01: both light rail captures had blank PDF canvases because the non-blank wait ran BEFORE data-theme was applied, so a theme-induced rerender could blank them unnoticed. The harness now re-establishes the render after each theme settles and asserts the capture subject (>=1 data-rendered canvas AND the fixture's known glyph run) immediately before every rail capture, for both themes at both widths; themeRailSubjects records 3 rendered canvases and hasKnownGlyphRun=true for all four cells. All 8 PNGs were inspected directly: every rail shows the rendered fixture page in its correct palette, the w900 overview clips show the Overview card, the w1380 clips show the properties rail, and all 8 hashes stay distinct with the round-5 assertions preserved. SOL6-R6-IMPL-02: the concrete sensitive config filename still appeared in the INDEX, both receipts and a source comment; it is now the generic phrase everywhere, verified repo-wide with runtime-constructed patterns printing counts only \u2014 0 occurrences of the filename and 0 of the prior verifier across 3466 files. The aggregate config equality output and the complete in-memory snapshot assertion are unchanged. No production source changed this round.",
+  "latest_verified_delta": "Task .7 complete. Five canonical baseline-compared commands all exit 0 with zero failures, per-command matched against capture_id cap-001 of .flow/reviews/fn-112-baseline-receipt.json, whose five raw-log sha256 values were re-verified (twice). cap-001 enumerates failures:[] for every command, so the tolerated pre-existing failure set is empty. Absolute-pass gates green: test:e2e:pdf PASSED, test:package passed on the third run, build:css 0, flowctl validate --spec Valid:True, git diff --check 0. test:package failed twice for environmental reasons, both diagnosed not masked: (1) the real-GNO isolation sentinel correctly tripped because a user-owned resident gno serve (PID 2666223) watcher fired a gno update reindexing the docs edited in this task \u2014 the user service was NOT killed, the run was repeated after quiescence; (2) /tmp exhausted (EDQUOT) by this task own two 2.5G/2.0G forensic dumps, which were the only gno-package-smoke-* dirs and were the only thing removed; /tmp/fn112-baseline was preserved and re-verified. bun run build fails on an unrelated markitdown-ts youtube-transcript import; proven pre-existing by reproducing it in a detached worktree at base bb994b58 with an empty status and frozen-lockfile install. It is not one of the five CBC commands. Real defect found and fixed by this gate: src/serve/public/globals.built.css was stale at c9b828eb and shipped WITHOUT the PDF toolbar zoom-select widths min-w-[4.25rem] and min-w-[6rem] (PdfToolbar.tsx:257,266). The rebuild adds those two and drops five verified-dead utilities; the generated mark rule is byte-identical, so no visual regression. Rerunning test:e2e:pdf regenerated task-.6 accepted evidence; it was restored via git checkout so task .6 Sol round-7 acceptance and its artifact-hashes.json remain exactly as reviewed.",
   "durable_artifacts": {
     "root": ".flow/reviews/fn-112-task-6-gates/",
     "index": ".flow/reviews/fn-112-task-6-gates/INDEX.md",
@@ -36,18 +36,16 @@
     "scripts_tests": ".flow/reviews/fn-112-task-6-gates/gate-scripts.log"
   },
   "tests": [
-    "bun test use-pdf-pages.dom.test.tsx: 14 pass, 0 fail",
-    "bun test lib/pdf.test.ts: 23 pass, 0 fail",
-    "bun test components/pdf: 44 pass, 0 fail",
-    "bun test test/scripts/: 33 pass, 0 fail",
-    "bun run test:web: 295 pass, 0 fail (WEB_EXIT=0)",
-    "bun test (full): 3595 pass, 2 skip, 0 fail, 28590 assertions, 439 files, 163.70s (FULL_EXIT=0)",
-    "bun run test:e2e:pdf: PDF viewer smoke PASSED (E2E_EXIT=0); 8 distinct visual hashes; all 8 PNGs visually verified",
-    "bun run test:package: installed-binary GET/HEAD byte equality + privacy-safe sentinel (PKG_EXIT=0)",
-    "bun run typecheck: exit 0",
-    "bun run lint:check: 0 warnings, 0 errors",
-    "git diff --check: exit 0",
-    "flowctl validate: valid true, 0 errors"
+    "bun run lint:check: 0 warnings 0 errors (exit 0)",
+    "bunx tsc --noEmit: exit 0, empty log",
+    "bun test: 3595 pass, 2 skip, 0 fail",
+    "bun run test:web: 295 pass, 0 fail",
+    "bun run docs:verify: 15 passed, 0 failed, 2 skipped",
+    "bun run test:e2e:pdf: PDF viewer smoke PASSED",
+    "bun run test:package: passed (installed-binary pdfjs GET/HEAD byte equality + sentinel unchanged=true)",
+    "bun run build:css: exit 0",
+    "flowctl validate --spec fn-112-native-pdfjs-document-renderer: Valid: True",
+    "git diff --check: exit 0"
   ],
   "measured_budgets": {
     "p1_small_ms": 388.4,
@@ -69,26 +67,28 @@
   },
   "review": {
     "reviewer": "Sol gpt-5.6-sol",
-    "round": 6,
-    "verdict": "NEEDS_WORK (superseded by this repair; not yet re-reviewed)",
+    "stage": "task .7 independent acceptance",
+    "rounds": 4,
+    "verdict": "SHIP (round 4)",
     "open_findings": [],
     "closed_findings": [
-      "SOL6-R3-IMPL-01",
-      "SOL6-R3-IMPL-02",
-      "SOL6-R4-IMPL-01",
-      "SOL6-R4-IMPL-02",
-      "SOL6-R5-IMPL-01",
-      "SOL6-R5-IMPL-02",
-      "SOL6-R6-IMPL-01",
-      "SOL6-R6-IMPL-02"
+      "SOL7-R1-DOC-01 guessed gno.sh filenames",
+      "SOL7-R2-DOC-01 targets required editorial judgment",
+      "SOL7-R3-DOC-01 target 5 deletion boundary undefined"
     ],
-    "next_review_round": 7
+    "notes": "gno.sh is unreachable from this engagement (absent locally; gh api -> 404), and cloning is prohibited by the task spec, so the brief targets by deterministic resolver + exact anchor + literal block/substitution instead of guessed paths."
   },
-  "next_action": "Launch fresh independent Sol re-review (round 7) of task .6 against .flow/reviews/fn-112-task-6-transaction-receipt.{md,json}, the durable gates in .flow/reviews/fn-112-task-6-gates/, and the regenerated evidence in .flow/reviews/fn-112-task-6-evidence/ (incl. visual-theme-proof.json themeRailSubjects and the 8 PNGs). Do not accept task .6 without Sol's SHIP.",
+  "next_action": "Sol spec-completion review -> integrated live QA -> final gates + exact diff inspection -> commit, flowctl done fn-112...7, push feat/native-pdf-renderer, open PR (NO MERGE) and gh-verify it",
   "publication": {
     "commits": [],
     "pushed_sha": null,
     "pr": null,
     "merged": false
+  },
+  "hosted_site": {
+    "repo": "~/work/gno.sh",
+    "state": "ABSENT from this environment; not cloned, not edited, not QA-d, not deployed",
+    "brief": ".flow/handoff/fn-112-gno-sh-docs-brief.md",
+    "dependency": "the in-repo brief is a completion dependency; executing it in the site repo is an external post-merge owner handoff and is NOT"
   }
 }

@@ -61,6 +61,7 @@ CLI.
 | `/api/docs/autocomplete` | GET    | Title/path suggestions for wiki-linking and quick switcher  |
 | `/api/note-presets`      | GET    | List note presets and scaffold previews                     |
 | `/api/doc`               | GET    | Get document content                                        |
+| `/api/doc-asset`         | GET    | Get the original source file bytes (Range-capable)          |
 | `/api/doc/:id/sections`  | GET    | Get extracted heading/section structure                     |
 | `/api/events`            | GET    | Server-sent document change events                          |
 | `/api/doc/:id/links`     | GET    | Get outgoing links from doc                                 |
@@ -1348,6 +1349,97 @@ curl "http://localhost:3000/api/doc?uri=gno://notes/readme.md" | jq '.content'
 To attach this explicit read to an open search/query receipt, send the
 `X-GNO-Trace-ID` response header from the earlier request. The response echoes
 the same header after exact full-document `get` and `open` spans are recorded.
+
+---
+
+### Get Document Asset
+
+```http
+GET /api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf
+```
+
+Streams the **original source file bytes** for an indexed document, rather than
+its converted text. The Web UI uses it to feed the native PDF viewer and to
+serve "Download original". `HEAD` is supported and returns the identical headers
+with an empty body.
+
+**Query Parameters**:
+
+| Param  | Type   | Required    | Description                                                                                  |
+| :----- | :----- | :---------- | :------------------------------------------------------------------------------------------- |
+| `path` | string | Yes         | Absolute path inside a configured collection, or a path relative to the document's directory |
+| `uri`  | string | Conditional | Document URI. Required whenever `path` is relative; ignored when `path` is absolute          |
+
+A relative `path` is resolved against `dirname()` of the file that `uri`
+resolves to, then re-checked for containment inside that collection's root. An
+absolute `path` must resolve inside one of the configured collection roots.
+
+**Response**: raw file bytes (not JSON), with:
+
+| Header                | Value                                                              |
+| :-------------------- | :----------------------------------------------------------------- |
+| `Content-Type`        | Detected file type, else `application/octet-stream`                |
+| `Content-Length`      | Full size, or the slice length on a `206`                          |
+| `Accept-Ranges`       | `bytes`                                                            |
+| `Content-Disposition` | `inline; filename*=UTF-8''<encoded basename>`                      |
+| `Cache-Control`       | `no-store`                                                         |
+| `Content-Range`       | On `206`: `bytes <start>-<end>/<size>`; on `416`: `bytes */<size>` |
+
+**Status Codes**:
+
+| Status | Meaning                                                                                  |
+| :----- | :--------------------------------------------------------------------------------------- |
+| `200`  | Full body (no `Range` header sent)                                                       |
+| `206`  | Single byte range satisfied                                                              |
+| `400`  | `VALIDATION` — `path` missing, or `path` relative with no `uri`                          |
+| `403`  | `FORBIDDEN` — path escapes the collection root, or is outside all collections            |
+| `404`  | `NOT_FOUND` — document, resolved document path, or file on disk not found                |
+| `416`  | Unsatisfiable range, or a multi-range request (multi-range is intentionally unsupported) |
+
+**Examples**:
+
+```bash
+# Full file
+curl "http://localhost:3000/api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf" \
+  --output spec.pdf
+
+# First 1024 bytes (206 Partial Content)
+curl -i -H "Range: bytes=0-1023" \
+  "http://localhost:3000/api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf"
+
+# Size probe without a body
+curl -I "http://localhost:3000/api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf"
+```
+
+---
+
+### PDF.js Vendor Assets
+
+```http
+GET /vendor/pdfjs/pdf.worker.min.mjs
+GET /vendor/pdfjs/cmaps/:file
+GET /vendor/pdfjs/standard_fonts/:file
+```
+
+Serves the pinned `pdfjs-dist` worker, character maps, and standard fonts
+**same-origin from the installed package** — GNO never loads PDF.js assets from
+a CDN, which is what keeps `worker-src 'self'` and the offline-first guarantee
+intact. `GET` and `HEAD` only.
+
+`:file` is a single path segment; `cmaps` accepts `.bcmap` and
+`standard_fonts` accepts `.pfb` / `.ttf`. Every resolved path is verified to
+live inside the real `pdfjs-dist` package directory, so traversal attempts and
+unknown subpaths return `404` rather than escaping it.
+
+| Status | Meaning                                                            |
+| :----- | :----------------------------------------------------------------- |
+| `200`  | Asset bytes, `Cache-Control: public, max-age=31536000, immutable`  |
+| `404`  | `NOT_FOUND` — unknown asset, rejected filename, or missing install |
+| `405`  | `METHOD_NOT_ALLOWED` — any method other than `GET` or `HEAD`       |
+
+```bash
+curl -I http://localhost:3000/vendor/pdfjs/pdf.worker.min.mjs
+```
 
 ---
 

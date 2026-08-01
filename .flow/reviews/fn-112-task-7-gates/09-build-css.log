@@ -1,0 +1,4 @@
+$ tailwindcss -i src/serve/public/globals.css -o src/serve/public/globals.built.css --minify
+≈ tailwindcss v4.1.18
+
+Done in 805ms

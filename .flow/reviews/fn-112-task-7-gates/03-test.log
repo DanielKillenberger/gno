@@ -1,0 +1,523 @@
+bun test v1.3.14 (0d9b296a)
+
+test/indexed-uri-roundtrip.test.ts:
+[MCP] gno_get error: Invalid index name: use 1-64 letters, marks, numbers, internal spaces, '.', '_' or '-', start with a letter or number, do not end with a space or '.', do not include '..', and fit the portable database filename limit.
+
+test/llm/embedding.test.ts:
+[llama] Truncated embedding input from 11 to 4 tokens
+[llama] Truncated embedding input from 6 to 3 tokens
+
+test/llm/lifecycle.test.ts:
+[llama] Invalid GNO_LLAMA_GPU/NODE_LLAMA_CPP_GPU value "bogus", using auto
+[llama] GPU backend "auto" failed, retrying with CPU: Binding binary load test timed out
+[llama] Backend initialization timed out after 1ms
+{
+  "installed": {
+    "target": "zed",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/xdg/zed/settings.json",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "zed",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/xdg/zed/settings.json",
+    "action": "updated",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "uninstalled": {
+    "target": "zed",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/xdg/zed/settings.json",
+    "action": "removed"
+  }
+}
+{
+  "installed": {
+    "target": "opencode",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/home/.config/opencode/opencode.jsonc",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "amp",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/home/.config/amp/settings.jsonc",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "updated",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "uninstalled": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "removed"
+  }
+}
+{
+  "installed": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "updated",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "uninstalled": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "removed"
+  }
+}
+{
+  "installed": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "uninstalled": {
+    "target": "librechat",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-preserving-formats/project/librechat.yaml",
+    "action": "removed"
+  }
+}
+
+test/cli/daemon.test.ts:
+GNO daemon started for index "default" using 1 collection.
+MCP gateway listening at http://127.0.0.1:3000/mcp
+watching: notes
+Skipping initial sync (--no-sync-on-start).
+Daemon stopped.
+GNO daemon started for index "default" using 1 collection.
+MCP gateway listening at http://127.0.0.1:3000/mcp
+watching: notes
+Running initial sync...
+sync totals: 0 added, 0 updated, 0 errors, 0 skipped
+Daemon stopped.
+
+test/cli/context.test.ts:
+Added context for scope: /
+Added context for scope: notes:
+Added context for scope: gno://notes/projects
+Error: Invalid scope format: invalid-scope
+Valid formats: "/" (global), "name:" (collection), or "gno://collection/path" (prefix)
+Added context for scope: /
+Error: Context for scope "/" with that text already exists
+Contexts:
+  / - Global context
+  notes: - Notes context
+No contexts configured.
+✓ Context configuration is valid
+{
+  "valid": false,
+  "warnings": [
+    "No global scope (/) configured"
+  ],
+  "errors": [
+    "Scope \"missing:\" references non-existent collection: missing"
+  ]
+}
+Removed context for scope: /
+Error: Context for scope "/" not found
+Error: Multiple contexts exist for scope "/"; pass the exact text to remove
+Removed context for scope: /
+{
+  "installed": {
+    "target": "codex",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/home/.codex/config.toml",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "codex",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/home/.codex/config.toml",
+    "action": "updated",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "uninstalled": {
+    "target": "codex",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/home/.codex/config.toml",
+    "action": "removed"
+  }
+}
+{
+  "installed": {
+    "target": "codex",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/home/.codex/config.toml",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "research",
+        "--config",
+        "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/project/gno.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "installed": {
+    "target": "codex",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/home/.codex/config.toml",
+    "action": "updated",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "updated",
+        "--config",
+        "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/project/updated.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+{
+  "uninstalled": {
+    "target": "codex",
+    "scope": "user",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/home/.codex/config.toml",
+    "action": "removed"
+  }
+}
+{
+  "installed": {
+    "target": "codex",
+    "scope": "project",
+    "configPath": "/home/claw/work/gno-pdf-renderer/test/cli/.temp-mcp-codex-toml/project/.codex/config.toml",
+    "action": "created",
+    "serverEntry": {
+      "command": "/home/claw/.bun/bin/bun",
+      "args": [
+        "run",
+        "/home/claw/work/gno-pdf-renderer/src/index.ts",
+        "--index",
+        "default",
+        "--config",
+        "/home/claw/Library/Application Support/gno/config/index.yml",
+        "mcp"
+      ],
+      "env": {
+        "GNO_DATA_DIR": "/home/claw/Library/Application Support/gno/data",
+        "GNO_CACHE_DIR": "/home/claw/Library/Caches/gno"
+      }
+    }
+  }
+}
+
+test/cli/context-capsule.test.ts:
+Added context for scope: /
+Added context for scope: /
+Added context for scope: /
+Added context for scope: /
+Added context for scope: /
+Added context for scope: /
+Added context for scope: /
+Potential secret files detected in /tmp/gno-setup-cli-decline-Vss4sP/docs
+Effective exclusions: .DS_Store, .git, .idea, .venv, Thumbs.db, __pycache__, build, dist, node_modules
+
+test/serve/api-presets.test.ts:
+Switching to preset: Balanced (~2GB)
+
+test/serve/server-connectors.test.ts:
+GNO server running at http://127.0.0.1:3210
+Press Ctrl+C to stop
+GNO server running at http://127.0.0.1:3210
+Press Ctrl+C to stop
+GNO server running at http://127.0.0.1:3210
+Press Ctrl+C to stop
+GNO server running at http://127.0.0.1:3210
+Press Ctrl+C to stop
+GNO server running at http://127.0.0.1:3210
+Press Ctrl+C to stop
+
+test/embed/backlog.test.ts:
+[vec] Synced index: +1 -0
+[vec] Sync failed: Test sync failure
+[vec] Sync failed: Test sync failure
+
+test/mcp/links-integration.test.ts:
+[MCP] gno_graph_query error: VALIDATION: edgeType and relation are aliases and must match when both are provided
+
+test/mcp/http-transport.test.ts:
+GNO server running at http://127.0.0.1:3210
+Press Ctrl+C to stop
+[MCP] gno_get error: store.getDocumentByUri is not a function. (In 'store.getDocumentByUri(parsed.value)', 'store.getDocumentByUri' is undefined)
+
+test/project-affinity/parity.test.ts:
+[MCP] gno_search error: project hints must contain at most 16 strings
+
+test/traces/cross-surface.test.ts:
+[MCP] gno_trace_export error: WRITE_DISABLED: Trace mutations require gateway.enableWrite or --mcp-enable-write
+[MCP] gno_trace_export error: EGRESS_DENIED: Operation blocked by collection egress policy
+
+test/mcp/tools/workspace-write-export.test.ts:
+[MCP] gno_rename_note error: CONFLICT: This document is a logical record derived from a file/export container and cannot be written back in place.
+
+test/mcp/tools/capture.test.ts:
+[MCP] gno_trace_purge error: WRITE_DISABLED: Trace mutations require gateway.enableWrite or --mcp-enable-write
+[MCP] gno_capture error: Write tools disabled. Start MCP with --enable-write.
+[MCP] gno_capture error: INVALID_PATH: Cannot write to sensitive directory: .git
+[MCP] gno_capture error: INVALID_INPUT: Capture content exceeds 1048576 byte limit.
+
+test/store/vector/sqlite-vec-works.test.ts:
+SKIP: macOS without custom SQLite (Homebrew not installed). Install sqlite3: brew install sqlite3
+
+test/serve/public/hooks/use-pdf-document.dom.test.tsx:
+Warning: Please use the `legacy` build in Node.js environments.
+
+test/serve/public/hooks/use-pdf-pages.dom.test.tsx:
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+test/serve/public/lib/pdf.test.ts:
+Warning: UnknownErrorException: Unable to load font data at: file:///home/claw/work/gno-pdf-renderer/node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf
+
+test/serve/public/components/pdf/PdfViewer.dom.test.tsx:
+An update to PdfViewer inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ 3595 pass
+ 2 skip
+ 0 fail
+ 28590 expect() calls
+Ran 3597 tests across 439 files. [172.95s]
