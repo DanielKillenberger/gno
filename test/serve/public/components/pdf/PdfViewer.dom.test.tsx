@@ -105,6 +105,7 @@ function makePagesResult(
 ): UsePdfPagesResult {
   return {
     slots: makeSlots(opts.numPages, rendered),
+    error: null,
     liveCanvasCount: rendered.size,
     observePage: mock(() => undefined),
     ensureRendered: mock(async () => undefined),
@@ -182,6 +183,7 @@ type MetricEvent = {
   taskId?: string | null;
   genId?: number | null;
   outcome?: string | null;
+  scale?: number | null;
 };
 
 describe("PdfViewer", () => {
@@ -635,6 +637,27 @@ describe("PdfViewer", () => {
     expect(doc2.retry).toHaveBeenCalled();
   });
 
+  test("page acquisition errors use the same designed panel and fallback path", () => {
+    const pagesFactory = (options: UsePdfPagesOptions): UsePdfPagesResult => ({
+      ...makePagesResult(options),
+      slots: [],
+      error: "password",
+    });
+    renderViewer({ doc: makeDocStub(), pagesFactory });
+    expect(screen.getByTestId("pdf-state-password")).toBeTruthy();
+
+    cleanup();
+    const onFallback = mock(() => undefined);
+    renderViewer({
+      doc: makeDocStub(),
+      pagesFactory,
+      extractedTextAvailable: true,
+      onFallback,
+    });
+    expect(onFallback).toHaveBeenCalledWith("password");
+    expect(screen.queryByTestId("pdf-state-password")).toBeNull();
+  });
+
   test("viewer is focusable with aria-label", () => {
     renderViewer({ doc: makeDocStub() });
     const viewer = screen.getByTestId("pdf-viewer");
@@ -688,6 +711,113 @@ describe("PdfViewer", () => {
     } finally {
       proto.scrollIntoView = originalScroll;
       window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  test("visible page changes keep toolbar and next-page navigation synchronized", async () => {
+    let visiblePage = 1;
+    const pagesFactory = (options: UsePdfPagesOptions): UsePdfPagesResult => {
+      const result = makePagesResult(options, new Set([1, 2, 3, 4]));
+      return {
+        ...result,
+        slots: result.slots.map((slot) => ({
+          ...slot,
+          visible: slot.pageNumber === visiblePage,
+        })),
+      };
+    };
+    const doc = makeDocStub({ numPages: 4 });
+    const renderTree = () => (
+      <PdfViewerTestDepsProvider
+        deps={{
+          usePdfDocument: stubDocumentHook(doc),
+          usePdfPages: stubPagesHook(pagesFactory),
+        }}
+      >
+        <PdfViewer
+          assetUrl="/asset.pdf"
+          downloadUrl="/download.pdf"
+          extractedTextAvailable={false}
+          onFallback={() => undefined}
+        />
+      </PdfViewerTestDepsProvider>
+    );
+    const view = render(renderTree());
+
+    visiblePage = 3;
+    view.rerender(renderTree());
+    await waitFor(() => {
+      expect(screen.getByTestId("pdf-toolbar-page-indicator").textContent).toBe(
+        "3 / 4"
+      );
+    });
+    fireEvent.click(screen.getByTestId("pdf-toolbar-next"));
+    expect(screen.getByTestId("pdf-toolbar-page-indicator").textContent).toBe(
+      "4 / 4"
+    );
+  });
+
+  test("internal PDF annotations navigate through the viewer callback", async () => {
+    const pageProxy = {
+      pageNumber: 1,
+      getViewport: ({ scale }: { scale: number }) => ({
+        width: 200 * scale,
+        height: 280 * scale,
+        scale,
+        convertToViewportRectangle: (rect: number[]) => rect,
+      }),
+      getTextContent: async () => ({ items: [], styles: {} }),
+      getAnnotations: async () => [
+        {
+          subtype: "Link",
+          rect: [0, 0, 20, 20],
+          dest: [{ num: 9, gen: 0 }],
+        },
+      ],
+      cleanup: () => undefined,
+      render: () => ({ promise: Promise.resolve(), cancel: () => undefined }),
+    };
+    const pdfDoc = {
+      numPages: 3,
+      getPage: async () => pageProxy,
+      getDestination: async () => null,
+      getPageIndex: async () => 2,
+    };
+    const doc = makeDocStub({ doc: pdfDoc, numPages: 3 });
+    const previousScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView"
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: () => undefined,
+    });
+    try {
+      renderViewer({ doc });
+      const internal = await waitFor(() => {
+        const node = document.querySelector(
+          '[data-annotation="internal"]'
+        ) as HTMLButtonElement | null;
+        expect(node).not.toBeNull();
+        return node as HTMLButtonElement;
+      });
+      fireEvent.click(internal);
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("pdf-toolbar-page-indicator").textContent
+        ).toBe("3 / 3");
+      });
+    } finally {
+      if (previousScrollIntoView) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          previousScrollIntoView
+        );
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+          .scrollIntoView;
+      }
     }
   });
 
@@ -1234,7 +1364,6 @@ describe("PdfViewer", () => {
           (e.genId ?? 0) > genBefore &&
           e.taskId !== taskId1
       );
-      const task2P = waitForNextTask();
 
       // Viewer zoom → genId bump → cancel old → higher-gen replacement
       await act(async () => {
@@ -1248,7 +1377,18 @@ describe("PdfViewer", () => {
       const cancelEv = await cancelP;
       const cancelledSettle = await cancelledSettleP;
       const start2 = await start2P;
-      const task2 = await task2P;
+      await waitFor(() => {
+        expect(
+          events
+            .filter(
+              (event) =>
+                event.kind === "renderStart" && (event.genId ?? 0) > genBefore
+            )
+            .map((event) => event.scale)
+        ).toContain(1.1);
+      });
+      const task2 = pages.get(1)?.lastTask;
+      expect(task2).toBeDefined();
 
       expect(cancelEv.genId).toBe(genBefore);
       expect(cancelledSettle.outcome).toBe("cancelled");
@@ -1276,12 +1416,12 @@ describe("PdfViewer", () => {
       ).toBe(1);
 
       // Replacement still in-flight (not auto-completed)
-      expect(task2.terminal).toBe(false);
+      expect(task2?.terminal).toBe(false);
       expect(task2).not.toBe(task1);
 
       // Settle replacement so teardown cannot hang on open promises
       await act(async () => {
-        task2.settle();
+        task2?.settle();
         await Promise.resolve();
         await Promise.resolve();
       });

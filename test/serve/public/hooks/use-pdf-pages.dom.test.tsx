@@ -566,8 +566,10 @@ describe("use-pdf-pages", () => {
     });
     await flushReact();
 
-    // Only page 1 for slot geometry — never eager getPage all pages
-    expect(getPageCalls.every((n) => n === 1)).toBe(true);
+    // Bounded metadata acquisition resolves every page's rotation-aware
+    // placeholder before publishing the scroll model; no page is rendered.
+    expect(getPageCalls).toHaveLength(200);
+    expect(new Set(getPageCalls).size).toBe(200);
     const geometryOnlyCalls = getPageCalls.length;
     expect(countNonzeroBackingCanvases()).toBe(0);
 
@@ -610,12 +612,12 @@ describe("use-pdf-pages", () => {
     expect(priorWindowCanvases.length).toBeGreaterThan(0);
     expect(priorWindowCanvases.length).toBeLessThanOrEqual(LIVE_CANVAS_CEILING);
 
-    // getPage only for geometry + window pages (not all 200)
-    const afterA = new Set(getPageCalls);
-    expect(afterA.size).toBeLessThanOrEqual(
-      geometryOnlyCalls + windowA.size + 1
+    // Metadata covers the document, but actual render calls remain confined to
+    // the observed window plus overscan.
+    expect(getPageCalls.length).toBeGreaterThanOrEqual(geometryOnlyCalls);
+    expect(new Set(renderCalls.map((call) => call.pageNumber))).toEqual(
+      windowA
     );
-    expect(afterA.has(200)).toBe(false);
 
     // ── Window B: disjoint far window at page 150 ───────────────────────
     metrics.reset({ capacity: 50_000 });
@@ -1514,6 +1516,253 @@ describe("use-pdf-pages", () => {
     // Every active page must be redrawn at the committed scale.
     expect(new Set(atNewScale.map((e) => e.pageNumber)).size).toBe(3);
   }, 20_000);
+
+  test("mixed-size geometry and fit modes use every page without eager canvas renders", async () => {
+    const doc = makeDoc(2, { mixedGeometry: true });
+    let fitMode: "width" | "page" = "width";
+    let containerWidth = 200;
+    let containerHeight = 140;
+    const { result, rerender } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "mixed",
+        numPages: 2,
+        zoom: 1,
+        fitMode,
+        containerWidth,
+        containerHeight,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+
+    await waitFor(() => expect(result.current.slots.length).toBe(2));
+    expect(result.current.scale).toBe(1);
+    expect(
+      result.current.slots.map(({ width, height }) => [width, height])
+    ).toEqual([
+      [100, 140],
+      [200, 100],
+    ]);
+    expect(renderCalls).toHaveLength(0);
+
+    fitMode = "page";
+    containerWidth = 150;
+    containerHeight = 70;
+    rerender();
+    await waitFor(() => expect(result.current.scale).toBe(0.5));
+    expect(
+      result.current.slots.map(({ width, height }) => [width, height])
+    ).toEqual([
+      [50, 70],
+      [100, 50],
+    ]);
+    expect(renderCalls).toHaveLength(0);
+  });
+
+  test("page metadata acquisition failures surface a classified viewer error", async () => {
+    const doc = {
+      numPages: 1,
+      getPage: async () => {
+        throw Object.assign(new Error("Password required"), {
+          name: "PasswordException",
+        });
+      },
+    };
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "protected",
+        numPages: 1,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.error).toBe("password"));
+    expect(result.current.slots).toHaveLength(0);
+  });
+
+  test("render-setup exceptions release admission so retry can render", async () => {
+    stubCanvas2d();
+    const doc = makeDoc(1);
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "setup-retry",
+        numPages: 1,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots).toHaveLength(1));
+    const page = doc._pages.get(1);
+    if (!page) {
+      throw new Error("expected page geometry to be cached");
+    }
+    const realGetViewport = page.getViewport;
+    let failSetup = true;
+    page.getViewport = (params) => {
+      if (failSetup) {
+        throw new Error("viewport setup failed");
+      }
+      return realGetViewport(params);
+    };
+
+    const element = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    document.body.append(element, canvas);
+    act(() => result.current.observePage(1, element));
+    await act(async () => emitIntersections({ 1: true }));
+
+    await act(async () => result.current.ensureRendered(1, canvas));
+    expect(result.current.error).toBe("corrupt");
+    expect(canvas.width).toBe(0);
+    expect(result.current.liveCanvasCount).toBe(0);
+
+    failSetup = false;
+    const retryPromise = result.current.ensureRendered(1, canvas);
+    await waitFor(() => expect(result.current.error).toBeNull());
+    await waitFor(() => expect(result.current.liveCanvasCount).toBe(1));
+    expect(
+      metrics.snapshot().events.filter((event) => event.kind === "renderStart")
+    ).toHaveLength(1);
+
+    await settleAllTasks();
+    await retryPromise;
+  });
+
+  test("concurrent cold-window admissions reserve the live-canvas ceiling atomically", async () => {
+    const doc = makeDoc(14);
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "ceiling",
+        numPages: 14,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots.length).toBe(14));
+
+    for (let pageNumber = 1; pageNumber <= 12; pageNumber += 1) {
+      const element = document.createElement("div");
+      act(() => result.current.observePage(pageNumber, element));
+    }
+    await act(async () => {
+      emitIntersections(
+        Object.fromEntries(
+          Array.from({ length: 12 }, (_, index) => [index + 1, true])
+        )
+      );
+      await Promise.resolve();
+    });
+
+    const pending: Promise<void>[] = [];
+    for (let pageNumber = 1; pageNumber <= 12; pageNumber += 1) {
+      const canvas = document.createElement("canvas");
+      document.body.appendChild(canvas);
+      pending.push(result.current.ensureRendered(pageNumber, canvas));
+    }
+    await waitFor(() =>
+      expect(
+        metrics
+          .snapshot()
+          .events.filter((event) => event.kind === "renderStart").length
+      ).toBe(LIVE_CANVAS_CEILING)
+    );
+    expect(countNonzeroBackingCanvases()).toBeLessThanOrEqual(
+      LIVE_CANVAS_CEILING
+    );
+    expect(result.current.liveCanvasCount).toBeLessThanOrEqual(
+      LIVE_CANVAS_CEILING
+    );
+
+    await settleAllTasks();
+    await Promise.all(pending);
+  });
+
+  test("same-generation scale replacement owns a pending getPage continuation", async () => {
+    const gate = deferred<void>();
+    let holdNext = false;
+    const base = makeDoc(1);
+    const doc = {
+      ...base,
+      getPage: async (pageNumber: number) => {
+        if (holdNext) {
+          holdNext = false;
+          await gate.promise;
+        }
+        return base.getPage(pageNumber);
+      },
+    };
+    let zoom = 1;
+    const { result, rerender } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "scale-race",
+        numPages: 1,
+        zoom,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots.length).toBe(1));
+    const element = document.createElement("div");
+    act(() => result.current.observePage(1, element));
+    await act(async () => {
+      emitIntersections({ 1: true });
+      await Promise.resolve();
+    });
+
+    const canvas = document.createElement("canvas");
+    document.body.appendChild(canvas);
+    holdNext = true;
+    const stale = result.current.ensureRendered(1, canvas);
+
+    zoom = 2;
+    rerender();
+    await waitFor(() => expect(result.current.scale).toBe(2));
+    const replacement = result.current.ensureRendered(1, canvas);
+    await waitFor(() =>
+      expect(
+        metrics
+          .snapshot()
+          .events.filter((event) => event.kind === "renderStart")
+      ).toHaveLength(1)
+    );
+    expect(
+      metrics.snapshot().events.find((event) => event.kind === "renderStart")
+        ?.scale
+    ).toBe(2);
+
+    await act(async () => {
+      gate.resolve();
+      await stale;
+    });
+    expect(
+      metrics.snapshot().events.filter((event) => event.kind === "renderStart")
+    ).toHaveLength(1);
+    expect(canvas.width).toBe(200);
+    expect(canvas.height).toBe(280);
+
+    await settleAllTasks();
+    await replacement;
+  });
 
   test("retention through hook churn + disposeAll; metrics survive unmount", async () => {
     const doc = makeDoc(5);

@@ -14,15 +14,8 @@
  * Large PDFs and temp installs stay under OS temp and are cleaned up.
  */
 
-import { createHash } from "node:crypto";
-import {
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+// node:fs/promises: temp directory lifecycle has no Bun-native equivalent.
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -256,7 +249,7 @@ async function generateLargePdf(
     `range-friendly early structure must fit in first range chunk (${RANGE_CHUNK_SIZE}), got ${earlyBytes}`
   );
   if (outPath) {
-    await writeFile(outPath, bytes);
+    await Bun.write(outPath, bytes);
   }
   return bytes;
 }
@@ -380,9 +373,9 @@ function assert(cond: unknown, msg: string): asserts cond {
 }
 
 function sha256(buf: ArrayBuffer | Uint8Array | Buffer | string): string {
-  return createHash("sha256")
-    .update(typeof buf === "string" ? buf : Buffer.from(buf as ArrayBuffer))
-    .digest("hex");
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(buf);
+  return hasher.digest("hex");
 }
 
 /** Max characters retained per stream for failure reports (bounded). */
@@ -1997,11 +1990,11 @@ async function main(): Promise<void> {
   ];
   await mkdir(collectionDir, { recursive: true });
   for (const f of fixtures) {
-    await copyFile(join(FIXTURE_DIR, f), join(collectionDir, f));
+    await Bun.write(join(collectionDir, f), Bun.file(join(FIXTURE_DIR, f)));
   }
 
   // Companion markdown so the collection is non-empty beyond PDFs
-  await writeFile(
+  await Bun.write(
     join(collectionDir, "with-text-meta.md"),
     "# Companion\n\nExtracted text companion for index coverage.\n"
   );
@@ -2017,7 +2010,7 @@ async function main(): Promise<void> {
   log(
     `large fixture bytes=${largeBytes.byteLength} pages=200 (>${MIN_RANGE_ELIGIBLE_BYTES}=2×rangeChunkSize)`
   );
-  await copyFile(largePath, join(collectionDir, "large-200.pdf"));
+  await Bun.write(join(collectionDir, "large-200.pdf"), Bun.file(largePath));
 
   const originalEnv = {
     GNO_CONFIG_DIR: process.env.GNO_CONFIG_DIR,
@@ -2799,7 +2792,7 @@ async function main(): Promise<void> {
             minRangeEligibleBytes: MIN_RANGE_ELIGIBLE_BYTES,
             pageCount: 200,
           };
-          await writeFile(
+          await Bun.write(
             join(ARTIFACT_DIR, "progressive-control-log.json"),
             JSON.stringify(
               {
@@ -2879,15 +2872,39 @@ async function main(): Promise<void> {
         // ── Password ───────────────────────────────────────────────────
         log("INTERCEPTION: password");
         await openPdf(page, baseUrl, "password-protected.pdf");
-        await page.waitForFunction(
-          () =>
-            Boolean(
-              document.querySelector('[data-testid="pdf-state-password"]') ||
-              document.querySelector('[data-testid="pdf-fallback-password"]')
-            ),
-          null,
-          { timeout: 30_000 }
-        );
+        try {
+          await page.waitForFunction(
+            () =>
+              Boolean(
+                document.querySelector('[data-testid="pdf-state-password"]') ||
+                document.querySelector('[data-testid="pdf-fallback-password"]')
+              ),
+            null,
+            { timeout: 30_000 }
+          );
+        } catch (error) {
+          const diagnostic = await page.evaluate(() => ({
+            states: [
+              ...document.querySelectorAll('[data-testid^="pdf-state-"]'),
+            ].map((node) => ({
+              testId: node.getAttribute("data-testid"),
+              text: node.textContent,
+            })),
+            fallbacks: [
+              ...document.querySelectorAll('[data-testid^="pdf-fallback-"]'),
+            ].map((node) => ({
+              testId: node.getAttribute("data-testid"),
+              text: node.textContent,
+            })),
+            viewer: document.querySelector('[data-testid="pdf-viewer"]')
+              ?.textContent,
+            body: document.body.textContent?.slice(0, 1000),
+          }));
+          throw new Error(
+            `password state timeout: ${JSON.stringify(diagnostic)}; browserConsole=${JSON.stringify(consoleLogs.slice(-20))}`,
+            { cause: error }
+          );
+        }
         if (
           (await page.locator('[data-testid="pdf-state-password"]').count()) > 0
         ) {
@@ -3471,7 +3488,7 @@ async function main(): Promise<void> {
         if (orphans > 0 || doubles > 0) {
           fail(`P-3 orphans=${orphans} doubles=${doubles}`);
         }
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p3-metrics.json"),
           JSON.stringify(await metricsExport(page), null, 2)
         );
@@ -3606,11 +3623,11 @@ async function main(): Promise<void> {
             `P-4a 19th/p95=${p95.toFixed(1)}ms > ${P4A_P95_MS}ms samples=${JSON.stringify(sorted.map((n) => Number(n.toFixed(1))))}`
           );
         }
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p4a-samples.json"),
           JSON.stringify(inter.p4a, null, 2)
         );
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p4a-metrics.json"),
           JSON.stringify(await metricsExport(page), null, 2)
         );
@@ -4466,12 +4483,12 @@ async function main(): Promise<void> {
         );
 
         await page.setViewportSize({ width: 1380, height: 900 });
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p4b-ladder.json"),
           JSON.stringify(ladderLog, null, 2)
         );
         inter.p4b = p4bRuns;
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p4b-events.json"),
           JSON.stringify(p4bRuns, null, 2)
         );
@@ -4533,7 +4550,7 @@ async function main(): Promise<void> {
                 : null,
           })),
         };
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p5-metrics.json"),
           JSON.stringify(await metricsExport(page), null, 2)
         );
@@ -4634,7 +4651,7 @@ async function main(): Promise<void> {
           lateStarts: lateStarts.length,
           dropped: p6.dropped,
         };
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "p6-metrics.json"),
           JSON.stringify(await metricsExport(page), null, 2)
         );
@@ -5007,7 +5024,7 @@ async function main(): Promise<void> {
           }
         }
         inter.themeScreenshotHashes = themeShotHashes;
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "visual-theme-proof.json"),
           JSON.stringify(
             {
@@ -5048,11 +5065,11 @@ async function main(): Promise<void> {
       await serverLogs.drain().catch(() => undefined);
       // Persist bounded server logs for post-mortem (always, not only on fail).
       try {
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "server-stdout.log"),
           serverLogs.stdout || ""
         );
-        await writeFile(
+        await Bun.write(
           join(ARTIFACT_DIR, "server-stderr.log"),
           serverLogs.stderr || ""
         );
@@ -5072,22 +5089,22 @@ async function main(): Promise<void> {
   }
 
   // Persist logs + evidence
-  await writeFile(
+  await Bun.write(
     join(ARTIFACT_DIR, "request-log.json"),
     JSON.stringify(requestLogs, null, 2)
   );
-  await writeFile(
+  await Bun.write(
     join(ARTIFACT_DIR, "console-log.json"),
     JSON.stringify(consoleLogs, null, 2)
   );
   evidence.machine.finishedAt = new Date().toISOString();
-  await writeFile(
+  await Bun.write(
     join(ARTIFACT_DIR, "evidence.json"),
     JSON.stringify(evidence, null, 2)
   );
 
   await hashArtifacts();
-  await writeFile(
+  await Bun.write(
     join(ARTIFACT_DIR, "artifact-hashes.json"),
     JSON.stringify(evidence.artifactHashes, null, 2)
   );
@@ -5118,7 +5135,7 @@ async function main(): Promise<void> {
       : ["- (none)"]),
     "",
   ].join("\n");
-  await writeFile(join(ARTIFACT_DIR, "INDEX.md"), indexMd);
+  await Bun.write(join(ARTIFACT_DIR, "INDEX.md"), indexMd);
 
   if (evidence.failures.length > 0) {
     console.error("PDF viewer smoke FAILED:");

@@ -43,8 +43,8 @@ function error404(message: string): Response {
   );
 }
 
-function fileUrlToPath(url: string): string {
-  return url.startsWith("file:") ? new URL(url).pathname : url;
+export function pdfjsFileUrlToPath(url: string): string {
+  return url.startsWith("file:") ? Bun.fileURLToPath(url) : url;
 }
 
 /**
@@ -56,7 +56,7 @@ export async function resolvePdfjsPackageRoot(
 ): Promise<string | null> {
   try {
     const pkgUrl = import.meta.resolve("pdfjs-dist/package.json");
-    const pkgPath = fileUrlToPath(pkgUrl);
+    const pkgPath = pdfjsFileUrlToPath(pkgUrl);
     const root = nodePath.dirname(pkgPath);
     return await realpathFn(root);
   } catch {
@@ -157,7 +157,7 @@ export const defaultPdfjsCandidateResolver: PdfjsCandidateResolver = async (
   try {
     if (kind === "worker") {
       const url = import.meta.resolve("pdfjs-dist/build/pdf.worker.min.mjs");
-      return fileUrlToPath(url);
+      return pdfjsFileUrlToPath(url);
     }
     if (kind === "cmaps") {
       if (!file) {
@@ -166,7 +166,7 @@ export const defaultPdfjsCandidateResolver: PdfjsCandidateResolver = async (
       // Resolve sample to find package layout, then join requested file name only
       const sample = import.meta
         .resolve("pdfjs-dist/cmaps/UniJIS-UCS2-H.bcmap");
-      const samplePath = fileUrlToPath(sample);
+      const samplePath = pdfjsFileUrlToPath(sample);
       return nodePath.join(nodePath.dirname(samplePath), file);
     }
     if (!file) {
@@ -174,7 +174,7 @@ export const defaultPdfjsCandidateResolver: PdfjsCandidateResolver = async (
     }
     const sample = import.meta
       .resolve("pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf");
-    const samplePath = fileUrlToPath(sample);
+    const samplePath = pdfjsFileUrlToPath(sample);
     return nodePath.join(nodePath.dirname(samplePath), file);
   } catch {
     return null;

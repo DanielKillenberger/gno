@@ -1,6 +1,5 @@
-// node:fs/promises: temp structure and cleanup have no Bun-native equivalent.
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+// node:fs/promises: temp directory structure has no Bun-native equivalent.
+import { mkdir, mkdtemp } from "node:fs/promises";
 // node:os: tmpdir has no Bun-native equivalent.
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -78,6 +77,12 @@ interface NpmPackResult {
 
 const rootDir = resolve(import.meta.dir, "..");
 const preserveTemp = process.env.GNO_PACKAGE_SMOKE_KEEP_TEMP === "1";
+
+function sha256(value: ArrayBuffer | Uint8Array): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(value);
+  return hasher.digest("hex");
+}
 
 function formatCommand(cmd: string[]): string {
   return cmd
@@ -324,20 +329,21 @@ async function verifyInstalledPdfjsAssets(opts: {
   const port = 45_000 + Math.floor(Math.random() * 1000);
   const baseUrl = `http://127.0.0.1:${port}`;
   // Resolve installed pdfjs-dist robustly: package node_modules first, then
-  // createRequire from the installed package root (handles hoisting layouts).
+  // Bun's resolver from the installed package root (handles hoisting layouts).
   let pdfjsRoot = join(opts.packageRoot, "node_modules", "pdfjs-dist");
   if (!(await Bun.file(join(pdfjsRoot, "package.json")).exists())) {
     try {
-      const { createRequire } = await import("node:module");
-      const req = createRequire(join(opts.packageRoot, "package.json"));
-      pdfjsRoot = join(req.resolve("pdfjs-dist/package.json"), "..");
+      pdfjsRoot = resolve(
+        Bun.resolveSync("pdfjs-dist/package.json", opts.packageRoot),
+        ".."
+      );
     } catch {
       // keep primary path for the explicit missing-file error below
     }
   }
   const assets = [
     {
-      urlPath: "/vendor/pdfjs/pdf.worker.min.mjs",
+      urlPath: "/vendor/pdfjs/pdf.worker.raw.min.mjs",
       filePath: join(pdfjsRoot, "build", "pdf.worker.min.mjs"),
     },
     {
@@ -414,9 +420,58 @@ async function verifyInstalledPdfjsAssets(opts: {
     }
     console.log(`[pdfjs-assets] installed binary healthy at ${baseUrl}`);
 
+    const bootstrapPath = "/vendor/pdfjs/pdf.worker.min.mjs";
+    const bootstrapGet = await fetch(baseUrl + bootstrapPath);
+    if (bootstrapGet.status !== 200) {
+      throw new Error(
+        "GET " +
+          bootstrapPath +
+          " returned " +
+          bootstrapGet.status +
+          " from installed gno serve"
+      );
+    }
+    const bootstrapBody = await bootstrapGet.text();
+    if (
+      !bootstrapBody.includes("Math.sumPrecise") ||
+      !bootstrapBody.includes(
+        'await import("/vendor/pdfjs/pdf.worker.raw.min.mjs")'
+      )
+    ) {
+      throw new Error(
+        "GET " +
+          bootstrapPath +
+          " did not contain the PDF.js compatibility bootstrap"
+      );
+    }
+    if (/https?:\/\//u.test(bootstrapBody)) {
+      throw new Error("GET " + bootstrapPath + " contained an off-origin URL");
+    }
+    const bootstrapHead = await fetch(baseUrl + bootstrapPath, {
+      method: "HEAD",
+    });
+    const bootstrapHeadBody = await bootstrapHead.arrayBuffer();
+    if (bootstrapHead.status !== 200 || bootstrapHeadBody.byteLength !== 0) {
+      throw new Error(
+        "HEAD " + bootstrapPath + " must return 200 with an empty body"
+      );
+    }
+    for (const header of ["content-type", "content-length", "cache-control"]) {
+      if (
+        bootstrapGet.headers.get(header) !== bootstrapHead.headers.get(header)
+      ) {
+        throw new Error(
+          "HEAD/GET header mismatch for " + bootstrapPath + " " + header
+        );
+      }
+    }
+    console.log(
+      "[pdfjs-assets] compatibility bootstrap: GET/HEAD 200, Math.sumPrecise + same-origin raw worker import verified"
+    );
+
     for (const a of assets) {
-      const expected = await readFile(a.filePath);
-      const expectedHash = createHash("sha256").update(expected).digest("hex");
+      const expected = await Bun.file(a.filePath).bytes();
+      const expectedHash = sha256(expected);
       console.log(`[pdfjs-assets] --- ${a.urlPath} ---`);
       console.log(`[pdfjs-assets]   installed file: ${a.filePath}`);
       console.log(
@@ -429,8 +484,8 @@ async function verifyInstalledPdfjsAssets(opts: {
           `GET ${a.urlPath} → ${getRes.status} (installed gno serve)`
         );
       }
-      const body = Buffer.from(await getRes.arrayBuffer());
-      const bodyHash = createHash("sha256").update(body).digest("hex");
+      const body = new Uint8Array(await getRes.arrayBuffer());
+      const bodyHash = sha256(body);
       console.log(
         `[pdfjs-assets]   GET status=${getRes.status} bytes=${body.byteLength} sha256=${bodyHash}`
       );

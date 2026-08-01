@@ -9,7 +9,7 @@ import {
   AdmissionController,
   ReaderGate,
 } from "../../src/serve/resident-admission";
-import { startServer } from "../../src/serve/server";
+import { loopbackHttpOrigin, startServer } from "../../src/serve/server";
 
 interface CapturedServeOptions {
   routes: Record<
@@ -17,6 +17,12 @@ interface CapturedServeOptions {
     { POST: (request: Request) => Response | Promise<Response> }
   >;
 }
+
+test("SPA self-fetch origins preserve alternate IPv4 and bracket IPv6", () => {
+  expect(loopbackHttpOrigin("127.0.0.2", 3210)).toBe("http://127.0.0.2:3210");
+  expect(loopbackHttpOrigin("::1", 3210)).toBe("http://[::1]:3210");
+  expect(loopbackHttpOrigin("[::1]", 3210)).toBe("http://[::1]:3210");
+});
 
 async function runConnectorInstallRoute(actualConfigPath: string): Promise<{
   installConnector: ReturnType<typeof mock>;

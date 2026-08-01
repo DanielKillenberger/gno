@@ -3,9 +3,11 @@
  * Runtime and type imports of pdfjs-dist are allowed ONLY in this module.
  */
 
+import "./math-sum-precise";
 import {
   getDocument as pdfjsGetDocument,
   GlobalWorkerOptions,
+  PasswordResponses,
   TextLayer,
   type PDFDocumentLoadingTask,
   type PDFDocumentProxy,
@@ -192,6 +194,35 @@ export function getDocument(
     // enableScripting is intentionally omitted (defaults false).
     // pdfjs v5 removed the former eval-support flag; CSP enforces no unsafe-eval.
   }) as GnoDocumentLoadingTask;
+  let rejectPassword!: (error: Error) => void;
+  const passwordFailure = new Promise<PDFDocumentProxy>((_resolve, reject) => {
+    rejectPassword = reject;
+  });
+  const productPromise = Promise.race([loadingTask.promise, passwordFailure]);
+  // PDFDocumentLoadingTask exposes promise as a prototype getter. Shadow it on
+  // this facade-owned instance so GNO can model password cancellation without
+  // reaching into pdf.js's private capability fields.
+  Object.defineProperty(loadingTask, "promise", {
+    value: productPromise,
+    writable: false,
+    enumerable: true,
+    configurable: false,
+  });
+  // GNO does not collect PDF passwords. Without an onPassword callback pdf.js
+  // intentionally leaves loadingTask.promise pending forever while it waits for
+  // UI input. Reject the facade promise so the existing password state/fallback
+  // renders deterministically; usePdfDocument then destroys the waiting task.
+  loadingTask.onPassword = (
+    updatePassword: (password: string | Error) => void,
+    reason: number
+  ): void => {
+    const error = new Error(
+      `Password-protected PDF requires an external reader (${reason || PasswordResponses.NEED_PASSWORD})`
+    );
+    error.name = "PasswordException";
+    updatePassword(error);
+    rejectPassword(error);
+  };
   Object.defineProperty(loadingTask, "gnoDocId", {
     value: gnoDocId,
     writable: false,

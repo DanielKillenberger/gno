@@ -11,9 +11,31 @@ import type { Config } from "../config/types";
 import type { SqliteAdapter } from "../store/sqlite/adapter";
 import type { ResidentRuntime } from "./resident-runtime";
 
-import { handlePdfjsAsset } from "./pdfjs-assets";
+import { handlePdfjsAsset, PDFJS_ASSET_CACHE_CONTROL } from "./pdfjs-assets";
 import { handleResidentRead } from "./resident-request";
 import { handleDocAsset } from "./routes/api";
+
+const PDFJS_WORKER_BOOTSTRAP = `
+if (typeof Math.sumPrecise !== "function") {
+  Object.defineProperty(Math, "sumPrecise", {
+    configurable: true,
+    writable: true,
+    value(values) {
+      let sum = 0;
+      let compensation = 0;
+      for (const value of values) {
+        const next = sum + value;
+        compensation += Math.abs(sum) >= Math.abs(value)
+          ? sum - next + value
+          : value - next + sum;
+        sum = next;
+      }
+      return sum + compensation;
+    },
+  });
+}
+await import("/vendor/pdfjs/pdf.worker.raw.min.mjs");
+`.trimStart();
 
 export type SecurityHeaderWrap = (
   response: Response,
@@ -114,8 +136,24 @@ async function dispatchPdfjsVendorInner(
     return methodNotAllowedResponse();
   }
 
-  // Exact worker
+  // Public worker bootstrap: install the ES2026 Math.sumPrecise compatibility
+  // required by pdfjs-dist before evaluating its worker module.
   if (pathname === "/vendor/pdfjs/pdf.worker.min.mjs") {
+    const headers = {
+      "Cache-Control": PDFJS_ASSET_CACHE_CONTROL,
+      "Content-Type": "text/javascript",
+      "Content-Length": String(
+        new TextEncoder().encode(PDFJS_WORKER_BOOTSTRAP).byteLength
+      ),
+    };
+    return new Response(method === "HEAD" ? null : PDFJS_WORKER_BOOTSTRAP, {
+      headers,
+    });
+  }
+
+  // Package worker stays behind a fixed same-origin route; never referenced
+  // directly by application code, only by the bootstrap above.
+  if (pathname === "/vendor/pdfjs/pdf.worker.raw.min.mjs") {
     return handlePdfjsAsset({ kind: "worker", method });
   }
 

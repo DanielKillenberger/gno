@@ -203,6 +203,7 @@ export function usePdfDocument(
         setDoc(null);
         setNumPages(0);
         setFirstPageReady(false);
+        teardown({ reason: "cleanup" });
       });
 
     return () => {

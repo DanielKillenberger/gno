@@ -10,6 +10,7 @@ import {
   handlePdfjsAsset,
   isContainedInRoot,
   isSafePdfjsAssetFilename,
+  pdfjsFileUrlToPath,
   PDFJS_ASSET_CACHE_CONTROL,
   PDFJS_CMAP_EXTENSIONS,
   PDFJS_STANDARD_FONT_EXTENSIONS,
@@ -79,6 +80,18 @@ function assertDocAssetEnvelope(
     expect(res.headers.get("content-range")).toBe(opts.contentRange);
   }
 }
+
+test("pdfjs file URLs decode spaces, percent escapes, and Unicode", () => {
+  const encoded = new URL(
+    "file:///tmp/GNO%20PDF/%E6%BC%A2%E5%AD%97/package.json"
+  );
+  expect(pdfjsFileUrlToPath(encoded.href)).toBe(
+    "/tmp/GNO PDF/漢字/package.json"
+  );
+  expect(pdfjsFileUrlToPath("/tmp/plain/package.json")).toBe(
+    "/tmp/plain/package.json"
+  );
+});
 
 async function setupSimpleAsset(
   tmpDir: string,

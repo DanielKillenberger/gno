@@ -102,6 +102,10 @@ import {
   handleTraceShow,
 } from "./routes/traces";
 import { forbiddenResponse, isRequestAllowed } from "./security";
+import {
+  createSpaBundleSource,
+  type SpaBundleSource,
+} from "./spa-bundle-source";
 
 export interface ServeOptions extends HttpGatewayOverrides {
   /** Port to listen on (default: 3000) */
@@ -201,6 +205,16 @@ export function withSecurityHeaders(
   }
 }
 
+/** Build a loopback origin with correct IPv6 authority formatting. */
+export function loopbackHttpOrigin(host: string, port: number): string {
+  const normalizedHost =
+    host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const authority = normalizedHost.includes(":")
+    ? `[${normalizedHost}]`
+    : normalizedHost;
+  return `http://${authority}:${port}`;
+}
+
 /**
  * Start the web server.
  * Opens DB once, closes on SIGINT/SIGTERM.
@@ -286,10 +300,29 @@ export async function startServer(
 
   // Start server with try/catch for port-in-use etc.
   let server: ReturnType<typeof Bun.serve>;
-  // Bun HTMLBundle route values cannot carry custom headers. Serve the bundle
-  // on an unguessable internal path, then re-emit public SPA routes through
-  // withSecurityHeaders so document navigations get CSP / XFO / etc.
-  const spaInternalPath = `/__gno_spa_${crypto.randomUUID().replaceAll("-", "")}`;
+  // Bun HTMLBundle route values cannot carry custom headers. In production,
+  // host it on a private Unix socket (ephemeral loopback on Windows), then
+  // proxy bytes through this public listener's security envelope. Injected
+  // server tests keep an in-listener bundle route because their fake Bun
+  // server cannot host the private source.
+  let spaBundleSource: SpaBundleSource | null = null;
+  const usesInjectedServer = dependencies.serve !== undefined;
+  try {
+    if (!usesInjectedServer) {
+      spaBundleSource = createSpaBundleSource(homepage, isDev);
+    }
+  } catch (error) {
+    removeShutdownHandlers();
+    await Promise.allSettled([gateway.close()]);
+    await Promise.allSettled([runtime.dispose()]);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const spaInternalPath =
+    spaBundleSource?.entryPath ??
+    `/__gno_spa_${crypto.randomUUID().replaceAll("-", "")}`;
   let spaHtmlCache: {
     body: ArrayBuffer;
     contentType: string;
@@ -310,7 +343,12 @@ export async function startServer(
       );
     }
     const boundPort = server.port ?? port;
-    const raw = await fetch(`http://127.0.0.1:${boundPort}${spaInternalPath}`);
+    const internalRequest = new Request(
+      `${loopbackHttpOrigin(gatewayConfig.host, boundPort)}${spaInternalPath}`
+    );
+    const raw = spaBundleSource
+      ? await spaBundleSource.fetch(internalRequest)
+      : await fetch(internalRequest);
     if (!raw.ok) {
       return withSecurityHeaders(
         new Response("SPA unavailable", { status: 503 }),
@@ -357,8 +395,9 @@ export async function startServer(
           isHttpGatewayLoopbackBind(gatewayConfig.host),
           clipperGateway
         ),
-        // Internal HTMLBundle (no public links). Public SPA routes wrap it.
-        [spaInternalPath]: homepage,
+        // Injected-server tests only. Real runs keep the raw HTMLBundle off the
+        // public listener in createSpaBundleSource above.
+        ...(spaBundleSource ? {} : { [spaInternalPath]: homepage }),
         // SPA routes - same React app, security envelope on every document
         "/": spaPageRoute,
         "/search": spaPageRoute,
@@ -1230,6 +1269,15 @@ export async function startServer(
             withSecurityHeaders,
           });
         }
+        if (
+          spaBundleSource &&
+          (req.method === "GET" || req.method === "HEAD")
+        ) {
+          const asset = await spaBundleSource.fetch(req);
+          if (asset.status !== 404) {
+            return withSecurityHeaders(asset, isDev);
+          }
+        }
         return withSecurityHeaders(
           new Response("Not Found", { status: 404 }),
           isDev
@@ -1238,6 +1286,9 @@ export async function startServer(
     });
   } catch (e) {
     removeShutdownHandlers();
+    if (spaBundleSource) {
+      await Promise.allSettled([spaBundleSource.close()]);
+    }
     await Promise.allSettled([gateway.close()]);
     await Promise.allSettled([runtime.dispose()]);
     return {
@@ -1267,6 +1318,9 @@ export async function startServer(
   try {
     await server.stop(true);
   } finally {
+    if (spaBundleSource) {
+      await Promise.allSettled([spaBundleSource.close()]);
+    }
     await Promise.allSettled([gateway.close()]);
     await Promise.allSettled([runtime.dispose()]);
   }

@@ -1,0 +1,704 @@
+[
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619817886
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619818247
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619818491
+  },
+  {
+    "mode": "CLEAN",
+    "type": "warning",
+    "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "ts": 1785619818620
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619823751
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619824023
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619824211
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619824455
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619824654
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619824898
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619829998
+  },
+  {
+    "mode": "CLEAN",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619830246
+  },
+  {
+    "mode": "CLEAN",
+    "type": "warning",
+    "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "ts": 1785619830363
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619830433
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619830800
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619831020
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619831388
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619840393
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619841145
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619841413
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619841598
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619841843
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Indexing all PDF objects",
+    "ts": 1785619841888
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619842011
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619842251
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619842433
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619842703
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_FAILED",
+    "ts": 1785619842759
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619842894
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619843167
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_FAILED",
+    "ts": 1785619843223
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_FAILED",
+    "ts": 1785619844074
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619844135
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619844447
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Setting up fake worker.",
+    "ts": 1785619844459
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619844461
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619844584
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619844910
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Setting up fake worker.",
+    "ts": 1785619844920
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619844924
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619845819
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619846183
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619846261
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap\".",
+    "ts": 1785619846262
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+    "ts": 1785619846263
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619853027
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619855874
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap\".",
+    "ts": 1785619855875
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+    "ts": 1785619855875
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619855907
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619856181
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619856186
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619856455
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619856522
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619856895
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619856970
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap\".",
+    "ts": 1785619856971
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+    "ts": 1785619856971
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619865027
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619865027
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619866792
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap\".",
+    "ts": 1785619866793
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+    "ts": 1785619866793
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619866821
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619867090
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619867095
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619867370
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619867429
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619867789
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619867867
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+    "ts": 1785619867868
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619877475
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+    "ts": 1785619877476
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619877553
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619877919
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619877997
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+    "ts": 1785619877998
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619878036
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619886038
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "ts": 1785619887816
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+    "ts": 1785619887817
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619887846
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619888108
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619888299
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619889034
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619889302
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619889586
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619889858
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619890051
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619890059
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619890295
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING",
+    "ts": 1785619902037
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619906273
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619906559
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619907506
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619907775
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619908024
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619908300
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619908539
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619908787
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619908933
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619909189
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619909391
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619909398
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619909642
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619910752
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619911001
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "ts": 1785619911092
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619911238
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619911486
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "ts": 1785619911574
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619911725
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619911965
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "ts": 1785619912062
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Setting the document's base URI to 'http://127.0.0.1:44553/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+    "ts": 1785619912223
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "ts": 1785619912470
+  },
+  {
+    "mode": "INTERCEPTION",
+    "type": "warning",
+    "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently",
+    "ts": 1785619912558
+  }
+]

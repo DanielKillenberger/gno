@@ -392,6 +392,9 @@ describe("production /vendor/pdfjs dispatcher (handlePdfjsVendorRequest — same
     expect(isPdfjsVendorPath("/vendor/pdfjs")).toBe(true);
     expect(isPdfjsVendorPath("/vendor/pdfjs/")).toBe(true);
     expect(isPdfjsVendorPath("/vendor/pdfjs/pdf.worker.min.mjs")).toBe(true);
+    expect(isPdfjsVendorPath("/vendor/pdfjs/pdf.worker.raw.min.mjs")).toBe(
+      true
+    );
     expect(isPdfjsVendorPath("/vendor/pdfjs/cmaps/x.bcmap")).toBe(true);
     expect(isPdfjsVendorPath("/vendor/pdfjs/cmaps/a/b")).toBe(true);
     expect(isPdfjsVendorPath("/api/doc-asset")).toBe(false);
@@ -402,6 +405,10 @@ describe("production /vendor/pdfjs dispatcher (handlePdfjsVendorRequest — same
     const surfaces = [
       {
         path: "/vendor/pdfjs/pdf.worker.min.mjs",
+        ct: "text/javascript",
+      },
+      {
+        path: "/vendor/pdfjs/pdf.worker.raw.min.mjs",
         ct: "text/javascript",
       },
       {

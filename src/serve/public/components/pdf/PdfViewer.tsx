@@ -174,22 +174,6 @@ export function PdfViewer({
     }
   }, [docId, status]);
 
-  // Fallback: exactly once per failed load attempt when extracted text exists
-  useEffect(() => {
-    if (status !== "error" || !error) {
-      return;
-    }
-    if (!extractedTextAvailable) {
-      return;
-    }
-    const key = `${docId ?? assetUrl ?? "err"}:${error}`;
-    if (fallbackFiredForLoadRef.current === key) {
-      return;
-    }
-    fallbackFiredForLoadRef.current = key;
-    onFallbackRef.current(error);
-  }, [status, error, extractedTextAvailable, docId, assetUrl]);
-
   // Real hook composition: genId from zoom/fit commits drives task .3 cancel path
   const pages = usePdfPages({
     doc: status === "ready" ? doc : null,
@@ -201,6 +185,32 @@ export function PdfViewer({
     containerHeight,
     genId,
   });
+  const viewerError = status === "error" ? error : pages.error;
+
+  // Fallback: exactly once per failed load/page attempt when extracted text exists.
+  useEffect(() => {
+    if (!viewerError || !extractedTextAvailable) {
+      return;
+    }
+    const key = `${docId ?? assetUrl ?? "err"}:${viewerError}`;
+    if (fallbackFiredForLoadRef.current === key) {
+      return;
+    }
+    fallbackFiredForLoadRef.current = key;
+    onFallbackRef.current(viewerError);
+  }, [viewerError, extractedTextAvailable, docId, assetUrl]);
+
+  const firstVisiblePage = pages.slots.find((slot) => slot.visible)?.pageNumber;
+
+  // Native scrolling is intentionally left to the browser. Keep toolbar and
+  // subsequent prev/next actions anchored to the first page currently visible
+  // in the column instead of the last explicitly requested page.
+  useEffect(() => {
+    if (firstVisiblePage === undefined || numPages < 1) {
+      return;
+    }
+    setPage(Math.min(numPages, Math.max(1, firstVisiblePage)));
+  }, [firstVisiblePage, numPages]);
 
   // Keep page in range when numPages changes
   useEffect(() => {
@@ -375,15 +385,16 @@ export function PdfViewer({
   // error: status === "error"
   const showLoading = status === "loading";
   const showEmpty = status === "ready" && numPages === 0;
-  const showProgressive = status === "ready" && numPages > 0;
-  const showError = status === "error" && error !== null;
+  const showProgressive =
+    status === "ready" && numPages > 0 && viewerError === null;
+  const showError = viewerError !== null;
   const showErrorPanel = showError && !extractedTextAvailable;
 
   const errorPanel = (() => {
-    if (!showErrorPanel || !error) {
+    if (!showErrorPanel || !viewerError) {
       return null;
     }
-    switch (error) {
+    switch (viewerError) {
       case "corrupt":
         return (
           <StatePanel
@@ -508,6 +519,7 @@ export function PdfViewer({
                 doc={doc}
                 height={slot.height}
                 onMount={pages.observePage}
+                onInternalNavigate={goToPage}
                 onRender={pages.ensureRendered}
                 pageNumber={slot.pageNumber}
                 rendered={slot.rendered}

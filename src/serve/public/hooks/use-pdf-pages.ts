@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  classifyPdfError,
   computeEffectiveScale as defaultComputeEffectiveScale,
   getPdfMetrics as defaultGetPdfMetrics,
   isRenderingCancelled as defaultIsRenderingCancelled,
   type PDFDocumentProxy,
   type PDFPageProxy,
+  type PdfFallbackReason,
   type RenderTask,
 } from "../lib/pdf";
 
@@ -65,6 +67,8 @@ export type UsePdfPagesOptions = {
 
 export type UsePdfPagesResult = {
   slots: PageSlotState[];
+  /** Geometry/page acquisition failure classified for the viewer state model. */
+  error: PdfFallbackReason | null;
   liveCanvasCount: number;
   observePage: (pageNumber: number, el: HTMLElement | null) => void;
   /**
@@ -103,6 +107,8 @@ type PageCache = {
   /** Single-owner cancel promise — concurrent callers share one cancel/settle. */
   cancelClaim: Promise<void> | null;
 };
+
+type BasePageGeometry = { width: number; height: number };
 
 function setsEqual(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
   if (a.size !== b.size) {
@@ -176,10 +182,16 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
     () => new Set()
   );
   const [liveCanvasCount, setLiveCanvasCount] = useState(0);
+  const [pageError, setPageError] = useState<PdfFallbackReason | null>(null);
 
   const cacheRef = useRef<Map<number, PageCache>>(new Map());
   const elementsRef = useRef<Map<number, HTMLElement>>(new Map());
   const canvasRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
+  const reservationsRef = useRef<Map<number, symbol>>(new Map());
+  const latestRequestRef = useRef<Map<number, symbol>>(new Map());
+  const geometryCacheRef = useRef<
+    WeakMap<PDFDocumentProxy, Promise<BasePageGeometry[]>>
+  >(new WeakMap());
   const observerRef = useRef<IntersectionObserver | null>(null);
   const settledTaskIdsRef = useRef<Set<string>>(new Set());
   const metrics = getPdfMetrics();
@@ -209,6 +221,7 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         epochSeq: number;
         pageNumber: number;
         canvas: HTMLCanvasElement;
+        scale: number;
       }
     >
   >(new Map());
@@ -235,6 +248,8 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       epochBatchOpenRef.current = true;
       epochAdmittedRef.current = 0;
       pendingRef.current.clear();
+      reservationsRef.current.clear();
+      latestRequestRef.current.clear();
       if (pendingTimerRef.current !== null) {
         clearTimeout(pendingTimerRef.current);
         pendingTimerRef.current = null;
@@ -272,56 +287,116 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
     [numPages]
   );
 
-  // Slot geometry from page 1 only — never eagerly getPage(1..N).
+  // Resolve rotation-aware geometry with bounded concurrency before publishing
+  // slots. Correct placeholders are part of the scroll model: copying page 1
+  // makes mixed-size documents jump and makes fit modes overflow later pages.
   useEffect(() => {
     let cancelled = false;
     if (!doc || numPages === 0) {
       setSlots([]);
       setScale(1);
+      setPageError(null);
       return;
     }
 
     void (async () => {
+      let geometryPromise = geometryCacheRef.current.get(doc);
+      if (!geometryPromise) {
+        geometryPromise = (async (): Promise<BasePageGeometry[]> => {
+          const geometry = Array.from<BasePageGeometry | undefined>({
+            length: numPages,
+          });
+          let nextPageNumber = 1;
+          let failure: unknown = null;
+          const worker = async (): Promise<void> => {
+            while (failure === null) {
+              const pageNumber = nextPageNumber;
+              nextPageNumber += 1;
+              if (pageNumber > numPages) {
+                return;
+              }
+              try {
+                const page = await doc.getPage(pageNumber);
+                if (failure !== null) {
+                  return;
+                }
+                const viewport = page.getViewport({ scale: 1 });
+                geometry[pageNumber - 1] = {
+                  width: viewport.width,
+                  height: viewport.height,
+                };
+              } catch (error) {
+                failure = error;
+              }
+            }
+          };
+          await Promise.all(
+            Array.from({ length: Math.min(4, numPages) }, async () => worker())
+          );
+          const resolved = geometry.filter(
+            (entry): entry is BasePageGeometry => entry !== undefined
+          );
+          if (failure !== null) {
+            throw failure;
+          }
+          if (resolved.length !== numPages) {
+            throw new Error("PDF page geometry is incomplete");
+          }
+          return resolved;
+        })();
+        geometryCacheRef.current.set(doc, geometryPromise);
+      }
+
+      let resolvedGeometry: BasePageGeometry[];
       try {
-        const page1 = await doc.getPage(1);
+        resolvedGeometry = await geometryPromise;
+      } catch (error) {
         if (cancelled) {
           return;
         }
-        const base = page1.getViewport({ scale: 1 });
-        let nextScale = zoom;
-        if (fitMode === "width" && containerWidth > 0) {
-          nextScale = containerWidth / base.width;
-        } else if (
-          fitMode === "page" &&
-          containerWidth > 0 &&
-          containerHeight > 0
-        ) {
-          nextScale = Math.min(
-            containerWidth / base.width,
-            containerHeight / base.height
-          );
-        }
-        nextScale = Math.max(0.25, Math.min(4, nextScale));
-        setScale(nextScale);
-
-        const vp = page1.getViewport({ scale: nextScale });
-        const visible = visibleRef.current;
-        const active = computeActiveSet(visible, numPages);
-        const nextSlots: PageSlotState[] = [];
-        for (let i = 1; i <= numPages; i++) {
-          nextSlots.push({
-            pageNumber: i,
-            width: vp.width,
-            height: vp.height,
-            rendered: false,
-            visible: visible.has(i),
-            active: active.has(i),
-          });
-        }
-        setSlots(nextSlots);
-      } catch {
-        // leave slots empty on failure
+        setSlots([]);
+        setPageError(classifyPdfError(error));
+        return;
       }
+      if (cancelled) {
+        return;
+      }
+
+      const maxWidth = Math.max(
+        ...resolvedGeometry.map((entry) => entry.width)
+      );
+      const maxHeight = Math.max(
+        ...resolvedGeometry.map((entry) => entry.height)
+      );
+      let nextScale = zoom;
+      if (fitMode === "width" && containerWidth > 0) {
+        nextScale = containerWidth / maxWidth;
+      } else if (
+        fitMode === "page" &&
+        containerWidth > 0 &&
+        containerHeight > 0
+      ) {
+        nextScale = Math.min(
+          containerWidth / maxWidth,
+          containerHeight / maxHeight
+        );
+      }
+      nextScale = Math.max(0.25, Math.min(4, nextScale));
+      setScale(nextScale);
+      setPageError(null);
+
+      const visible = visibleRef.current;
+      const active = computeActiveSet(visible, numPages);
+      setSlots(
+        resolvedGeometry.map((entry, index) => ({
+          pageNumber: index + 1,
+          width: entry.width * nextScale,
+          height: entry.height * nextScale,
+          rendered: false,
+          visible: visible.has(index + 1),
+          active: active.has(index + 1),
+        }))
+      );
     })();
 
     return () => {
@@ -633,6 +708,8 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
 
       const currentGen = genIdRef.current;
       const currentScale = scaleRef.current;
+      const requestToken = Symbol(`pdf-page-${pageNumber}`);
+      latestRequestRef.current.set(pageNumber, requestToken);
 
       /**
        * Full admission identity: {docId, genId, epochSeq, pageNumber, canvas}
@@ -644,7 +721,9 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       const identityStillValid = (): boolean =>
         !disposedRef.current &&
         genIdRef.current === currentGen &&
+        scaleRef.current === currentScale &&
         epochSeqRef.current === admittedEpochSeq &&
+        latestRequestRef.current.get(pageNumber) === requestToken &&
         computeActiveSet(visibleRef.current, numPages).has(pageNumber) &&
         canvasRef.current.get(pageNumber) === canvas &&
         canvas.isConnected;
@@ -660,7 +739,9 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         if (
           disposedRef.current ||
           genIdRef.current !== currentGen ||
+          scaleRef.current !== currentScale ||
           epochSeqRef.current !== admittedEpochSeq ||
+          latestRequestRef.current.get(pageNumber) !== requestToken ||
           !computeActiveSet(visibleRef.current, numPages).has(pageNumber) ||
           !canvas.isConnected
         ) {
@@ -674,11 +755,18 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         return true;
       };
 
-      // Evict farthest if at ceiling and this page is not cached
-      if (
-        !cacheRef.current.has(pageNumber) &&
-        cacheRef.current.size >= LIVE_CANVAS_CEILING
-      ) {
+      // Evict farthest until this uncached page can reserve one live-canvas
+      // slot. Reservations happen before getPage(), so concurrent cold-window
+      // admissions cannot all observe the same under-ceiling cache size.
+      while (!cacheRef.current.has(pageNumber)) {
+        const alreadyReserved = reservationsRef.current.has(pageNumber);
+        const usedByOtherPages =
+          cacheRef.current.size +
+          reservationsRef.current.size -
+          (alreadyReserved ? 1 : 0);
+        if (usedByOtherPages < LIVE_CANVAS_CEILING) {
+          break;
+        }
         let farthest = -1;
         let farthestDist = -1;
         for (const p of cacheRef.current.keys()) {
@@ -691,11 +779,12 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
             farthest = p;
           }
         }
-        if (farthest > 0) {
-          await cancelAndCleanup(farthest);
-          if (!identityValidAfterOwnCancel()) {
-            return;
-          }
+        if (farthest < 1) {
+          return;
+        }
+        await cancelAndCleanup(farthest);
+        if (!identityValidAfterOwnCancel()) {
+          return;
         }
       }
 
@@ -730,43 +819,41 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         }
       }
 
+      if (!cacheRef.current.has(pageNumber)) {
+        reservationsRef.current.set(pageNumber, requestToken);
+      }
+      const releaseReservation = (): void => {
+        if (reservationsRef.current.get(pageNumber) === requestToken) {
+          reservationsRef.current.delete(pageNumber);
+        }
+      };
+
       let page: PDFPageProxy;
       const still = cacheRef.current.get(pageNumber);
       if (still?.page) {
         page = still.page;
       } else {
-        page = await doc.getPage(pageNumber);
+        try {
+          page = await doc.getPage(pageNumber);
+        } catch (error) {
+          releaseReservation();
+          setPageError(classifyPdfError(error));
+          return;
+        }
       }
 
       // Full identity re-check after page acquisition, BEFORE any slot write,
       // metric event, or backing-store allocation.
       if (!identityStillValid()) {
+        releaseReservation();
         return;
       }
 
-      const viewport = page.getViewport({ scale: currentScale });
-      setSlots((prev) =>
-        prev.map((s) =>
-          s.pageNumber === pageNumber
-            ? { ...s, width: viewport.width, height: viewport.height }
-            : s
-        )
-      );
-
-      const effective = computeEffectiveScale({
-        zoom: currentScale,
-        devicePixelRatio,
-        cssWidth: viewport.width,
-        cssHeight: viewport.height,
-      });
-
-      const taskId = metrics.mintTaskId();
-      const startGenId = currentGen;
-      const renderViewport = page.getViewport({ scale: effective.renderScale });
-
-      // Allocate backing store only after we know we will attempt a render.
-      // On pre-start failure: roll back dims + cleanup page (I3-05).
+      // Release the admission on every pre-commit path. Geometry/DPR helpers
+      // are third-party boundaries too; an exception there must not consume a
+      // permanent canvas reservation and deadlock later pages at the ceiling.
       const rollbackPreStart = () => {
+        releaseReservation();
         zeroCanvasBacking(canvas);
         try {
           page.cleanup();
@@ -779,6 +866,43 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         cacheRef.current.delete(pageNumber);
         setLiveCanvasCount(cacheRef.current.size);
       };
+
+      let prepared: {
+        viewport: ReturnType<PDFPageProxy["getViewport"]>;
+        renderViewport: ReturnType<PDFPageProxy["getViewport"]>;
+        effective: ReturnType<typeof defaultComputeEffectiveScale>;
+      };
+      try {
+        const viewport = page.getViewport({ scale: currentScale });
+        const effective = computeEffectiveScale({
+          zoom: currentScale,
+          devicePixelRatio,
+          cssWidth: viewport.width,
+          cssHeight: viewport.height,
+        });
+        prepared = {
+          viewport,
+          effective,
+          renderViewport: page.getViewport({
+            scale: effective.renderScale,
+          }),
+        };
+      } catch (error) {
+        rollbackPreStart();
+        setPageError(classifyPdfError(error));
+        return;
+      }
+      const { viewport, effective, renderViewport } = prepared;
+      setSlots((prev) =>
+        prev.map((s) =>
+          s.pageNumber === pageNumber
+            ? { ...s, width: viewport.width, height: viewport.height }
+            : s
+        )
+      );
+
+      const taskId = metrics.mintTaskId();
+      const startGenId = currentGen;
 
       canvas.width = effective.canvasWidth;
       canvas.height = effective.canvasHeight;
@@ -799,8 +923,9 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
           viewport: renderViewport,
           canvas,
         } as never);
-      } catch {
+      } catch (error) {
         rollbackPreStart();
+        setPageError(classifyPdfError(error));
         return;
       }
 
@@ -825,6 +950,8 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         settled: false,
         cancelClaim: null,
       });
+      releaseReservation();
+      setPageError(null);
       setLiveCanvasCount(cacheRef.current.size);
 
       try {
@@ -953,8 +1080,12 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         if (
           cached?.task &&
           !cached.settled &&
-          cached.startGenId === genIdRef.current
+          cached.startGenId === genIdRef.current &&
+          cached.startScale === entry.scale
         ) {
+          continue;
+        }
+        if (entry.scale !== scaleRef.current) {
           continue;
         }
         await startRenderAdmitted(
@@ -1008,6 +1139,7 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         epochSeq: admittedEpochSeq,
         pageNumber,
         canvas,
+        scale: scaleRef.current,
       });
       // Arm once per pending batch. The quiescence being waited on is that of
       // the VISIBLE SET (the observer re-arms below on genuine churn); resetting
@@ -1033,6 +1165,8 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       const pages = [...cacheRef.current.keys()];
       await Promise.all(pages.map((p) => cancelAndCleanup(p)));
       canvasRef.current.clear();
+      reservationsRef.current.clear();
+      latestRequestRef.current.clear();
       setLiveCanvasCount(0);
     })();
     try {
@@ -1053,6 +1187,7 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
 
   return {
     slots,
+    error: pageError,
     liveCanvasCount,
     observePage,
     ensureRendered,
