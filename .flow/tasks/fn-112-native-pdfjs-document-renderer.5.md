@@ -43,7 +43,7 @@ Wire the viewer into `DocView`: the `isPdf` branch, the `Pages`/`Text` toggle re
 - [ ] `extractedTextAvailable` implements the spec predicate exactly (`doc.contentAvailable === true && typeof doc.content === "string" && doc.content.trim().length > 0`) and is table-tested over `contentAvailable:false` / `content:null` / `""` / whitespace-only / non-empty; predicate false → no fallback occurs and the viewer's error card stays visible and actionable; the "No extracted text for this document." sub-state renders only on manual Text selection, with zero `pdf-fallback-*` nodes present and the download affordance reachable (DOM tests)
 - [ ] Asset-URL derivation validated against nested `relPath`, `recordSourcePath`-backed, and container-backed documents, plus a same-basename sibling — the derived URL resolves the actual indexed PDF and cannot select the sibling (DOM/unit tests); the chosen derivation is documented in the done summary
 - [ ] Download/open-original affordance present for PDFs; viewer remount-on-navigation verified (test or documented manual check)
-- [ ] `bun test test/serve/public/pages/DocView.dom.test.tsx` green; `bun run test:web`, lint, typecheck: no new failures vs the durable baseline receipt `.flow/reviews/fn-112-landing-record.md` (task .2 step 0)
+- [ ] `bun test test/serve/public/pages/DocView.dom.test.tsx` green; `bun run test:web`, lint, typecheck: no new failures vs the durable baseline receipt `.flow/reviews/fn-112-baseline-receipt.json` (task .2 step 0)
 
 ## Acceptance
 - [ ] isPdf branch renders lazy PdfViewer; non-PDF behavior unchanged; no iframe/object/embed
@@ -51,7 +51,7 @@ Wire the viewer into `DocView`: the `isPdf` branch, the `Pages`/`Text` toggle re
 - [ ] DocView-owned `pdfFallbackReason` flow tested for all four reasons with string-exact canonical notice copy, `pdf-fallback-<reason>` hooks, notice clearing, the exact `extractedTextAvailable` predicate (table-tested), and the no-extracted-text actionable case — the scanned/empty sub-state never co-occurring with a notice
 - [ ] Asset-URL derivation proven correct for nested/recordSourcePath/container docs and a same-basename sibling
 - [ ] Download/open-original affordance for PDFs; remount-on-navigation verified
-- [ ] DocView DOM suite + test:web + lint + typecheck: no new failures vs the durable baseline receipt `.flow/reviews/fn-112-landing-record.md`
+- [ ] DocView DOM suite + test:web + lint + typecheck: no new failures vs the durable baseline receipt `.flow/reviews/fn-112-baseline-receipt.json`
 
 
 ## Done summary
@@ -61,7 +61,7 @@ Wire the viewer into `DocView`: the `isPdf` branch, the `Pages`/`Text` toggle re
 - **B5-02:** Real SqliteAdapter + handleDocAsset byte-exact nested/recordSourcePath/container/sibling suite.
 - **B5-03:** Stub mount identities; Text→Pages B≠A; App key={location} A→B remount with B URL, notice cleared.
 
-Prior receipt superseded_incomplete. Repair: `.flow/reviews/fn-112-landing-record.md`. **No Sol SHIP.**
+Prior receipt superseded_incomplete. Repair: `fn-112-grok-implementation-task-5-repair.{md,json}` (removed during PR hygiene). **No Sol SHIP.**
 ## Evidence
 - Commits:
 - Tests: bun test DocView.dom → 14 pass (B5-01/B5-03), bun test fn112-doc-asset-bytes → 1 pass (B5-02), focused pdf+hooks+routes+security+DocView+bytes → 129 pass, bun run test:web → 279 pass, lint:check / tsc / diff-check → clean

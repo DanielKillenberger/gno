@@ -1,6 +1,6 @@
 {
   "assignee": null,
-  "claim_note": "In progress and unaccepted. Implementation was driven through the canonical Grok task-.6 rounds (.flow/reviews/fn-112-landing-record.md) and the progressive contract was subsequently repaired (.flow/reviews/fn-112-landing-record.md). Status corrected to in_progress on 2026-08-01 by the fn-112 plan repair (Sol PR6-01); claimed_at is left null because the task was never claimed through `flowctl start`, and no claim timestamp is inferred.",
+  "claim_note": "In progress and unaccepted. Implementation was driven through the canonical Grok task-.6 rounds (fn-112-grok-task-6-repair-round-*, never tracked in git) and the progressive contract was subsequently repaired (fn-112-opus-plan-repair-task-6-progressive-receipt.md, removed during PR hygiene; the round ledger survives in .flow/reviews/fn-112-landing-record.md). Status corrected to in_progress on 2026-08-01 by the fn-112 plan repair (Sol PR6-01); claimed_at is left null because the task was never claimed through `flowctl start`, and no claim timestamp is inferred.",
   "claimed_at": null,
   "created_at": "2026-07-31T14:09:22.080575Z",
   "depends_on": [

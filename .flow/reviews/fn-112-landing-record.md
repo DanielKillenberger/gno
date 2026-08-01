@@ -2,15 +2,25 @@
 
 Consolidated evidence + review ledger for spec `fn-112-native-pdfjs-document-renderer`.
 
-This is the single durable Flow artifact for the PR, alongside the terminal
-spec-completion verdict in `fn-112-spec-completion-sol-round1.out.md`. Every
-other build artifact — per-round review receipts, orchestration transcripts,
-harness telemetry, raw gate logs, screenshots, driver scripts, and the
-regenerable browser evidence — was removed during PR hygiene. Repository
+`.flow/reviews/` retains exactly four files for this spec:
+
+| File | Why it is kept |
+| --- | --- |
+| `fn-112-landing-record.md` (this file) | consolidated evidence summary + review ledger |
+| `fn-112-spec-completion-sol-round1.out.md` | the only verbatim record of the R1–R19 dispositions |
+| `fn-112-baseline-receipt.json` | the R17 durable baseline; task `.2`'s acceptance criterion names this file's versioned append-only `captures[]` schema literally, so no summary can stand in for it |
+| `fn-112-baseline-receipt.md` | the human-readable twin the same acceptance criterion requires |
+
+Every other build artifact — per-round review receipts, orchestration
+transcripts, harness telemetry, raw gate logs, screenshots, driver scripts, and
+the regenerable browser evidence — was removed during PR hygiene. Repository
 precedent for merged feature PRs (#147, #151, #152, #154, #156) retains **zero**
-`.flow/reviews` files; this record and the completion verdict are the deliberate
-two-file exception, kept because they are the only proof that R1–R19 were
-independently accepted and that the gates ran.
+`.flow/reviews` files; these four are the deliberate exception, kept because
+they are the only proof that R1–R19 were independently accepted, that the gates
+ran, and that they ran against a verifiable baseline. They are not forced into
+one path: a machine-schema receipt, a verbatim reviewer verdict, and a
+consolidated narrative record are unlike artifacts, and merging them would
+destroy the schema the spec requires.
 
 The evidence summary and the review ledger are one document on purpose:
 separating them would duplicate the gate table and the artifact-hash table
@@ -24,7 +34,7 @@ across two files for no reader benefit.
 | Per-task implementation review, tasks `.1`–`.7` | SHIP each (terminal round) | ledger below |
 | Spec completion review, R1–R19 | **SHIP** | `fn-112-spec-completion-sol-round1.out.md` (retained verbatim) |
 | Live QA | SHIP, 8/8 PASS, 0 findings | this file |
-| PR hygiene review | SHIP | ledger below |
+| PR hygiene review | rounds 1–2 SHIP; round 3 under review as this file is written | ledger below |
 
 Reviewer for every row: Sol, canonical model `gpt-5.6-sol`, read-only mode.
 
@@ -35,6 +45,10 @@ Captured before any implementation in an isolated detached worktree at base
 there, `bun install --frozen-lockfile` exit 0, `bun.lock` unchanged).
 This is the R17 baseline: the five canonical baseline-compared commands and
 their enumerated failures, against which the final gate run was diffed.
+
+The table below is a **summary**. The authoritative artifact — and the one the
+spec and every task cite — is `fn-112-baseline-receipt.json`, retained in full,
+with `fn-112-baseline-receipt.md` as its human-readable twin.
 
 | Command | Exit | Counts | Enumerated failures | Log SHA256 |
 | --- | ---: | --- | --- | --- |
@@ -124,8 +138,10 @@ proving the task `.6` assertions are non-vacuous.
 
 ## Review ledger — every round
 
-Terminal verdict per scope was SHIP. Intermediate rounds are recorded by
-verdict and content digest; the receipt files themselves are not retained.
+This is a **summary ledger**: it records, per scope, how many independent review
+rounds ran and what the terminal verdict was. Intermediate rounds are counted,
+not itemized — their individual verdicts, findings, and receipt files are not
+retained, and no content digest of them survives.
 
 | Scope | Rounds | Terminal |
 | --- | --- | --- |
@@ -139,23 +155,41 @@ verdict and content digest; the receipt files themselves are not retained.
 | Task `.6` implementation | 7 | SHIP |
 | Task `.7` implementation | 4 | SHIP |
 | Spec completion, R1–R19 | 1 | **SHIP** (retained verbatim) |
-| PR hygiene + implementation integrity | 2 | SHIP |
+| PR hygiene + implementation integrity | 3 | rounds 1–2 SHIP; round 3 **pending** at the time this line was written |
 
-Across all recorded Sol receipt files: 3 SHIP, 19 NEEDS_WORK, 9 REVISE — the
-build converged through 31 recorded independent review rounds.
+The PR-hygiene row's round 3 is this record's own correction round: round 2's
+global citation repointing broke task `.2`'s baseline-schema acceptance
+criterion and produced several duplicated or over-claiming citations. Round 3
+restored `fn-112-baseline-receipt.json` (+ `.md`), repointed every
+schema-specific citation back to it, and replaced the remaining repointings with
+named-but-marked-removed references. Round 3's own verdict cannot be asserted by
+the artifact under review; it is recorded in the commit message of the repair
+commit, which is written after the review returns.
+
+Counting the review receipts that existed before hygiene: 3 SHIP, 19
+NEEDS_WORK, 9 REVISE across 31 recorded independent rounds, plus the hygiene
+rounds above.
 
 ## Provenance limits — read this before trusting the record
 
 The removed receipts are **not** durably recoverable: they exist in this
 branch's history now, but a squash merge or branch deletion destroys them. This
-record is therefore the record of last resort. Its digests prove *what was
-reviewed*, not *what the reviews said*. Anything whose content is genuinely
+record is therefore the record of last resort, and it is a summary: it records
+*what was reviewed, how many rounds ran, and the terminal verdict*, not *what
+any individual review said*. Anything whose content is genuinely
 load-bearing — the R1–R19 dispositions — is retained verbatim in the completion
 verdict rather than summarized here.
 
-Spec and task texts cite receipt paths from the build. Those citations were
-repointed to this record; the surrounding requirement text, acceptance criteria,
-R-ID meanings, and done summaries were **not** altered. One citation predates
-all cleanup and was never resolvable: task `.6`'s `claim_note` names
-`fn-112-grok-task-6-repair-round-*`, which was never tracked in git (those
-rounds produced only gitignored `.events.jsonl` streams).
+Spec and task texts cite receipt paths from the build. Every citation to the
+durable baseline receipt still points at `fn-112-baseline-receipt.json` (+
+`.md`), which is retained — those citations are schema-specific and a summary
+cannot satisfy them. Citations to removed per-round receipts keep the original
+filename and are marked *removed during PR hygiene*, rather than being silently
+repointed at this record: this file proves *what was reviewed and what the
+terminal verdict was*, not what any individual round said. The surrounding
+requirement text, acceptance criteria, R-ID meanings, and done summaries were
+**not** altered.
+
+One citation predates all cleanup and was never resolvable: task `.6`'s
+`claim_note` names `fn-112-grok-task-6-repair-round-*`, which was never tracked
+in git (those rounds produced only gitignored `.events.jsonl` streams).

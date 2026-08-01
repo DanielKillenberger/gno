@@ -23,10 +23,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Flow review process artifacts.
 #
 # Repository precedent for merged feature PRs is to carry NO .flow/reviews
-# files at all — only the terminal verdict and a consolidated landing record
-# are worth version control. Everything below is an orchestration transcript,
-# session telemetry, or a regenerable tool output: not a governance record,
-# and it bloats feature PRs.
+# files at all — only the terminal verdict, the durable baseline receipt, and
+# a consolidated landing record are worth version control. Everything below is
+# an orchestration transcript, session telemetry, or a regenerable tool
+# output: not a governance record, and it bloats feature PRs.
 .flow/reviews/*.events.jsonl
 .flow/reviews/*.log
 .flow/reviews/**/*.log
@@ -37,7 +37,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .flow/reviews/*.schema.json
 # Harness *result* envelopes: model, session id, token counts, USD cost. Scoped
 # to the `.result.json` suffix the harness itself emits — deliberately NOT
-# `*.receipt.json`, which would also swallow a future governance receipt.
+# `*.receipt.json`, which would also swallow governance receipts such as
+# .flow/reviews/fn-112-baseline-receipt.json.
 .flow/reviews/*.result.json
 # Local convenience symlink into a session-scoped debug log.
 .flow/reviews/latest

@@ -50,7 +50,7 @@ The rendering core and the spec's early proof point: document/page hooks, `PdfPa
 - [ ] `PdfPageView` DOM tests: rotation-aware placeholder aspect; external `https:` link rendered with `target="_blank" rel="noopener noreferrer"`; `javascript:` annotation inert; internal destination triggers page-jump callback
 - [ ] globals.css defines the `--scale-factor`/`--total-scale-factor`/`--scale-round-*` contract on the page wrapper and text-layer styles using semantic tokens only (no raw hex)
 - [ ] `TextLayer` and every other pdfjs runtime/type symbol is imported from `../lib/pdf`; `rg "from ['\"]pdfjs-dist" src/` matches `src/serve/public/lib/pdf.ts` and nothing else (greppable assertion in the test suite)
-- [ ] `bun test test/serve/public/components/pdf test/serve/public/hooks` green; `bun run test:web`, lint, typecheck: no new failures vs the durable baseline receipt `.flow/reviews/fn-112-landing-record.md` (task .2 step 0)
+- [ ] `bun test test/serve/public/components/pdf test/serve/public/hooks` green; `bun run test:web`, lint, typecheck: no new failures vs the durable baseline receipt `.flow/reviews/fn-112-baseline-receipt.json` (task .2 step 0)
 
 ## Acceptance
 - [ ] StrictMode invariant as specified (two loads permitted, first promptly destroyed, no concurrent surviving task, no stale write) plus out-of-order URL-change and retry race tests
@@ -58,7 +58,7 @@ The rendering core and the spec's early proof point: document/page hooks, `PdfPa
 - [ ] `__gnoPdfMetrics` records starts/cancels/settles/cleanup/destroy with full correlation fields (docId/page/taskId/genId/scale/canvas dims), survives unmount, exactly one terminal settle per start, cancel→cancelled-settle→replacement-start ordering, bounded retention with `dropped`/`reset` proven, and no content or path leakage
 - [ ] PdfPageView: rotation-aware placeholders, aligned TextLayer (facade import), sanitized external links, internal page-jump destinations
 - [ ] --scale-factor + --total-scale-factor CSS contract present; Scholarly Dusk tokens only
-- [ ] pdfjs-dist imported only in lib/pdf.ts (asserted); DOM suites + test:web + lint + typecheck no new failures vs the durable baseline receipt `.flow/reviews/fn-112-landing-record.md`
+- [ ] pdfjs-dist imported only in lib/pdf.ts (asserted); DOM suites + test:web + lint + typecheck no new failures vs the durable baseline receipt `.flow/reviews/fn-112-baseline-receipt.json`
 
 
 ## Done summary

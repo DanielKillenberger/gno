@@ -8,7 +8,7 @@
   "last_evidence": {
     "no_sol_ship_claimed": true,
     "remaining_gate": "independent Sol re-review of task .3",
-    "repair_receipt": ".flow/reviews/fn-112-landing-record.md"
+    "repair_receipt": "fn-112-grok-implementation-task-3-repair.json (removed during PR hygiene; terminal verdict in .flow/reviews/fn-112-landing-record.md)"
   },
   "last_summary": "Task .3 repair round2 I3-01/03/06; Sol round3 candidate; no SHIP.",
   "priority": null,
