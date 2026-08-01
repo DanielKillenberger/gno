@@ -1,0 +1,94 @@
+{
+  "schema": "fn-112-grok-task-2-repair-round2",
+  "schema_version": 1,
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.2",
+  "owner": "Grok 4.5",
+  "canonical_model": "grok-4.5",
+  "session_id": "019fb8d5-7418-7a11-963b-1a206a7af924",
+  "branch": "feat/native-pdf-renderer",
+  "base_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+  "prior_reviews": [
+    {
+      "path": ".flow/reviews/fn-112-sol-impl-review-task-2.json",
+      "verdict": "NEEDS_WORK",
+      "round": 1
+    },
+    {
+      "path": ".flow/reviews/fn-112-sol-impl-rereview-task-2.json",
+      "verdict": "NEEDS_WORK",
+      "round": 2,
+      "authoritative": true,
+      "note": "I2-1..I2-5 resolved; I2-6 and I2-7 remain blocking"
+    }
+  ],
+  "prior_repair": {
+    "path": ".flow/reviews/fn-112-grok-task-2-repair.json",
+    "i2_6_claim": "superseded_incorrect",
+    "i2_7_claim": "superseded_incorrect"
+  },
+  "baseline": {
+    "receipt": ".flow/reviews/fn-112-baseline-receipt.json",
+    "capture_id": "cap-001"
+  },
+  "dispositions": {
+    "I2-6": {
+      "status": "fixed",
+      "summary": "Removed caller-controlled docId from GnoGetDocumentParams; getDocument always mints gnoDocId. Metric t is performance.now() directly (not elapsed). Genuine dual successful loads of real viewer-links.pdf via distinctive temp path: await both promises, numPages===5, known glyph text + annotations, distinct opaque ids, privacy (path/filename/title/content absent from metrics). Bun uses package-local worker/cMap/font URLs; browsers keep /vendor/pdfjs/*."
+    },
+    "I2-7": {
+      "status": "fixed",
+      "summary": "Round-1 I2-6/I2-7 claims marked superseded_incorrect in first repair receipt. This round-2 receipt is authoritative. flowctl done + task JSON status reconciled to done only after gates pass. No Sol SHIP claimed."
+    }
+  },
+  "changed_files": [
+    "src/serve/public/lib/pdf.ts",
+    "test/serve/public/lib/pdf.test.ts",
+    ".flow/reviews/fn-112-grok-task-2-repair.json",
+    ".flow/reviews/fn-112-grok-task-2-repair.md",
+    ".flow/reviews/fn-112-grok-task-2-repair-round2.json",
+    ".flow/reviews/fn-112-grok-task-2-repair-round2.md"
+  ],
+  "successful_load_assertions": {
+    "fixture": "test/fixtures/conversion/pdf/viewer-links.pdf (copied to distinctive temp path)",
+    "loads": 2,
+    "awaited_promises": true,
+    "numPages": 5,
+    "known_text": "KNOWN_GLYPH_RUN_ALPHA the quick brown fox",
+    "known_external_annotation": "https://example.com/gno-pdf-viewer",
+    "javascript_annotation_present": true,
+    "distinct_gnoDocIds": true,
+    "caller_docId_ignored": true,
+    "privacy": "secret path, filename, title, known content/URL absent from metrics export"
+  },
+  "commands": [
+    {
+      "command": "bun test test/serve/public/lib/pdf.test.ts",
+      "exit_status": 0,
+      "result": "22 pass, 0 fail (includes genuine dual successful loads)"
+    },
+    {
+      "command": "bun run lint:check",
+      "exit_status": 0,
+      "result": "0 warnings, 0 errors; format clean"
+    },
+    {
+      "command": "bunx tsc --noEmit",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": ".flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer --json",
+      "exit_status": 0,
+      "result": "valid: true"
+    }
+  ],
+  "task_status_after": "done",
+  "remaining_gate": "independent Sol re-review round 3",
+  "finished_at": "2026-07-31T16:28:30Z"
+}

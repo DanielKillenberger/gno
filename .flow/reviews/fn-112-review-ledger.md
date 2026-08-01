@@ -105,10 +105,17 @@ and the full security envelope including `worker-src 'self'`,
 ## Live QA
 
 8/8 scenarios PASS, 0 P0/P1/P2 findings, verdict SHIP, driven with
-Playwright/Chromium against a real server on an isolated temp config. Per-scenario
-observations are retained verbatim in `fn-112-qa-evidence/qa-verdict.json`.
-Screenshots and the session driver script were removed; the QA scenarios are
-re-drivable from the spec.
+Playwright/Chromium against a real server on an isolated temp config.
+
+The **entire** `fn-112-qa-evidence/` directory is retained: the verdict with its
+per-scenario observations, all seven screenshots, the captured browser console
+output, the request capture, the run output, and the session driver script. An
+earlier pass of this cleanup removed the screenshots and captures; that was
+wrong and was reverted. The Live QA Gate forbids deriving PASS from source, and
+two scenarios depend on captures rather than on recorded scalars: QA-5 records
+`scaleAfterReset=metrics-unavailable(visual check)`, so its screenshot **is**
+the evidence, and QA-10's `foreignRequests=0` is backed by `requests.json` and
+`console.log`. Deleting them would have left those PASS verdicts unsupported.
 
 ## Negative control
 
@@ -157,26 +164,51 @@ it passes (exit 0). Its log output was removed; re-run the script to reproduce.
 | `server-stdout.log` | `71f2a070d871631758dadd7183da63d29b92758f62d73c57b898947419ab0990` |
 | `visual-theme-proof.json` | `edb7e346f16af1f3a01db8a7b9545b390016d3a242fc52c89c8587f63129015f` |
 
-## Removed-artifact provenance
+## Removed-artifact provenance — and the limit of this record
 
-The complete list of removed paths with byte sizes and SHA-256 digests is not
-reproduced here in full (188 files, ~6.0 MiB). Every removed file remains
-recoverable from this branch's history: the pre-cleanup tree is the parent of
-the PR-hygiene commit.
+The removed files are **not** durably recoverable. They exist in this branch's
+history today, but a squash merge or a branch deletion destroys them, so this
+ledger must be read as the record of last resort rather than as an index into
+something retrievable. That is the deliberate trade: the SHA-256 digests below
+and in the review-history table prove *what was reviewed*, not *what it said*.
+
+Anything whose content is genuinely load-bearing was therefore restored to
+version control rather than left to history — the full live-QA evidence
+directory, and every receipt cited by the approved spec or task texts.
 
 ## Citations in the spec and task files that now resolve here
 
-The approved spec and task definitions cite receipt paths that this cleanup
-removed. Those texts are the reviewed record and were deliberately **not**
-rewritten — editing them would falsify what Sol actually approved. The
-citations resolve as follows:
+The approved spec and task definitions cite receipt paths by name. Those texts
+are the reviewed record and were deliberately **not** rewritten — editing them
+would falsify what Sol actually approved. Instead, **every cited receipt that
+ever existed in version control was restored**, so the citations resolve
+against the tree rather than against a redirect table:
+
+| Cited in | Restored path |
+| --- | --- |
+| spec (line 470) | `fn-112-task-6-transaction-receipt.md` |
+| spec (line 1325), task `.4` | `fn-112-opus-plan-repair-task-4-design.md` |
+| task `.1` | `fn-112-grok-task-1-repair-round3.json` |
+| task `.2` | `fn-112-grok-task-2-repair-round2.{md,json}` |
+| task `.3` | `fn-112-grok-implementation-task-3-repair.json` |
+| task `.4` | `fn-112-grok-implementation-task-4-repair-round2.json` |
+| task `.5` | `fn-112-grok-implementation-task-5-repair.{md,json}` |
+| task `.6` | `fn-112-task-6-plan-repair-receipt.md`, `fn-112-task-6-plan-repair-receipt-round3.md`, `fn-112-opus-plan-repair-task-6-progressive-receipt.md` |
+
+One citation cannot be repaired and was **already broken before this cleanup**:
+task `.6`'s `claim_note` cites `fn-112-grok-task-6-repair-round-*`, which was
+never tracked in git (those rounds only ever produced gitignored
+`.events.jsonl` streams). It is recorded here rather than silently ignored.
+
+The following were removed and are *not* cited by any approved text:
 
 | Cited in | Removed path | Where its substance lives now |
 | --- | --- | --- |
-| spec, task `.4` | `fn-112-opus-plan-repair-task-4-design.md` | Folded into the spec's own "Decision Context → Implementation Tradeoffs" entries (progressive rendering, zoom-level combobox) |
-| spec | `fn-112-task-6-transaction-receipt.md` | Superseded by `fn-112-sol-impl-rereview-task-6-round7.json` (SHIP) and the P-1…P-6 table above |
-| tasks `.1`–`.6` | `fn-112-grok-*` implementation transcripts | Delegated-implementation transcripts; the code they produced is the diff, and its acceptance is the per-task terminal SHIP receipts |
-| task `.6` | `fn-112-task-6-plan-repair-receipt-round3.md`, `fn-112-opus-plan-repair-task-6-progressive-receipt.md` | Plan-repair iterations, folded into the spec's Decision Context |
-
-All of them remain retrievable from this branch's history at the commit
-immediately preceding the PR-hygiene commit.
+| Removed path | Why it is safe to drop |
+| --- | --- |
+| `fn-112-task-6-plan-repair-receipt-round2.{md,json}`, `fn-112-task-6-plan-repair-receipt{,-round3}.json` | Superseded plan-repair rounds not named by any approved text; the cited `.md` renderings are retained and the accepted outcome is in the spec's Decision Context |
+| `fn-112-grok-*` (remaining rounds) | Superseded delegated-implementation rounds; the code they produced is the diff, and its acceptance is the per-task terminal SHIP |
+| `fn-112-opus-plan-revision-*`, `fn-112-full-hermes-*`, `fn-112-durable-mission-state.json` | Orchestration transcripts and coordinator state, with session ids and no governance content |
+| `*.result.json`, `fn-112-fable-revision.receipt.json`, `.flow/fable-spec-plan-receipt.json` | Harness telemetry: model, session id, token counts, USD cost |
+| raw gate logs | Duplicated (`01–05` vs `final-01–05`) and regenerable; results live in `fn-112-task-7-gates/INDEX.md` |
+| `fn-112-task-6-evidence/*` | Regenerable with `bun run test:e2e:pdf`; hashes and measurements are above |

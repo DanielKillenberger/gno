@@ -29,15 +29,18 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .flow/reviews/*.events.jsonl
 .flow/reviews/*.log
 .flow/reviews/**/*.log
+# Captured browser console output IS live-QA evidence, not a process log.
+!.flow/reviews/fn-112-qa-evidence/console.log
 .flow/reviews/*.raw.txt
 .flow/reviews/*.raw.json
 .flow/reviews/*-prompt.md
 .flow/reviews/*.prompt.md
 .flow/reviews/*.schema.json
-# Harness result/receipt envelopes: model, session id, token counts, USD cost.
+# Harness *result* envelopes: model, session id, token counts, USD cost. Scoped
+# to the `.result.json` suffix the harness itself emits — deliberately NOT
+# `*.receipt.json`, which would also swallow future governance receipts such as
+# .flow/reviews/fn-112-baseline-receipt.json.
 .flow/reviews/*.result.json
-.flow/reviews/*.receipt.json
-.flow/*-receipt.json
 # Local convenience symlink into a session-scoped debug log.
 .flow/reviews/latest
 # Regenerable browser-evidence output of `bun run test:e2e:pdf`

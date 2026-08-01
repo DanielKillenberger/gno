@@ -1,0 +1,85 @@
+{
+  "schema": "fn-112-grok-implementation-task-5-repair",
+  "schema_version": 1,
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.5",
+  "owner": "Grok 4.5",
+  "canonical_model": "grok-4.5",
+  "session_id": "019fb8d5-7418-7a11-963b-1a206a7af924",
+  "branch": "feat/native-pdf-renderer",
+  "prior_review": {
+    "path": ".flow/reviews/fn-112-sol-impl-review-task-5.json",
+    "verdict": "NEEDS_WORK",
+    "blocking_open": ["B5-01", "B5-02", "B5-03"]
+  },
+  "prior_implementation": {
+    "path": ".flow/reviews/fn-112-grok-implementation-task-5.json",
+    "status": "superseded_incomplete"
+  },
+  "dispositions": {
+    "B5-01": {
+      "status": "fixed",
+      "summary": "handlePdfFallback guards isExtractedTextAvailable(doc) before any state change; depends on [doc]; test spuriously fires all four reasons for every false predicate row and asserts same mount id, no Text surfaces, no notice, pill still offers Text."
+    },
+    "B5-02": {
+      "status": "fixed",
+      "summary": "Real SqliteAdapter + handleDocAsset + buildDocAssetUrl byte-exact suite for nested, recordSourcePath, container-backed (.gno/records virtual + recordSourcePath physical), same-basename siblings; escape 403; production basename URL cannot select sibling content for dir1 URI.",
+      "container_shape": "relPath=.gno/records/container/<key>.pdf, recordSourcePath=<physical collection-relative path>, matches record-container.ts upsert"
+    },
+    "B5-03": {
+      "status": "fixed",
+      "summary": "Stub mount counter + unmount log + data-mount-id; fallback A unmount / Pages B≠A; App-equivalent key={location} A→B remount with B asset URL and cleared notice.",
+      "app_remount_contract": "src/serve/public/app.tsx: pageKey = basePath === '/browse' ? basePath : location; <Page key={pageKey} />"
+    }
+  },
+  "changed_files": [
+    "src/serve/public/pages/DocView.tsx",
+    "test/serve/public/pages/DocView.dom.test.tsx",
+    "test/serve/fn112-doc-asset-bytes.test.ts",
+    ".flow/reviews/fn-112-grok-implementation-task-5.md",
+    ".flow/reviews/fn-112-grok-implementation-task-5.json",
+    ".flow/reviews/fn-112-grok-implementation-task-5-repair.md",
+    ".flow/reviews/fn-112-grok-implementation-task-5-repair.json"
+  ],
+  "commands": [
+    {
+      "command": "bun test test/serve/public/pages/DocView.dom.test.tsx",
+      "exit_status": 0,
+      "result": "14 pass"
+    },
+    {
+      "command": "bun test test/serve/fn112-doc-asset-bytes.test.ts",
+      "exit_status": 0,
+      "result": "1 pass"
+    },
+    {
+      "command": "bun test pdf+hooks+lib+routes+security+DocView+bytes",
+      "exit_status": 0,
+      "result": "129 pass"
+    },
+    {
+      "command": "bun run test:web",
+      "exit_status": 0,
+      "result": "279 pass"
+    },
+    {
+      "command": "bun run lint:check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "bunx tsc --noEmit",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    }
+  ],
+  "no_sol_ship_claimed": true,
+  "remaining_gate": "independent Sol re-review of task .5 repair",
+  "task_status_after": "done",
+  "finished_at": "2026-07-31T20:06:00Z"
+}
