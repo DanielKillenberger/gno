@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+## [1.30.1] - 2026-08-02
+
+### Fixed
+
+- Published the native PDF viewer from v1.30.0 after moving its model-independent
+  installed-package asset check ahead of semantic model initialization. This
+  prevents slower Linux CI hosts from timing out while loading an unrelated
+  embedding model before the PDF.js worker, cMap, and font checks run.
+
 ## [1.30.0] - 2026-08-02
 
 ### Added
@@ -1946,7 +1955,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.1...HEAD
+[1.30.1]: https://github.com/gmickel/gno/compare/v1.30.0...v1.30.1
 [1.30.0]: https://github.com/gmickel/gno/compare/v1.29.6...v1.30.0
 [1.29.6]: https://github.com/gmickel/gno/compare/v1.29.5...v1.29.6
 [1.29.5]: https://github.com/gmickel/gno/compare/v1.29.4...v1.29.5
