@@ -1,7 +1,0 @@
-$ oxlint --type-aware --type-check && oxfmt --check .
-Found 0 warnings and 0 errors.
-Finished in 11.0s on 1111 files with 105 rules using 6 threads.
-Checking formatting...
-
-All matched files use the correct format.
-Finished in 12621ms on 1882 files using 6 threads.

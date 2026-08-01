@@ -1,5 +1,11 @@
 # fn-112 task .7 — durable gate artifacts
 
+> **PR-hygiene note (added after the fact).** The raw `NN-*.log` and
+> `final-NN-*.log` files this index describes were removed from version control
+> during PR cleanup — they were duplicated (`01–05` vs `final-01–05`) and are
+> regenerable by re-running the commands named below. This summary, which
+> carries the actual results, is retained. See `../fn-112-review-ledger.md`.
+
 Task: `fn-112-native-pdfjs-document-renderer.7` — Documentation, CHANGELOG, and
 final quality gates.
 

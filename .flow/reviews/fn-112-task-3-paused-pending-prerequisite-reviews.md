@@ -1,1 +1,0 @@
-Task .3 is paused as unapproved partial implementation. Task .2 was mechanically marked done but Sol's authoritative per-task implementation review returned NEEDS_WORK with blocking findings I2-1 through I2-7. Resume task .3 only after task .2 and task .1 each receive an independent Sol SHIP verdict. Preserve the current partial task .3 files; do not discard valid work wholesale.
