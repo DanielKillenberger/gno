@@ -15,7 +15,7 @@
   "plan_reviewed_at": "2026-07-31T23:13:08.613762Z",
   "ready": true,
   "spec_path": ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
-  "status": "open",
+  "status": "done",
   "title": "Native PDF.js Document Renderer",
   "tracker": {
     "baseHashFlow": null,
@@ -28,5 +28,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-07-31T23:13:08.613762Z"
+  "updated_at": "2026-08-01T22:15:14.919523Z"
 }
