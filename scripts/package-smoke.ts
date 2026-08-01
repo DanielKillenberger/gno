@@ -696,6 +696,22 @@ async function main(): Promise<void> {
       env,
       runCommand,
     });
+
+    // Prove the installed PDF.js assets before configuring the real embedding
+    // model. This check is model-independent; running it afterward makes a
+    // fresh server wait for model initialization and can exceed the bounded
+    // health probe on slower CI hosts.
+    await verifyInstalledPdfjsAssets({
+      gnoBin,
+      packageRoot,
+      cwd: tempRoot,
+      env,
+      configDir: explicitEnv.GNO_CONFIG_DIR,
+      dataDir: explicitEnv.GNO_DATA_DIR,
+      cacheDir: explicitEnv.GNO_CACHE_DIR,
+      fixtureDir: notesDir,
+    });
+
     if (embeddingModelPath) {
       await configurePackedEmbeddingModel(
         join(explicitEnv.GNO_CONFIG_DIR, "index.yml"),
@@ -736,19 +752,6 @@ async function main(): Promise<void> {
     assertLexicalActivationReady(doctor.activation, "doctor");
     assertEmbeddingFingerprintShape(doctor);
     assertNoDoctorErrors(doctor);
-
-    // fn-112: prove installed binary serves pdfjs assets byte-identical to
-    // the packaged pdfjs-dist dependency (GET + HEAD).
-    await verifyInstalledPdfjsAssets({
-      gnoBin,
-      packageRoot,
-      cwd: tempRoot,
-      env,
-      configDir: explicitEnv.GNO_CONFIG_DIR,
-      dataDir: explicitEnv.GNO_DATA_DIR,
-      cacheDir: explicitEnv.GNO_CACHE_DIR,
-      fixtureDir: notesDir,
-    });
 
     completedTarballPath = tarballPath;
   } catch (error) {
