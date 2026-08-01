@@ -1,0 +1,29 @@
+{
+  "assignee": null,
+  "claimed_at": null,
+  "created_at": "2026-07-31T14:09:22.080575Z",
+  "depends_on": [
+    "fn-112-native-pdfjs-document-renderer.5"
+  ],
+  "id": "fn-112-native-pdfjs-document-renderer.6",
+  "last_evidence": {
+    "lifecycle_note": "Status corrected to done on 2026-08-01. The prior in_progress value and its claim_note were written mid-flight by the fn-112 plan repair and were superseded by the terminal Sol round-7 SHIP plus the maintainer's final quality-audit SHIP.",
+    "sol_review": "Task .6 implementation, terminal round 7 (terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
+    "sol_verdict": "SHIP",
+    "commits": ["48f09e94"],
+    "prs": ["https://github.com/gmickel/gno/pull/161"],
+    "tests": [
+      "bun run lint:check",
+      "bunx tsc --noEmit",
+      "bun run test:e2e:pdf",
+      "bun run test:package"
+    ]
+  },
+  "last_summary": "Closed the full PR review set, retained reproducible browser evidence, hardened the public SPA security envelope, and passed browser plus installed-package smokes.",
+  "priority": null,
+  "spec": "fn-112-native-pdfjs-document-renderer",
+  "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
+  "status": "done",
+  "title": "Browser smoke, performance evidence, and npm package smoke for pdfjs assets",
+  "updated_at": "2026-08-01T21:54:57Z"
+}

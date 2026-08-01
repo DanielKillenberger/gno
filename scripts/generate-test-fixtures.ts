@@ -301,16 +301,309 @@ async function generatePptx(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PDF fixtures for native viewer (fn-112)
+//
+// All checked-in fn-112 fixtures are hand-authored deterministic byte templates
+// so isolated regeneration is exact byte-match. pdf-lib is used only for the
+// on-demand large PDF generator (NOT checked in).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PDF_DIR = join(FIXTURES_DIR, "pdf");
+
+/** Fixed creation epoch used nowhere in hand templates (documentation only). */
+const FN112_FIXTURE_NAMES = [
+  "viewer-links.pdf",
+  "corrupt.pdf",
+  "js-action.pdf",
+  "standard-font.pdf",
+  "cjk-cmap.pdf",
+  "zero-page.pdf",
+] as const;
+
+/**
+ * Build a deterministic PDF from numbered object bodies.
+ * Object bodies must be complete `N 0 obj...endobj\n` strings without leading
+ * offsets; xref is computed from UTF-8 byte lengths.
+ */
+function buildDeterministicPdf(objectBodies: string[]): string {
+  let body = "%PDF-1.4\n";
+  const offsets: number[] = [0];
+  for (const obj of objectBodies) {
+    offsets.push(Buffer.byteLength(body, "utf8"));
+    body += obj;
+  }
+  const xrefStart = Buffer.byteLength(body, "utf8");
+  const n = objectBodies.length;
+  let xref = `xref\n0 ${n + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= n; i++) {
+    xref += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  body += xref;
+  body += `trailer<< /Size ${n + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return body;
+}
+
+async function writePdfFixture(
+  name: string,
+  body: string | Uint8Array
+): Promise<void> {
+  await mkdir(PDF_DIR, { recursive: true });
+  await writeFile(join(PDF_DIR, name), body);
+  console.log(`✓ Generated pdf/${name}`);
+}
+
+/** On-demand large PDF generator for e2e (NOT checked in). */
+export async function generateLargePdf(
+  pages: number,
+  outPath?: string
+): Promise<Uint8Array> {
+  // updateMetadata:false avoids wall-clock timestamps in Info dict
+  const pdfDoc = await PDFDocument.create({ updateMetadata: false });
+  pdfDoc.setCreationDate(new Date(Date.UTC(2020, 0, 1, 0, 0, 0)));
+  pdfDoc.setModificationDate(new Date(Date.UTC(2020, 0, 1, 0, 0, 0)));
+  pdfDoc.setProducer("gno-fn112-fixture");
+  pdfDoc.setCreator("gno-fn112-fixture");
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const count = Math.max(1, pages);
+  for (let i = 0; i < count; i++) {
+    const page = pdfDoc.addPage([612, 792]);
+    const { height } = page.getSize();
+    page.drawText(`Large fixture page ${i + 1} of ${count}`, {
+      x: 50,
+      y: height - 50,
+      size: 18,
+      font,
+      color: rgb(0, 0, 0),
+    });
+    page.drawText(
+      "Deterministic content for virtualization and performance budgets.",
+      {
+        x: 50,
+        y: height - 90,
+        size: 12,
+        font,
+        color: rgb(0.2, 0.2, 0.2),
+      }
+    );
+    page.drawText(`MARKER_PAGE_${i + 1}`, {
+      x: 50,
+      y: height - 130,
+      size: 14,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  }
+  const bytes = await pdfDoc.save({
+    useObjectStreams: false,
+    addDefaultPage: false,
+    updateFieldAppearances: false,
+  });
+  if (outPath) {
+    await mkdir(join(outPath, ".."), { recursive: true }).catch(
+      () => undefined
+    );
+    await writeFile(outPath, bytes);
+  }
+  return bytes;
+}
+
+/**
+ * ~5-page fixture with selectable text, external https link, javascript: link,
+ * and an internal GoTo destination. Pure hand-authored bytes (deterministic).
+ */
+async function generateViewerLinkFixture(): Promise<void> {
+  const pageContents: string[] = [];
+  for (let i = 1; i <= 5; i++) {
+    const lines = [
+      `BT /F1 20 Tf 50 742 Td (Viewer Link Fixture - Page ${i}) Tj ET`,
+      `BT /F1 14 Tf 50 692 Td (KNOWN_GLYPH_RUN_ALPHA the quick brown fox) Tj ET`,
+      `BT /F1 12 Tf 50 662 Td (Selectable text for alignment tests at multiple zooms.) Tj ET`,
+    ];
+    if (i === 1) {
+      lines.push(
+        `BT /F1 12 Tf 50 612 Td (External HTTPS link below \\(annotation\\).) Tj ET`,
+        `BT /F1 12 Tf 50 572 Td (JavaScript link \\(must be inert\\).) Tj ET`,
+        `BT /F1 12 Tf 50 532 Td (Internal jump to page 3.) Tj ET`
+      );
+    }
+    if (i === 3) {
+      lines.push(`BT /F1 16 Tf 50 632 Td (INTERNAL_DEST_PAGE_THREE) Tj ET`);
+    }
+    pageContents.push(lines.join("\n"));
+  }
+
+  // Object layout:
+  // 1 Catalog, 2 Pages, 3-7 Page, 8-12 Contents, 13 Font, 14-16 Annots
+  const contentObjs = pageContents.map((c, idx) => {
+    const n = 8 + idx;
+    const len = Buffer.byteLength(c, "utf8");
+    return `${n} 0 obj<< /Length ${len} >>stream\n${c}\nendstream\nendobj\n`;
+  });
+
+  // Annotations reference page 3 (object 5) for GoTo
+  const httpsAnnot =
+    "14 0 obj<< /Type /Annot /Subtype /Link /Rect [50 592 280 622] /Border [0 0 1] /A << /Type /Action /S /URI /URI (https://example.com/gno-pdf-viewer) >> >>endobj\n";
+  const jsAnnot =
+    "15 0 obj<< /Type /Annot /Subtype /Link /Rect [50 552 280 582] /Border [0 0 1] /A << /Type /Action /S /URI /URI (javascript:alert\\('xss'\\)) >> >>endobj\n";
+  const gotoAnnot =
+    "16 0 obj<< /Type /Annot /Subtype /Link /Rect [50 512 280 542] /Border [0 0 1] /A << /Type /Action /S /GoTo /D [5 0 R /XYZ 0 792 null] >> >>endobj\n";
+
+  const pageObjs: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const pageObjNum = 3 + i;
+    const contentObjNum = 8 + i;
+    const annots = i === 0 ? " /Annots [14 0 R 15 0 R 16 0 R]" : "";
+    pageObjs.push(
+      `${pageObjNum} 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjNum} 0 R /Resources << /Font << /F1 13 0 R >> >>${annots} >>endobj\n`
+    );
+  }
+
+  const objects = [
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+    "2 0 obj<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R 7 0 R] /Count 5 >>endobj\n",
+    ...pageObjs,
+    ...contentObjs,
+    "13 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n",
+    httpsAnnot,
+    jsAnnot,
+    gotoAnnot,
+  ];
+
+  const body = buildDeterministicPdf(objects);
+  await writePdfFixture("viewer-links.pdf", body);
+}
+
+/** Truncated valid PDF — corrupt fixture (deterministic). */
+async function generateCorruptPdf(): Promise<void> {
+  // Start from a minimal valid single-page PDF, then truncate after the header
+  // so parsers recognize %PDF- but fail on structure.
+  const full = buildDeterministicPdf([
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+    "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n",
+    "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n",
+    "4 0 obj<< /Length 44 >>stream\nBT /F1 12 Tf 50 700 Td (truncated) Tj ET\nendstream\nendobj\n",
+    "5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n",
+  ]);
+  const truncated = Buffer.from(full, "utf8").subarray(0, 120);
+  await writePdfFixture("corrupt.pdf", truncated);
+}
+
+/**
+ * PDF with a real catalog /OpenAction whose action has /S /JavaScript and /JS.
+ * Names-tree JavaScript alone is insufficient (I2-4).
+ */
+async function generateJsActionPdf(): Promise<void> {
+  const content =
+    "BT /F1 14 Tf 50 700 Td (JS OpenAction fixture - scripting must stay inert.) Tj ET";
+  const contentLen = Buffer.byteLength(content, "utf8");
+  const js = "app.alert('PDF embedded JS must not run');";
+  // Catalog OpenAction → action dict with /S /JavaScript /JS
+  const objects = [
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R /OpenAction 6 0 R >>endobj\n",
+    "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n",
+    "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n",
+    `4 0 obj<< /Length ${contentLen} >>stream\n${content}\nendstream\nendobj\n`,
+    "5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n",
+    `6 0 obj<< /Type /Action /S /JavaScript /JS (${js}) >>endobj\n`,
+  ];
+  const body = buildDeterministicPdf(objects);
+  if (!body.includes("/OpenAction 6 0 R")) {
+    throw new Error("js-action.pdf missing catalog /OpenAction");
+  }
+  if (!body.includes("/S /JavaScript") || !body.includes("/JS (")) {
+    throw new Error("js-action.pdf missing JavaScript action dictionary");
+  }
+  await writePdfFixture("js-action.pdf", body);
+}
+
+/**
+ * Standard 14 font reference with NO embedded FontFile stream.
+ * Hand-authored so PDF.js must fetch from standardFontDataUrl.
+ */
+async function generateStandardFontPdf(): Promise<void> {
+  const content =
+    "BT /F1 24 Tf 50 700 Td (Standard Font Fixture HELVETICA) Tj ET";
+  const contentLen = Buffer.byteLength(content, "utf8");
+  const objects = [
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+    "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n",
+    "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n",
+    `4 0 obj<< /Length ${contentLen} >>stream\n${content}\nendstream\nendobj\n`,
+    "5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n",
+  ];
+  const body = buildDeterministicPdf(objects);
+  if (body.includes("FontFile")) {
+    throw new Error("standard-font.pdf unexpectedly contains FontFile");
+  }
+  await writePdfFixture("standard-font.pdf", body);
+}
+
+/**
+ * Minimal Type0 font with /Encoding /UniJIS-UCS2-H and non-embedded CID font
+ * so PDF.js must fetch the packed cMap from cMapUrl.
+ */
+async function generateCjkCmapPdf(): Promise<void> {
+  const content = "BT /F0 24 Tf 50 700 Td <004100420043> Tj ET";
+  const contentLen = Buffer.byteLength(content, "utf8");
+  const objects = [
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+    "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n",
+    "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F0 5 0 R >> >> >>endobj\n",
+    `4 0 obj<< /Length ${contentLen} >>stream\n${content}\nendstream\nendobj\n`,
+    "5 0 obj<< /Type /Font /Subtype /Type0 /BaseFont /KozMinPro-Regular-Acro /Encoding /UniJIS-UCS2-H /DescendantFonts [6 0 R] >>endobj\n",
+    "6 0 obj<< /Type /Font /Subtype /CIDFontType0 /BaseFont /KozMinPro-Regular-Acro /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 0 >> /FontDescriptor 7 0 R /DW 1000 >>endobj\n",
+    "7 0 obj<< /Type /FontDescriptor /FontName /KozMinPro-Regular-Acro /Flags 6 /FontBBox [-500 -300 1200 1200] /ItalicAngle 0 /Ascent 1000 /Descent -200 /CapHeight 800 /StemV 80 >>endobj\n",
+  ];
+  const body = buildDeterministicPdf(objects);
+  await writePdfFixture("cjk-cmap.pdf", body);
+}
+
+/** Empty /Pages tree (/Count 0) for the empty-state fixture. */
+async function generateZeroPagePdf(): Promise<void> {
+  const objects = [
+    "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+    "2 0 obj<< /Type /Pages /Kids [] /Count 0 >>endobj\n",
+  ];
+  const body = buildDeterministicPdf(objects);
+  await writePdfFixture("zero-page.pdf", body);
+}
+
+/**
+ * Generate ONLY the fn-112 checked-in PDF fixtures.
+ * Does not touch sample.pdf / docx / xlsx / pptx (I2-3).
+ */
+export async function generateViewerPdfFixtures(): Promise<void> {
+  await generateViewerLinkFixture();
+  await generateCorruptPdf();
+  await generateJsActionPdf();
+  await generateStandardFontPdf();
+  await generateCjkCmapPdf();
+  await generateZeroPagePdf();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const fn112Only =
+    process.argv.includes("--fn112-only") ||
+    process.argv.includes("--fn-112-only");
+
+  if (fn112Only) {
+    console.log("Generating fn-112 PDF fixtures only (no sample.* churn)...\n");
+    await generateViewerPdfFixtures();
+    console.log(`\n✓ fn-112 fixtures: ${FN112_FIXTURE_NAMES.join(", ")}`);
+    return;
+  }
+
   console.log("Generating test fixtures...\n");
 
   await generatePdf();
   await generateDocx();
   await generateXlsx();
   await generatePptx();
+  await generateViewerPdfFixtures();
 
   console.log("\n✓ All fixtures generated successfully");
 }

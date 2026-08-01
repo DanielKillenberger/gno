@@ -253,6 +253,51 @@ PDF, DOCX, PPTX, XLSX, and other converted source formats stay **read-only** in 
 
 For those documents, use **Create editable copy**. GNO creates a new markdown note with source provenance frontmatter and opens that copy in the editor.
 
+#### Native PDF Viewer
+
+PDFs render as actual pages, not just converted text. GNO ships PDF.js and
+serves its worker, character maps, and standard fonts same-origin from the
+installed package, so page rendering works fully offline with no CDN.
+
+A **Pages / Text** toggle sits at the top of every PDF document view:
+
+- **Pages** — the native viewer: rendered pages with a selectable, searchable
+  text layer aligned over each one. The toolbar carries page navigation, a page
+  number field, zoom in/out, fixed zoom levels (50%–400%), fit-width and
+  fit-page, and **Download original**. With the page area focused, `PageDown` /
+  `Right` and `PageUp` / `Left` change pages, `+` / `-` zoom, and `0` resets to
+  100%. Arrow-up/down, `Home`, `End`, and `Space` scroll normally. Only pages
+  near the viewport are rendered, so long documents stay responsive.
+- **Text** — the extracted text that search and the rest of GNO already index.
+
+The viewer loads the original file bytes over
+[`GET /api/doc-asset`](API.md#get-document-asset), which supports HTTP `Range`
+requests so PDF.js can fetch a document progressively.
+
+**Fallback.** When a PDF cannot be rendered **and extracted text is available**,
+GNO switches to the Text view and shows a notice explaining why, alongside a
+**Download original** button. There are four reasons:
+
+| Reason      | Notice             | When                                                 |
+| :---------- | :----------------- | :--------------------------------------------------- |
+| `corrupt`   | Cannot render      | The file is damaged or not a readable PDF            |
+| `password`  | Password protected | The PDF is encrypted and needs a password            |
+| `network`   | Could not load     | The bytes could not be fetched in this session       |
+| `bootstrap` | Viewer unavailable | PDF.js itself could not start in this browser window |
+
+If the document has no extracted text, the Pages view keeps the designed error
+card and its retry/download actions. Selecting **Text** manually shows **"No
+extracted text for this document."** with a **Download original** button instead
+of an empty pane.
+
+**Limits.** Printing from the viewer is not supported — download the original and
+print it from a PDF reader. Viewer state (page, zoom, fit mode, Pages/Text
+choice) is per visit and resets when you leave the document.
+
+> `globalThis.__gnoPdfMetrics` is an **unstable local diagnostic surface** used
+> by GNO's own browser tests. It is not an API contract, is not versioned, and
+> may change or disappear in any release. Do not build against it.
+
 ### Creating Documents
 
 Use Quick Capture (N) for new notes:
@@ -818,6 +863,26 @@ The Web UI is designed for local use only:
 | **CORS protection**       | Cross-origin requests blocked                     |
 | **No external resources** | No CDN fonts, scripts, or tracking                |
 | **Path traversal guard**  | Write operations validate paths stay within root  |
+
+The Content-Security-Policy is `'self'`-only for every fetch directive:
+
+| Directive         | Value                                         |
+| :---------------- | :-------------------------------------------- |
+| `default-src`     | `'self'`                                      |
+| `script-src`      | `'self'`                                      |
+| `worker-src`      | `'self'` — the PDF.js module worker           |
+| `style-src`       | `'self' 'unsafe-inline'`                      |
+| `font-src`        | `'self'`                                      |
+| `img-src`         | `'self' data: blob:`                          |
+| `connect-src`     | `'self'` (dev mode also allows `ws:` for HMR) |
+| `frame-ancestors` | `'none'`                                      |
+| `base-uri`        | `'none'`                                      |
+| `object-src`      | `'none'`                                      |
+
+The PDF.js worker, character maps, and standard fonts are served same-origin
+from the installed `pdfjs-dist` package under `/vendor/pdfjs/`, which is what
+lets `worker-src` and `font-src` stay at `'self'`. PDF rendering adds no
+external network dependency.
 
 > **Warning**: Do not expose `gno serve` to the internet. It has no authentication.
 

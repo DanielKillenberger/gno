@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-07-31T14:09:20.290359Z",
+  "depends_on": [
+    "fn-112-native-pdfjs-document-renderer.2",
+    "fn-112-native-pdfjs-document-renderer.1"
+  ],
+  "id": "fn-112-native-pdfjs-document-renderer.3",
+  "last_evidence": {
+    "no_sol_ship_claimed": true,
+    "remaining_gate": "independent Sol re-review of task .3",
+    "repair_receipt": "fn-112-grok-implementation-task-3-repair.json (removed during PR hygiene; terminal verdict in .flow/reviews/fn-112-landing-record.md)"
+  },
+  "last_summary": "Task .3 repair round2 I3-01/03/06; Sol round3 candidate; no SHIP.",
+  "priority": null,
+  "spec": "fn-112-native-pdfjs-document-renderer",
+  "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.md",
+  "status": "done",
+  "title": "Page rendering core: document/page hooks, PdfPageView, aligned text layer, virtualization",
+  "updated_at": "2026-07-31T18:15:42.509243Z"
+}

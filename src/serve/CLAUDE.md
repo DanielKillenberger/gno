@@ -76,6 +76,8 @@ Answer generation uses shared module to stay in sync with CLI:
 | `/api/publish/export` | POST   | Export gno.sh publish artifact JSON        |
 | `/api/docs`           | GET    | List documents                             |
 | `/api/doc`            | GET    | Get document content                       |
+| `/api/doc-asset`      | GET    | Original source file bytes (Range, HEAD)   |
+| `/vendor/pdfjs/*`     | GET    | Same-origin pdfjs worker/cmaps/fonts       |
 | `/api/search`         | POST   | BM25 search                                |
 | `/api/query`          | POST   | Hybrid search                              |
 | `/api/ask`            | POST   | AI answer with citations                   |
@@ -108,7 +110,9 @@ gno serve --port 3000
 - Binds to `127.0.0.1` only (no LAN exposure)
 - CSP headers on all responses
 - CORS protection on POST endpoints
-- No external font/script loading
+- No external font/script loading — the PDF.js worker, cMaps, and standard fonts
+  are served same-origin from the installed `pdfjs-dist` package via
+  `/vendor/pdfjs/*`, so the CSP keeps `worker-src 'self'` and `font-src 'self'`
 
 ## Bun.serve() Patterns
 

@@ -101,6 +101,7 @@
     - Quick capture (Cmd+N) for instant note creation
     - Typed note preset scaffolds for ideas, people, projects, and meetings
     - Safe markdown/plaintext editing with read-only converted docs
+    - Native PDF page rendering with extracted-text fallback
     - Cross-collection tree browser with folder detail panes
     - Collection management (add, remove, re-index)
     - Collection-level model editor with per-role overrides

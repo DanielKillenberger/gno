@@ -20,6 +20,34 @@ logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
+# Flow review process artifacts.
+#
+# Repository precedent for merged feature PRs is to carry NO .flow/reviews
+# files at all — only the terminal verdict, the durable baseline receipt, and
+# a consolidated landing record are worth version control. Everything below is
+# an orchestration transcript, session telemetry, or a regenerable tool
+# output: not a governance record, and it bloats feature PRs.
+.flow/reviews/*.events.jsonl
+.flow/reviews/*.log
+.flow/reviews/**/*.log
+.flow/reviews/*.raw.txt
+.flow/reviews/*.raw.json
+.flow/reviews/*-prompt.md
+.flow/reviews/*.prompt.md
+.flow/reviews/*.schema.json
+# Harness *result* envelopes: model, session id, token counts, USD cost. Scoped
+# to the `.result.json` suffix the harness itself emits — deliberately NOT
+# `*.receipt.json`, which would also swallow governance receipts such as
+# .flow/reviews/fn-112-baseline-receipt.json.
+.flow/reviews/*.result.json
+# Local convenience symlink into a session-scoped debug log.
+.flow/reviews/latest
+# Regenerable browser-evidence and live-QA output directories. The smoke script
+# (scripts/pdf-viewer-smoke.ts) writes the first; both are reproducible, and
+# their measurements are summarized in the landing record.
+.flow/reviews/fn-112-task-6-evidence/
+.flow/reviews/fn-112-qa-evidence/
+
 # dotenv environment variable files
 .env
 .env.development.local
@@ -48,6 +76,9 @@ eggs/
 .eggs/
 lib/
 !src/serve/public/lib/
+# Track focused unit tests under test/**/lib/ (Python lib/ ignore must not hide them)
+!test/serve/public/lib/
+!test/serve/public/lib/**
 lib64/
 parts/
 sdist/

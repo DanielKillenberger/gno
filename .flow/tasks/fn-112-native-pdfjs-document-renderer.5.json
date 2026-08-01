@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-07-31T14:09:21.356718Z",
+  "depends_on": [
+    "fn-112-native-pdfjs-document-renderer.1",
+    "fn-112-native-pdfjs-document-renderer.4"
+  ],
+  "id": "fn-112-native-pdfjs-document-renderer.5",
+  "last_evidence": {
+    "repair_receipt": "fn-112-grok-implementation-task-5-repair.json (removed during PR hygiene; terminal verdict in .flow/reviews/fn-112-landing-record.md)",
+    "sol_review": "fn-112-sol-impl-rereview-task-5.json (removed during PR hygiene; terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
+    "sol_verdict": "SHIP",
+    "lifecycle_note": "Status corrected to done on 2026-08-01 by the fn-112 plan repair (Sol PR6-01). No implementation, test, or receipt content was altered; only lifecycle metadata was reconciled with the existing Sol SHIP receipt."
+  },
+  "last_summary": "Task .5 repair closed B5-01/B5-02/B5-03 (fallback predicate guard, real-adapter byte-exact doc-asset suite, remount contract); Sol impl re-review returned SHIP with no blocking findings.",
+  "priority": null,
+  "spec": "fn-112-native-pdfjs-document-renderer",
+  "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md",
+  "status": "done",
+  "title": "Integrate the PDF viewer into DocView with Pages/Text toggle and fallback",
+  "updated_at": "2026-07-31T23:13:08.613762Z"
+}

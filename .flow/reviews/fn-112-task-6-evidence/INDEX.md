@@ -1,0 +1,75 @@
+# fn-112 task .6 PDF viewer smoke — artifact index
+
+- Started: 2026-08-01T21:30:15.107Z
+- Finished: 2026-08-01T21:31:52.767Z
+- Platform: darwin/arm64 Bun 1.3.14
+- Failures: 0
+
+## Screenshots
+- `.flow/reviews/fn-112-task-6-evidence/CLEAN__viewer-links-rendered.png`
+- `.flow/reviews/fn-112-task-6-evidence/CLEAN__standard-font.png`
+- `.flow/reviews/fn-112-task-6-evidence/CLEAN__cjk-cmap.png`
+- `.flow/reviews/fn-112-task-6-evidence/CLEAN__js-action.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-loading.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-progressive.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-empty.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-corrupt.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-password.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-network.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-bootstrap.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-100.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-fit-width.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-200.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w1380-rail.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w1380-overview.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w900-rail.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w900-overview.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w1380-rail.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w1380-overview.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w900-rail.png`
+- `.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w900-overview.png`
+
+## Modes
+- CLEAN: {"name":"CLEAN","ok":true}
+- INTERCEPTION: {"name":"INTERCEPTION","ok":true}
+
+## Artifact hashes (sha256)
+- `evidence.json`: `4b439eac7a2c58d6b17f76597d3ab73782e9fb7a115bf7c3f2df9aac2c458996`
+- `INTERCEPTION__state-loading.png`: `3330a0c6411d70f9296e73627f6b07af5bf33a2955e00897e87c4d13de9c2c80`
+- `INTERCEPTION__state-empty.png`: `23ae0413c51eade23b695b8a5a3af116007d9b1b97e2a9a8c2e0c7a88282df08`
+- `INTERCEPTION__visual-dark-w900-overview.png`: `6921ff76a1d1ba28d43633280d1fd3c2dfc2d2c6fa2f8d775c1760ae97136776`
+- `INTERCEPTION__align-100.png`: `e0908d844d2528e9e46f5ca1f9fc99ef00aa6455d790a79d2036fc9252afd004`
+- `INTERCEPTION__state-network.png`: `c58bae60ee5b4cdcbf8d1fe6b238b9c765354ee14759e4c95e150eb160f34509`
+- `visual-theme-proof.json`: `4cce7aee68fa6d8f88c9915cd0a102da689203462875f2502d09e1f22a993cb1`
+- `INTERCEPTION__visual-dark-w1380-overview.png`: `9648a3e980ed9a78a1908d723435a25ed427834990808f72cd5a2c401adfabbc`
+- `INTERCEPTION__state-corrupt.png`: `9ac25dacdf8d68993034aba0757b1b627f8c4b477417629741120bc86192c1d3`
+- `console-log.json`: `6c8d30f4e60cd205d7387805ad978bb90d62e520d6dc0b3447c5402da53b07d4`
+- `INTERCEPTION__state-progressive.png`: `1ffe00a343ff6c89001236dc50663b6696de58eb0be70d87fea39feb90ffc676`
+- `CLEAN__viewer-links-rendered.png`: `914c55e138d30f9065cb0b69f8d6a045093fd817275a1a1f740d53a42047884b`
+- `CLEAN__js-action.png`: `de568e27c0bcef7e690f1cc2a33fe8f2ad19e6d13bd19d87d3f053a5698a9721`
+- `p6-metrics.json`: `19c731c631b70b290bcc5a6977e72f54471a0c7710a2805e838a6890fc5d4fb9`
+- `server-stderr.log`: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+- `INTERCEPTION__visual-dark-w1380-rail.png`: `52144915814c891b0e66204e6459ad6f3a23b9e4af3c2bdbab8515c8465f5b1e`
+- `INTERCEPTION__state-bootstrap.png`: `ae86478d0820b6771fab6262db54ec91a36a102655cffc3c778accd96eb7d616`
+- `INTERCEPTION__align-200.png`: `0517ce76ad46d855c450e5213adfe05e548e606d173c6001cb24affe5dcf103b`
+- `request-log.json`: `8e8fa7795332ed7ac911af31a33e155ab45cecfd0bb9c832d4fc1a783a6de4b4`
+- `INTERCEPTION__state-password.png`: `7a65bdf7aa9289171e46249349510b83b86498c65f33b4fab12a9388ae70aad9`
+- `p4b-ladder.json`: `f657654e8d8afaebde8ebc488f97d4e6d7d82256f29adc38f02dab04119a2347`
+- `p3-metrics.json`: `8733c48aa839801d160c9c7a3aad1cd20a78fab17b4a2874dadb69981702df6c`
+- `progressive-control-log.json`: `63b241ba489feb65a9a1e5e6328e6a727f01caac85c61f9fc41718498566ac6b`
+- `p4a-metrics.json`: `4838982673420a1868b4c9418588416e537fe54ae1bfac0a57dd2285c15b188f`
+- `INTERCEPTION__align-fit-width.png`: `a06a7371254832fcd84be5d64339aa5c4cfe71dfb17878865555be7725f463e0`
+- `p5-metrics.json`: `3f00de2eb174a0773c5e6c378358096183e9907af22bbd65d93e5298883dac0f`
+- `CLEAN__cjk-cmap.png`: `97c380c582ecab670492413e744cb66a6ab1e47e7c8c16d319ed925ac49dfe6c`
+- `INTERCEPTION__visual-light-w1380-overview.png`: `86dcad60024cfb396136f7bc2b71f36fe6b5f07c2e39dff57ad6bbda458e8dee`
+- `INTERCEPTION__visual-dark-w900-rail.png`: `3c4c2eed1787bad2f3806a45dd7cb807eaed3ddfc2957b7961a89881ba2a5eda`
+- `p4b-events.json`: `56769f6b9fa4aeb66f04f70fc8971f4aa318d7c32e37a0400455646edd99061c`
+- `CLEAN__standard-font.png`: `db1de15fbae17003578ad6b2f29b3d04aa1764a3309566141833fc21f398b0e4`
+- `INTERCEPTION__visual-light-w900-overview.png`: `eb139f29258a0ec27037c0f1f8ea84b9eccbc67e7628f218daa06b5217702a5a`
+- `INTERCEPTION__visual-light-w900-rail.png`: `d4b87e83f0b2cf36d8088e1753236cf637b3b55325e9205d54d0e17a55bdbd42`
+- `p4a-samples.json`: `1a753e44f8fe48e6dd831b3bd3a156d8a1a37d8c6391f7b762676b2b9af4caee`
+- `INTERCEPTION__visual-light-w1380-rail.png`: `70f3301bc5dbf9c8248651cf5e5d05875274ed78e043a3e1fbbd0e7e36c1ffe7`
+- `server-stdout.log`: `dcd4d205030963f02bf3e6398fb923d665210079a40c57ed5b733d488d6c1d35`
+
+## Failures
+- (none)

@@ -2,14 +2,23 @@
  * Tests for CSRF protection and security utilities.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import type { Config } from "../../src/config/types";
+import type { DocumentRow } from "../../src/store/types";
+
+import { handleDocAsset } from "../../src/serve/routes/api";
 import {
   forbiddenResponse,
   isRequestAllowed,
   validateOrigin,
   validateToken,
 } from "../../src/serve/security";
+import { getCspHeader, withSecurityHeaders } from "../../src/serve/server";
+import { safeRm } from "../helpers/cleanup";
 
 describe("validateOrigin", () => {
   const port = 3000;
@@ -186,5 +195,109 @@ describe("forbiddenResponse", () => {
   test("sets Content-Type header", () => {
     const response = forbiddenResponse();
     expect(response.headers.get("Content-Type")).toContain("application/json");
+  });
+});
+
+describe("CSP and framing headers (fn-112)", () => {
+  test("CSP includes worker-src 'self', frame-ancestors none, object-src none; no unsafe-eval", () => {
+    for (const isDev of [true, false]) {
+      const csp = getCspHeader(isDev);
+      expect(csp).toContain("worker-src 'self'");
+      expect(csp).toContain("frame-ancestors 'none'");
+      expect(csp).toContain("object-src 'none'");
+      expect(csp).not.toContain("unsafe-eval");
+    }
+  });
+
+  test("withSecurityHeaders sets X-Frame-Options DENY and CSP", () => {
+    const res = withSecurityHeaders(new Response("ok"), false);
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toContain("worker-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("unsafe-eval");
+  });
+
+  describe("doc-asset responses keep framing + CSP envelope", () => {
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), "gno-sec-asset-"));
+    });
+
+    afterEach(async () => {
+      await safeRm(tmpDir);
+    });
+
+    test("doc-asset through withSecurityHeaders retains DENY + frame-ancestors", async () => {
+      const notesDir = join(tmpDir, "notes");
+      await mkdir(notesDir, { recursive: true });
+      await writeFile(join(notesDir, "doc.md"), "# note");
+      await writeFile(join(notesDir, "a.pdf"), "%PDF-1.4 fake");
+
+      const doc: DocumentRow = {
+        id: 1,
+        collection: "reading",
+        relPath: "notes/doc.md",
+        sourceHash: "hash",
+        sourceMime: "application/pdf",
+        sourceExt: ".pdf",
+        sourceSize: 100,
+        sourceMtime: new Date().toISOString(),
+        docid: "#doc",
+        uri: "gno://reading/notes/doc.md",
+        title: "doc",
+        mirrorHash: "mirror",
+        converterId: null,
+        converterVersion: null,
+        languageHint: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastErrorAt: null,
+        active: true,
+        ingestVersion: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const config: Config = {
+        version: "1.0",
+        ftsTokenizer: "unicode61",
+        collections: [
+          {
+            name: "reading",
+            path: tmpDir,
+            pattern: "**/*",
+            include: [],
+            exclude: [],
+          },
+        ],
+        contexts: [],
+      };
+
+      const store = {
+        getDocumentByUri(uri: string) {
+          return Promise.resolve({
+            ok: true as const,
+            value: uri === doc.uri ? doc : null,
+          });
+        },
+      };
+
+      const raw = await handleDocAsset(
+        store as never,
+        config,
+        new URL(
+          `http://localhost/api/doc-asset?uri=${encodeURIComponent(doc.uri)}&path=a.pdf`
+        )
+      );
+      const wrapped = withSecurityHeaders(raw, false);
+      expect(wrapped.headers.get("X-Frame-Options")).toBe("DENY");
+      const csp = wrapped.headers.get("Content-Security-Policy") ?? "";
+      expect(csp).toContain("frame-ancestors 'none'");
+      expect(csp).toContain("worker-src 'self'");
+      expect(csp).toContain("object-src 'none'");
+      expect(csp).not.toContain("unsafe-eval");
+    });
   });
 });

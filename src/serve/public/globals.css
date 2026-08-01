@@ -451,3 +451,116 @@ mark {
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Native PDF viewer (fn-112) ───────────────────────────────────────────── */
+
+.gno-pdf-viewer {
+  isolation: isolate;
+}
+
+.gno-pdf-page-column {
+  scrollbar-gutter: stable;
+}
+
+.gno-pdf-page {
+  position: relative;
+  margin: 0 auto 1rem;
+  max-width: 100%;
+  background: hsl(var(--muted) / 0.2);
+  border: 1px solid hsl(var(--border) / 0.4);
+  border-radius: 0.25rem;
+  box-shadow:
+    0 1px 2px hsl(var(--background) / 0.4),
+    0 8px 24px -12px hsl(var(--foreground) / 0.18);
+  /* pdfjs v5 TextLayer CSS contract on the page wrapper (inherits to layers) */
+  --scale-factor: 1;
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit, 1));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+}
+
+.gno-pdf-page-inner {
+  position: relative;
+  /* Existing Scholarly Dusk semantic surface token — no invented paper color */
+  background: hsl(var(--card));
+  overflow: hidden;
+}
+
+.gno-pdf-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  vertical-align: top;
+}
+
+/* Text layer: transparent text over canvas, Scholarly Dusk selection */
+.gno-pdf-text-layer,
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+}
+
+.gno-pdf-text-layer :is(span, br),
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.gno-pdf-text-layer ::selection,
+.textLayer ::selection {
+  background: hsl(var(--primary) / 0.35);
+  color: transparent;
+}
+
+.gno-pdf-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.gno-pdf-annotation-link,
+.gno-pdf-annotation-inert {
+  position: absolute;
+  pointer-events: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.gno-pdf-annotation-inert {
+  cursor: default;
+  pointer-events: none;
+}
+
+.gno-pdf-page[data-rendered="false"] .gno-pdf-page-inner {
+  animation: gno-pdf-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes gno-pdf-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gno-pdf-page[data-rendered="false"] .gno-pdf-page-inner {
+    animation: none;
+  }
+}

@@ -1,4 +1,4 @@
-// node:fs/promises: temp structure and cleanup have no Bun-native equivalent.
+// node:fs/promises: temp directory structure has no Bun-native equivalent.
 import { mkdir, mkdtemp } from "node:fs/promises";
 // node:os: tmpdir has no Bun-native equivalent.
 import { tmpdir } from "node:os";
@@ -15,8 +15,9 @@ import { verifyPackedProjectProfile } from "./package-smoke-profile";
 import { verifyPackedResidentGateway } from "./package-smoke-resident";
 import { verifyPackedFolderSetup } from "./package-smoke-setup";
 import {
+  formatUserGnoSentinelSafeDetail,
   snapshotUserGnoState,
-  verifyUserGnoStateUnchanged,
+  verifyUserGnoStateUnchangedDetailed,
 } from "./package-smoke-user-sentinel";
 
 interface CommandResult {
@@ -76,6 +77,12 @@ interface NpmPackResult {
 
 const rootDir = resolve(import.meta.dir, "..");
 const preserveTemp = process.env.GNO_PACKAGE_SMOKE_KEEP_TEMP === "1";
+
+function sha256(value: ArrayBuffer | Uint8Array): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(value);
+  return hasher.digest("hex");
+}
 
 function formatCommand(cmd: string[]): string {
   return cmd
@@ -304,6 +311,232 @@ function parseStatusJson(stdout: string): StatusResult {
   return { ...parsed, activation } as StatusResult;
 }
 
+/**
+ * Launch the *installed* `gno serve` binary (never repo bun source) and verify
+ * worker / cmap / standard-font GET bodies match files inside the installed
+ * package's pdfjs-dist, with matching HEAD headers and empty HEAD body.
+ */
+async function verifyInstalledPdfjsAssets(opts: {
+  gnoBin: string;
+  packageRoot: string;
+  cwd: string;
+  env: Record<string, string>;
+  configDir: string;
+  dataDir: string;
+  cacheDir: string;
+  fixtureDir: string;
+}): Promise<void> {
+  const port = 45_000 + Math.floor(Math.random() * 1000);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  // Resolve installed pdfjs-dist robustly: package node_modules first, then
+  // Bun's resolver from the installed package root (handles hoisting layouts).
+  let pdfjsRoot = join(opts.packageRoot, "node_modules", "pdfjs-dist");
+  if (!(await Bun.file(join(pdfjsRoot, "package.json")).exists())) {
+    try {
+      pdfjsRoot = resolve(
+        Bun.resolveSync("pdfjs-dist/package.json", opts.packageRoot),
+        ".."
+      );
+    } catch {
+      // keep primary path for the explicit missing-file error below
+    }
+  }
+  const assets = [
+    {
+      urlPath: "/vendor/pdfjs/pdf.worker.raw.min.mjs",
+      filePath: join(pdfjsRoot, "build", "pdf.worker.min.mjs"),
+    },
+    {
+      urlPath: "/vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+      filePath: join(pdfjsRoot, "cmaps", "UniJIS-UCS2-H.bcmap"),
+    },
+    {
+      urlPath: "/vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+      filePath: join(pdfjsRoot, "standard_fonts", "LiberationSans-Regular.ttf"),
+    },
+  ];
+
+  for (const a of assets) {
+    const f = Bun.file(a.filePath);
+    if (!(await f.exists())) {
+      throw new Error(
+        `Installed pdfjs-dist missing expected file: ${a.filePath}`
+      );
+    }
+  }
+
+  const server = Bun.spawn(
+    [
+      opts.gnoBin,
+      "--config",
+      join(opts.configDir, "index.yml"),
+      "serve",
+      "--port",
+      String(port),
+    ],
+    {
+      cwd: opts.cwd,
+      env: {
+        ...opts.env,
+        GNO_CONFIG_DIR: opts.configDir,
+        GNO_DATA_DIR: opts.dataDir,
+        GNO_CACHE_DIR: opts.cacheDir,
+        GNO_OFFLINE: "1",
+        NODE_ENV: "production",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
+
+  // Diagnostics only — every assertion below is unchanged. These lines make
+  // the durable package-smoke log record the values a reviewer must be able to
+  // inspect directly (installed-binary launch, installed-file vs GET-body
+  // hashes/sizes, HEAD status/empty body/header equality) instead of only a
+  // pass/fail summary.
+  console.log("[pdfjs-assets] installed binary:  " + opts.gnoBin);
+  console.log("[pdfjs-assets] package root:      " + opts.packageRoot);
+  console.log("[pdfjs-assets] installed pdfjs:   " + pdfjsRoot);
+  console.log(
+    `[pdfjs-assets] launched installed 'gno serve' pid=${server.pid} port=${port} (NOT repo bun source)`
+  );
+
+  try {
+    for (let i = 0; i < 100; i++) {
+      try {
+        const h = await fetch(`${baseUrl}/api/health`);
+        if (h.ok) {
+          break;
+        }
+      } catch {
+        // starting
+      }
+      await Bun.sleep(100);
+      if (i === 99) {
+        throw new Error(
+          `Installed gno serve did not become healthy on ${baseUrl}`
+        );
+      }
+    }
+    console.log(`[pdfjs-assets] installed binary healthy at ${baseUrl}`);
+
+    const bootstrapPath = "/vendor/pdfjs/pdf.worker.min.mjs";
+    const bootstrapGet = await fetch(baseUrl + bootstrapPath);
+    if (bootstrapGet.status !== 200) {
+      throw new Error(
+        "GET " +
+          bootstrapPath +
+          " returned " +
+          bootstrapGet.status +
+          " from installed gno serve"
+      );
+    }
+    const bootstrapBody = await bootstrapGet.text();
+    if (
+      !bootstrapBody.includes("Math.sumPrecise") ||
+      !bootstrapBody.includes(
+        'await import("/vendor/pdfjs/pdf.worker.raw.min.mjs")'
+      )
+    ) {
+      throw new Error(
+        "GET " +
+          bootstrapPath +
+          " did not contain the PDF.js compatibility bootstrap"
+      );
+    }
+    if (/https?:\/\//u.test(bootstrapBody)) {
+      throw new Error("GET " + bootstrapPath + " contained an off-origin URL");
+    }
+    const bootstrapHead = await fetch(baseUrl + bootstrapPath, {
+      method: "HEAD",
+    });
+    const bootstrapHeadBody = await bootstrapHead.arrayBuffer();
+    if (bootstrapHead.status !== 200 || bootstrapHeadBody.byteLength !== 0) {
+      throw new Error(
+        "HEAD " + bootstrapPath + " must return 200 with an empty body"
+      );
+    }
+    for (const header of ["content-type", "content-length", "cache-control"]) {
+      if (
+        bootstrapGet.headers.get(header) !== bootstrapHead.headers.get(header)
+      ) {
+        throw new Error(
+          "HEAD/GET header mismatch for " + bootstrapPath + " " + header
+        );
+      }
+    }
+    console.log(
+      "[pdfjs-assets] compatibility bootstrap: GET/HEAD 200, Math.sumPrecise + same-origin raw worker import verified"
+    );
+
+    for (const a of assets) {
+      const expected = await Bun.file(a.filePath).bytes();
+      const expectedHash = sha256(expected);
+      console.log(`[pdfjs-assets] --- ${a.urlPath} ---`);
+      console.log(`[pdfjs-assets]   installed file: ${a.filePath}`);
+      console.log(
+        `[pdfjs-assets]   installed bytes=${expected.byteLength} sha256=${expectedHash}`
+      );
+
+      const getRes = await fetch(`${baseUrl}${a.urlPath}`);
+      if (getRes.status !== 200) {
+        throw new Error(
+          `GET ${a.urlPath} → ${getRes.status} (installed gno serve)`
+        );
+      }
+      const body = new Uint8Array(await getRes.arrayBuffer());
+      const bodyHash = sha256(body);
+      console.log(
+        `[pdfjs-assets]   GET status=${getRes.status} bytes=${body.byteLength} sha256=${bodyHash}`
+      );
+      console.log(
+        `[pdfjs-assets]   byte-equality: ${bodyHash === expectedHash ? "MATCH" : "MISMATCH"} (size ${expected.byteLength === body.byteLength ? "equal" : "differs"})`
+      );
+      if (bodyHash !== expectedHash) {
+        throw new Error(
+          `GET ${a.urlPath} body hash mismatch vs installed pdfjs-dist file ${a.filePath}\n expected ${expectedHash}\n got      ${bodyHash}`
+        );
+      }
+
+      const headRes = await fetch(`${baseUrl}${a.urlPath}`, {
+        method: "HEAD",
+      });
+      if (headRes.status !== 200) {
+        throw new Error(
+          `HEAD ${a.urlPath} → ${headRes.status} (installed gno serve)`
+        );
+      }
+      const headBody = await headRes.arrayBuffer();
+      console.log(
+        `[pdfjs-assets]   HEAD status=${headRes.status} bodyBytes=${headBody.byteLength} (expected 0)`
+      );
+      if (headBody.byteLength !== 0) {
+        throw new Error(
+          `HEAD ${a.urlPath} returned non-empty body (${headBody.byteLength} bytes)`
+        );
+      }
+      for (const h of ["content-type", "content-length", "cache-control"]) {
+        const gv = getRes.headers.get(h);
+        const hv = headRes.headers.get(h);
+        console.log(
+          `[pdfjs-assets]   header ${h}: GET=${gv} HEAD=${hv} ${gv === hv ? "MATCH" : "MISMATCH"}`
+        );
+        if (gv !== hv) {
+          throw new Error(
+            `HEAD/GET header mismatch for ${a.urlPath} ${h}: GET=${gv} HEAD=${hv}`
+          );
+        }
+      }
+    }
+    console.log(
+      "Installed binary pdfjs asset smoke passed (worker + cmap + standard-font GET/HEAD)"
+    );
+  } finally {
+    server.kill();
+    await server.exited.catch(() => undefined);
+  }
+}
+
 function assertLexicalActivationReady(
   activation: ActivationStatus,
   command: "doctor" | "status"
@@ -504,6 +737,19 @@ async function main(): Promise<void> {
     assertEmbeddingFingerprintShape(doctor);
     assertNoDoctorErrors(doctor);
 
+    // fn-112: prove installed binary serves pdfjs assets byte-identical to
+    // the packaged pdfjs-dist dependency (GET + HEAD).
+    await verifyInstalledPdfjsAssets({
+      gnoBin,
+      packageRoot,
+      cwd: tempRoot,
+      env,
+      configDir: explicitEnv.GNO_CONFIG_DIR,
+      dataDir: explicitEnv.GNO_DATA_DIR,
+      cacheDir: explicitEnv.GNO_CACHE_DIR,
+      fixtureDir: notesDir,
+    });
+
     completedTarballPath = tarballPath;
   } catch (error) {
     console.error(`Package smoke temp root: ${tempRoot}`);
@@ -513,7 +759,14 @@ async function main(): Promise<void> {
 
   let sentinelProof = "";
   try {
-    sentinelProof = await verifyUserGnoStateUnchanged(userStateBefore);
+    const detailed = await verifyUserGnoStateUnchangedDetailed(userStateBefore);
+    sentinelProof = detailed.proof;
+    // Diagnostics only — the assertion above already decided pass/fail over the
+    // COMPLETE snapshots (hashes included). What is printed here is deliberately
+    // narrowed so the durable artifact carries no credential-derived metadata.
+    console.log(
+      formatUserGnoSentinelSafeDetail(userStateBefore, detailed.after)
+    );
   } catch (error) {
     smokeError ??= error;
     console.error(`Package smoke forensic recovery directory: ${tempRoot}`);
