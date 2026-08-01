@@ -49,42 +49,8 @@ Finalization: documentation, CHANGELOG, and the full quality gate against the re
 
 
 ## Done summary
-Documented the PDF viewer surface, added the CHANGELOG entry, and closed the final quality gates.
-
-**Docs (all five in-repo surfaces, plus the AGENTS mirror):**
-- `docs/API.md` — `GET /api/doc-asset` documented for the first time (it was previously entirely undocumented): quick-reference row, query params, binary response headers, and `200`/`206`/`400`/`403`/`404`/`416` semantics including the intentionally-unsupported multi-range case, with Range and `curl -I` examples. New `PDF.js Vendor Assets` section for the three `/vendor/pdfjs/*` routes.
-- `docs/WEB-UI.md` — native viewer, Pages/Text toggle, the four fallback reasons and the "No extracted text" sub-state, full CSP directive table incl. `worker-src 'self'`, and the limits (no printing, per-visit viewer state). `__gnoPdfMetrics` recorded explicitly as an unstable diagnostic surface, **not** an API contract.
-- `src/serve/CLAUDE.md` + `src/serve/AGENTS.md` — the two missing endpoint rows; the "no external font/script loading" bullet qualified with the same-origin pdfjs path.
-- `CHANGELOG.md` `[Unreleased] / Added`; `website/_data/features.yml` web-ui benefit line.
-
-**Defect found and fixed by this gate:** `src/serve/public/globals.built.css` was stale at `c9b828eb` and shipped **without** the PDF toolbar's zoom-select widths `min-w-[4.25rem]` and `min-w-[6rem]` (`PdfToolbar.tsx:257,266`). This file ships in the npm package. The rebuild adds those two and drops five utilities verified unused by any source; the generated `mark` rule is byte-identical, so no visual regression.
-
-**R17 baseline comparison.** Receipt `.flow/reviews/fn-112-baseline-receipt.json`,
-`capture_id` **`cap-002`** (`regenerated: true`, base `bb994b58`). The original
-`cap-001` scratch logs were absent, so the baseline was regenerated in a clean
-detached worktree at the exact base with a frozen-lockfile install. All five new
-`raw_log_sha256` values re-hash correctly. **Tolerated pre-existing failures:
-NONE** — `cap-002` enumerates `failures: []` for every command, so the tolerance
-set is empty and all five current commands had to pass absolutely. They did:
-`bun run lint:check` 0/0, `bunx tsc --noEmit` exit 0, `bun test` exit 0,
-`bun run test:web` 305 pass / 0 fail, `bun run docs:verify` 15 passed / 0 failed /
-2 skipped. Zero new failures.
-
-**Absolute-pass gates:** `test:e2e:pdf` PASSED, `test:package` passed, `build:css` 0, `flowctl validate --spec` Valid: True, `git diff --check` 0. `bun run build` fails on an unrelated `markitdown-ts` → `youtube-transcript` import; proven pre-existing by reproducing it in a detached worktree at base `bb994b58` with empty status and a frozen-lockfile install. It is not one of the five CBC commands.
-
-`test:package` failed twice before passing, both environmental and both diagnosed rather than masked: (1) the real-GNO isolation sentinel correctly tripped because a user-owned resident `gno serve` watcher reindexed the docs edited here — the user's service was not killed, the run was repeated after quiescence; (2) `/tmp` exhausted (EDQUOT) by this task's own two forensic dumps, which were the only `gno-package-smoke-*` dirs and the only thing removed. The task `.7` gate index that held the full forensic detail was removed during PR hygiene; the account above is the surviving record, and `.flow/reviews/fn-112-landing-record.md` records only the final passing gate run.
-
-**Reviews:** independent Sol (`gpt-5.6-sol`) task review → **SHIP** at round 4 (closed: guessed gno.sh paths, targets requiring editorial judgment, undefined deletion boundary). Sol spec-completion review across R1–R19 → **SHIP**. Integrated live QA drove a real isolated `gno serve` with Playwright: **8/8 scenarios PASS, 0 findings**; QA-1 and QA-6 screenshots inspected directly, not trusted from the exit code.
-
-**Hosted site:** `/Users/gordon/work/gno.sh` was updated and opened as
-[`gmickel/gno.sh#26`](https://github.com/gmickel/gno.sh/pull/26) from
-`codex/native-pdf-viewer-docs`. The public Web UI/API docs, Web UI product page,
-Browse showcase, and PDF FAQ now match the native viewer while preserving the
-read-only binary boundary. `bun run check`, `bun run typecheck`, `bun run build`,
-and `bun test` passed; local desktop/mobile browser QA covered every changed page
-with no console errors. Production deployment remains pending PR merge and is not
-claimed here. The execution record is `.flow/handoff/fn-112-gno-sh-docs-brief.md`.
+Completed the native PDF viewer documentation and final quality gates. Corrected the fallback contract in CHANGELOG and Web UI docs, retained real hosted-site browser evidence, and implemented the public documentation in gmickel/gno.sh#26. The companion site passed check, typecheck, build, all tests, and desktop/mobile browser QA. The five GNO canonical commands passed with zero new failures against regenerated durable baseline capture cap-002; cap-002 has no tolerated pre-existing failures and its raw-log hashes were verified. Absolute PDF E2E and package-install smokes also pass. Production gno.sh deployment remains pending companion PR merge and is not claimed.
 ## Evidence
-- Commits: b54a8f3558907c5b6294cd99417814210fbedb14
-- Tests: bun run lint:check, bunx tsc --noEmit, bun test, bun run test:web, bun run docs:verify, bun run test:e2e:pdf, bun run test:package, bun run build:css, .flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer
-- PRs:
+- Commits: 936d9c3bf490f10885921b46c4fc692def26552d, d5894f9b, gmickel/gno.sh@192dead
+- Tests: bun run lint:check, bunx tsc --noEmit, bun test, bun run test:web, bun run docs:verify, bun run test:e2e:pdf, bun run test:package, bun run build:css, .flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer, gno.sh: bun run check, gno.sh: bun run typecheck, gno.sh: bun run build, gno.sh: bun test, gno.sh: local desktop/mobile browser QA
+- PRs: https://github.com/gmickel/gno/pull/161, https://github.com/gmickel/gno.sh/pull/26
