@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-01T10:40:39.088106Z",
+  "depends_on": [
+    "fn-116-macos-release-bundled-bun-signed.2"
+  ],
+  "id": "fn-116-macos-release-bundled-bun-signed.3",
+  "priority": null,
+  "spec": "fn-116-macos-release-bundled-bun-signed",
+  "spec_path": ".flow/tasks/fn-116-macos-release-bundled-bun-signed.3.md",
+  "status": "done",
+  "title": "Document the entitlements requirement, the gate, and the manual launch check",
+  "updated_at": "2026-08-01T10:56:33.369428Z"
+}

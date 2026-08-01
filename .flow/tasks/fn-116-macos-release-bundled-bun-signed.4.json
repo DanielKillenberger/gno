@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-01T10:58:32.852183Z",
+  "depends_on": [
+    "fn-116-macos-release-bundled-bun-signed.3"
+  ],
+  "id": "fn-116-macos-release-bundled-bun-signed.4",
+  "priority": null,
+  "spec": "fn-116-macos-release-bundled-bun-signed",
+  "spec_path": ".flow/tasks/fn-116-macos-release-bundled-bun-signed.4.md",
+  "status": "blocked",
+  "title": "Maintainer gate: notarized build launches on a clean Apple Silicon machine",
+  "updated_at": "2026-08-01T10:58:33.042882Z"
+}

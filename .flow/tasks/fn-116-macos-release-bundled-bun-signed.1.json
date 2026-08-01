@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-01T10:40:38.717412Z",
+  "depends_on": [],
+  "id": "fn-116-macos-release-bundled-bun-signed.1",
+  "priority": null,
+  "spec": "fn-116-macos-release-bundled-bun-signed",
+  "spec_path": ".flow/tasks/fn-116-macos-release-bundled-bun-signed.1.md",
+  "status": "done",
+  "title": "Add macOS entitlements plist and sign Mach-O code inside-out",
+  "updated_at": "2026-08-01T10:56:32.983898Z"
+}
