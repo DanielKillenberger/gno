@@ -1,9 +1,9 @@
 {
   "schema": "fn-112-durable-mission-state",
   "schema_version": 1,
-  "updated_at": "2026-08-01T19:05:00Z",
+  "updated_at": "2026-08-01T19:45:00Z",
   "service": "fn112-pdf-build.service",
-  "major_gate": "task-.7 implemented; Sol round-4 SHIP on task .7; next = spec-completion Sol review, live QA, final gates, commit/push/PR",
+  "major_gate": "ALL BUILD/REVIEW/QA GATES COMPLETE. Blocked at publication only: no write access to origin.",
   "owner": {
     "orchestrator": "/goal in canonical Claude Opus 5 session (pilot work stage would route to Grok, which frozen routing forbids; equivalent serial lifecycle run here without changing owners)",
     "writer": "Claude Opus 5 medium \u2014 task-.7 transaction (complete; no writer currently editing)",
@@ -12,14 +12,18 @@
   },
   "repository": {
     "branch": "feat/native-pdf-renderer",
-    "head": "c9b828eb7bb8337dcf4ad14c6027d4fea1075ccc",
-    "base": "bb994b580356a41a31093fea85b06993c1a18e4c",
-    "working_tree": "task-.7 docs/CHANGELOG/features + rebuilt globals.built.css + .flow/handoff + .flow/reviews/fn-112-task-7-gates; task-.6 evidence restored to committed state"
+    "head": "75f1ca5f",
+    "commits_this_session": [
+      "b54a8f3558907c5b6294cd99417814210fbedb14 docs: document the PDF viewer surface and close the fn-112 gates",
+      "75f1ca5f chore(flow): mark fn-112 task .7 done with gate and review evidence"
+    ],
+    "working_tree": "clean",
+    "pushed": false
   },
   "flow": {
     "spec": "fn-112-native-pdfjs-document-renderer",
-    "task_6": "done (Sol round-7 SHIP, commit c9b828eb)",
-    "task_7": "in_progress \u2014 Sol round-4 SHIP obtained; formal flowctl done pending the task-.7 commit"
+    "tasks": "7/7 done",
+    "validate": "Valid: True"
   },
   "latest_verified_delta": "Task .7 complete. Five canonical baseline-compared commands all exit 0 with zero failures, per-command matched against capture_id cap-001 of .flow/reviews/fn-112-baseline-receipt.json, whose five raw-log sha256 values were re-verified (twice). cap-001 enumerates failures:[] for every command, so the tolerated pre-existing failure set is empty. Absolute-pass gates green: test:e2e:pdf PASSED, test:package passed on the third run, build:css 0, flowctl validate --spec Valid:True, git diff --check 0. test:package failed twice for environmental reasons, both diagnosed not masked: (1) the real-GNO isolation sentinel correctly tripped because a user-owned resident gno serve (PID 2666223) watcher fired a gno update reindexing the docs edited in this task \u2014 the user service was NOT killed, the run was repeated after quiescence; (2) /tmp exhausted (EDQUOT) by this task own two 2.5G/2.0G forensic dumps, which were the only gno-package-smoke-* dirs and were the only thing removed; /tmp/fn112-baseline was preserved and re-verified. bun run build fails on an unrelated markitdown-ts youtube-transcript import; proven pre-existing by reproducing it in a detached worktree at base bb994b58 with an empty status and frozen-lockfile install. It is not one of the five CBC commands. Real defect found and fixed by this gate: src/serve/public/globals.built.css was stale at c9b828eb and shipped WITHOUT the PDF toolbar zoom-select widths min-w-[4.25rem] and min-w-[6rem] (PdfToolbar.tsx:257,266). The rebuild adds those two and drops five verified-dead utilities; the generated mark rule is byte-identical, so no visual regression. Rerunning test:e2e:pdf regenerated task-.6 accepted evidence; it was restored via git checkout so task .6 Sol round-7 acceptance and its artifact-hashes.json remain exactly as reviewed.",
   "durable_artifacts": {
@@ -66,19 +70,11 @@
     "budget_failures": []
   },
   "review": {
-    "reviewer": "Sol gpt-5.6-sol",
-    "stage": "task .7 independent acceptance",
-    "rounds": 4,
-    "verdict": "SHIP (round 4)",
-    "open_findings": [],
-    "closed_findings": [
-      "SOL7-R1-DOC-01 guessed gno.sh filenames",
-      "SOL7-R2-DOC-01 targets required editorial judgment",
-      "SOL7-R3-DOC-01 target 5 deletion boundary undefined"
-    ],
-    "notes": "gno.sh is unreachable from this engagement (absent locally; gh api -> 404), and cloning is prohibited by the task spec, so the brief targets by deterministic resolver + exact anchor + literal block/substitution instead of guessed paths."
+    "task_7": "Sol gpt-5.6-sol SHIP at round 4",
+    "spec_completion": "Sol gpt-5.6-sol SHIP across R1-R19",
+    "live_qa": "8/8 scenarios PASS, 0 findings (P0=0 P1=0 P2=0), QA_VERDICT SHIP"
   },
-  "next_action": "Sol spec-completion review -> integrated live QA -> final gates + exact diff inspection -> commit, flowctl done fn-112...7, push feat/native-pdf-renderer, open PR (NO MERGE) and gh-verify it",
+  "next_action": "OWNER DECISION REQUIRED to publish. Local work is complete, committed, and clean at 75f1ca5f on feat/native-pdf-renderer.",
   "publication": {
     "commits": [],
     "pushed_sha": null,
@@ -90,5 +86,16 @@
     "state": "ABSENT from this environment; not cloned, not edited, not QA-d, not deployed",
     "brief": ".flow/handoff/fn-112-gno-sh-docs-brief.md",
     "dependency": "the in-repo brief is a completion dependency; executing it in the site repo is an external post-merge owner handoff and is NOT"
+  },
+  "blocker": {
+    "kind": "authentication/authorization \u2014 genuine, nonrecoverable without owner action",
+    "detail": "origin is https://github.com/gmickel/gno.git. The only available credential authenticates as GitHub user DanielKillenberger, which has permissions {admin:false, maintain:false, push:false, triage:false, pull:true} on gmickel/gno. SSH auth itself succeeds (\"Hi DanielKillenberger! You have successfully authenticated\") but `git push --dry-run git@github.com:gmickel/gno.git feat/native-pdf-renderer` returns \"ERROR: Permission to gmickel/gno.git denied to DanielKillenberger.\" HTTPS push fails earlier for lack of a credential helper. This is authorization, not transport.",
+    "not_attempted_and_why": "Creating a fork under DanielKillenberger would be an outward-facing action creating a new public repository under the user identity, and would change the deliverable from \"push feat/native-pdf-renderer to origin and open a PR\" to a cross-fork PR. Not authorized by the goal, so not done without the owner deciding.",
+    "unblock_options": [
+      "grant DanielKillenberger write access to gmickel/gno",
+      "provide a credential for an account with write access",
+      "authorize a fork + cross-fork PR",
+      "push and open the PR manually from an authorized machine"
+    ]
   }
 }
