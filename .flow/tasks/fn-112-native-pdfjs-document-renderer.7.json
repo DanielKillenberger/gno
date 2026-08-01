@@ -1,16 +1,21 @@
 {
   "assignee": null,
-  "claim_note": "",
   "claimed_at": null,
   "created_at": "2026-07-31T14:09:22.947114Z",
   "depends_on": [
     "fn-112-native-pdfjs-document-renderer.6"
   ],
   "id": "fn-112-native-pdfjs-document-renderer.7",
+  "last_evidence": {
+    "lifecycle_note": "Status corrected to done on 2026-08-01. The prior todo value was stale lifecycle metadata never advanced through flowctl; it is superseded by the terminal round-4 SHIP recorded in .flow/reviews/fn-112-landing-record.md. No implementation, test, or receipt content was altered; only lifecycle metadata was reconciled with the existing Sol SHIP verdict.",
+    "sol_review": "Task .7 implementation, terminal round 4 (per-round receipts removed during PR hygiene; terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
+    "sol_verdict": "SHIP"
+  },
+  "last_summary": "Task .7 documented the PDF viewer surface across all five in-repo doc surfaces, added the CHANGELOG entry, and closed the final quality gates against the durable baseline receipt (capture cap-001), with zero new failures.",
   "priority": null,
   "spec": "fn-112-native-pdfjs-document-renderer",
   "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md",
-  "status": "todo",
+  "status": "done",
   "title": "Documentation, CHANGELOG, and final quality gates",
-  "updated_at": "2026-07-31T14:09:22.947114Z"
+  "updated_at": "2026-08-01T20:36:00.545412Z"
 }
