@@ -7,15 +7,23 @@
   ],
   "id": "fn-112-native-pdfjs-document-renderer.6",
   "last_evidence": {
-    "lifecycle_note": "Status corrected to done on 2026-08-01. The prior in_progress value and its claim_note were written mid-flight by the fn-112 plan repair (Sol PR6-01) and were superseded by the terminal round-7 SHIP recorded in .flow/reviews/fn-112-landing-record.md. No implementation, test, or receipt content was altered; only lifecycle metadata was reconciled with the existing Sol SHIP verdict.",
-    "sol_review": "Task .6 implementation, terminal round 7 (per-round receipts removed during PR hygiene; terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
-    "sol_verdict": "SHIP"
+    "lifecycle_note": "Status corrected to done on 2026-08-01. The prior in_progress value and its claim_note were written mid-flight by the fn-112 plan repair and were superseded by the terminal Sol round-7 SHIP plus the maintainer's final quality-audit SHIP.",
+    "sol_review": "Task .6 implementation, terminal round 7 (terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
+    "sol_verdict": "SHIP",
+    "commits": ["936d9c3bf490f10885921b46c4fc692def26552d"],
+    "prs": ["https://github.com/gmickel/gno/pull/161"],
+    "tests": [
+      "bun run lint:check",
+      "bunx tsc --noEmit",
+      "bun run test:e2e:pdf",
+      "bun run test:package"
+    ]
   },
-  "last_summary": "Task .6 delivered the browser smoke, P-1…P-6 performance evidence, security/visual/progressive-range and cancellation coverage, and the installed-binary npm package smoke for the pdfjs assets. Independent canonical Sol round 7 returned SHIP with no blocking findings.",
+  "last_summary": "Closed the full PR review set, retained reproducible browser evidence, hardened the public SPA security envelope, and passed browser plus installed-package smokes.",
   "priority": null,
   "spec": "fn-112-native-pdfjs-document-renderer",
   "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
   "status": "done",
   "title": "Browser smoke, performance evidence, and npm package smoke for pdfjs assets",
-  "updated_at": "2026-08-01T20:36:00.545412Z"
+  "updated_at": "2026-08-01T21:54:57Z"
 }

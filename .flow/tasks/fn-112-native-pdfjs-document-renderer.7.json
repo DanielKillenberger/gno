@@ -7,15 +7,33 @@
   ],
   "id": "fn-112-native-pdfjs-document-renderer.7",
   "last_evidence": {
-    "lifecycle_note": "Status corrected to done on 2026-08-01. The prior todo value was stale lifecycle metadata never advanced through flowctl; it is superseded by the terminal round-4 SHIP recorded in .flow/reviews/fn-112-landing-record.md. No implementation, test, or receipt content was altered; only lifecycle metadata was reconciled with the existing Sol SHIP verdict.",
-    "sol_review": "Task .7 implementation, terminal round 4 (per-round receipts removed during PR hygiene; terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
-    "sol_verdict": "SHIP"
+    "lifecycle_note": "Status corrected to done on 2026-08-01. The prior todo value was superseded by the terminal Sol round-4 SHIP and the completed owner-authorized hosted-documentation work.",
+    "sol_review": "Task .7 implementation, terminal round 4 (terminal SHIP recorded in .flow/reviews/fn-112-landing-record.md)",
+    "sol_verdict": "SHIP",
+    "commits": [
+      "936d9c3bf490f10885921b46c4fc692def26552d",
+      "d5894f9b",
+      "gmickel/gno.sh@192dead"
+    ],
+    "prs": [
+      "https://github.com/gmickel/gno/pull/161",
+      "https://github.com/gmickel/gno.sh/pull/26"
+    ],
+    "tests": [
+      "bun run lint:check",
+      "bunx tsc --noEmit",
+      "bun test",
+      "bun run test:web",
+      "bun run docs:verify",
+      "bun run test:e2e:pdf",
+      "bun run test:package"
+    ]
   },
-  "last_summary": "Task .7 documented the PDF viewer surface across all five in-repo doc surfaces, added the CHANGELOG entry, and closed the final quality gates against the durable baseline receipt (capture cap-001), with zero new failures.",
+  "last_summary": "Completed in-repo and hosted-site documentation, regenerated durable baseline capture cap-002, passed final gates, and opened gmickel/gno.sh#26.",
   "priority": null,
   "spec": "fn-112-native-pdfjs-document-renderer",
   "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md",
   "status": "done",
   "title": "Documentation, CHANGELOG, and final quality gates",
-  "updated_at": "2026-08-01T20:36:00.545412Z"
+  "updated_at": "2026-08-01T21:54:57Z"
 }
