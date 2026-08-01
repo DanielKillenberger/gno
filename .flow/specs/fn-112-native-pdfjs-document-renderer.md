@@ -971,14 +971,12 @@ they are not CI-gated microbenchmarks.
   table + `__gnoPdfMetrics` diagnostic-surface note), `src/serve/CLAUDE.md`
   endpoint table, `website/_data/features.yml` `web-ui` benefits, CHANGELOG
   `[Unreleased]`, and `bun run docs:verify` passes. These in-repo surfaces are
-  the complete documentation deliverable for this spec. Additionally the
-  ready-to-apply hosted-docs change brief exists at
-  `.flow/handoff/fn-112-gno-sh-docs-brief.md` (see Boundaries) — complete
-  enough that a reviewer can verify the hosted-docs delta without opening
-  the gno.sh repo. Applying, QA-ing, and deploying that brief in
-  `~/work/gno.sh` is an external post-merge owner handoff and is explicitly
-  **not** a completion dependency of this spec; no artifact may claim the
-  hosted docs were updated, QA'd, or deployed.
+  the complete documentation deliverable for this spec. The owner-authorized
+  task .7 scope expansion also completed the hosted-docs change in
+  `~/work/gno.sh`, recorded its gates and local browser QA in
+  `.flow/handoff/fn-112-gno-sh-docs-brief.md`, and opened companion PR #26.
+  Production deployment remains a post-merge handoff and is not claimed.
+  <!-- Updated by plan-sync: fn-112-native-pdfjs-document-renderer.7 used an owner-authorized hosted-docs companion PR, not a brief-only handoff -->
 - **R17:** Quality gates, split into two kinds that are never mixed:
   - **Canonical baseline-compared commands (CBC)** — exactly these five, in
     this order, with these exact strings, captured at base and re-run verbatim
@@ -1103,28 +1101,12 @@ Out of scope — do not build:
   (accepted for v1; note in docs if surprising).
 - PDF rendering anywhere other than `/doc` (no search-result previews, no
   Browse-pane embedding).
-- Publication/marketing content work, and any edit, commit, QA, or deploy in
-  the `~/work/gno.sh` repository. Reconciliation with AGENTS.md (which
-  requires hosted-website docs to reflect user-facing changes): AGENTS.md's
-  own framing makes the gno.sh update a merge/ship-time obligation (its
-  deploy and site-QA steps run "after merging … to `gno.sh` `main`", and
-  this repo's post-merge workflow is where releases happen), while this
-  spec's authorized scope ends at implementation readiness in THIS
-  repository with no push/PR/publication. Editing a second repository is
-  therefore outside this spec's authorization — but the documentation duty
-  is NOT waived or deferred as a vague note: task .7 must produce a
-  complete, ready-to-apply hosted-docs change brief **inside this repo** at
-  `.flow/handoff/fn-112-gno-sh-docs-brief.md` (exact gno.sh pages/files,
-  drafted replacement copy, and the Live-QA-Gate checklist to run before
-  merge and after deploy), so the ship-time execution is mechanical and
-  reviewable now. To be unambiguous: the in-repo brief **is** a completion
-  dependency of task .7; applying/QA-ing/deploying it in `~/work/gno.sh`
-  **is not**, because cross-repository work and publication are unauthorized
-  in this engagement. The hosted-site source and deploy procedure (repo
-  `git@github.com:gmickel/gno.sh.git`, deploy via
-  `DEPLOY_HOST=… ./scripts/deploy-prod.sh` per AGENTS.md) is recorded here
-  purely as the external post-merge owner handoff. No spec, task, or receipt
-  artifact may state that hosted docs were updated, QA'd, or deployed.
+- Production deployment in `~/work/gno.sh` remains outside this spec: the
+  owner-authorized task .7 expansion completed the hosted-docs edit, local
+  gates, browser QA, and companion PR #26, but did not deploy. The durable
+  execution record is `.flow/handoff/fn-112-gno-sh-docs-brief.md`; after
+  merge, the site owner runs the documented deploy and production QA.
+  <!-- Updated by plan-sync: fn-112-native-pdfjs-document-renderer.7 used a hosted-docs companion PR, not a brief-only handoff -->
 - No changes to `spec/output-schemas/*` — `/api/doc-asset` is a binary
   passthrough, not a JSON contract.
 - This spec's lifecycle stops at plan/implementation readiness per current
