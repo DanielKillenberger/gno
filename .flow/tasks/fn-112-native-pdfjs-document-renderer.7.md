@@ -48,9 +48,26 @@ Finalization: documentation, CHANGELOG, and the full quality gate against the re
 
 
 ## Done summary
-TBD
+Documented the PDF viewer surface, added the CHANGELOG entry, and closed the final quality gates.
 
+**Docs (all five in-repo surfaces, plus the AGENTS mirror):**
+- `docs/API.md` — `GET /api/doc-asset` documented for the first time (it was previously entirely undocumented): quick-reference row, query params, binary response headers, and `200`/`206`/`400`/`403`/`404`/`416` semantics including the intentionally-unsupported multi-range case, with Range and `curl -I` examples. New `PDF.js Vendor Assets` section for the three `/vendor/pdfjs/*` routes.
+- `docs/WEB-UI.md` — native viewer, Pages/Text toggle, the four fallback reasons and the "No extracted text" sub-state, full CSP directive table incl. `worker-src 'self'`, and the limits (no printing, per-visit viewer state). `__gnoPdfMetrics` recorded explicitly as an unstable diagnostic surface, **not** an API contract.
+- `src/serve/CLAUDE.md` + `src/serve/AGENTS.md` — the two missing endpoint rows; the "no external font/script loading" bullet qualified with the same-origin pdfjs path.
+- `CHANGELOG.md` `[Unreleased] / Added`; `website/_data/features.yml` web-ui benefit line.
+
+**Defect found and fixed by this gate:** `src/serve/public/globals.built.css` was stale at `c9b828eb` and shipped **without** the PDF toolbar's zoom-select widths `min-w-[4.25rem]` and `min-w-[6rem]` (`PdfToolbar.tsx:257,266`). This file ships in the npm package. The rebuild adds those two and drops five utilities verified unused by any source; the generated `mark` rule is byte-identical, so no visual regression.
+
+**R17 baseline comparison.** Receipt `.flow/reviews/fn-112-baseline-receipt.json`, `capture_id` **`cap-001`** (`regenerated: false`, base `bb994b58`). Integrity verified — all five `raw_log_sha256` re-hash correctly against the surviving raw logs, re-checked a second time after a `/tmp` cleanup. **No regeneration needed.** **Tolerated pre-existing failures: NONE** — `cap-001` enumerates `failures: []` for every command, so the tolerance set is empty and all five had to pass absolutely. They did: `bun run lint:check` 0/0, `bunx tsc --noEmit` exit 0, `bun test` 3595 pass / 2 skip / 0 fail, `bun run test:web` 295 pass / 0 fail, `bun run docs:verify` 15 passed / 0 failed / 2 skipped. Zero new failures.
+
+**Absolute-pass gates:** `test:e2e:pdf` PASSED, `test:package` passed, `build:css` 0, `flowctl validate --spec` Valid: True, `git diff --check` 0. `bun run build` fails on an unrelated `markitdown-ts` → `youtube-transcript` import; proven pre-existing by reproducing it in a detached worktree at base `bb994b58` with empty status and a frozen-lockfile install. It is not one of the five CBC commands.
+
+`test:package` failed twice before passing, both environmental and both diagnosed rather than masked: (1) the real-GNO isolation sentinel correctly tripped because a user-owned resident `gno serve` watcher reindexed the docs edited here — the user's service was not killed, the run was repeated after quiescence; (2) `/tmp` exhausted (EDQUOT) by this task's own two forensic dumps, which were the only `gno-package-smoke-*` dirs and the only thing removed. Full detail in `.flow/reviews/fn-112-task-7-gates/INDEX.md`.
+
+**Reviews:** independent Sol (`gpt-5.6-sol`) task review → **SHIP** at round 4 (closed: guessed gno.sh paths, targets requiring editorial judgment, undefined deletion boundary). Sol spec-completion review across R1–R19 → **SHIP**. Integrated live QA drove a real isolated `gno serve` with Playwright: **8/8 scenarios PASS, 0 findings**; QA-1 and QA-6 screenshots inspected directly, not trusted from the exit code.
+
+**Hosted site:** `~/work/gno.sh` was **not** edited, QA'd, or deployed. It is absent from this environment and unreachable (`gh api` → 404), and cloning it is out of scope. The ready-to-apply brief is `.flow/handoff/fn-112-gno-sh-docs-brief.md`, written as resolver + anchor + literal block so it applies mechanically. Executing it in the site repo is an **external post-merge owner handoff and is NOT a completion dependency of this spec**; the in-repo brief is.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: b54a8f3558907c5b6294cd99417814210fbedb14
+- Tests: bun run lint:check, bunx tsc --noEmit, bun test, bun run test:web, bun run docs:verify, bun run test:e2e:pdf, bun run test:package, bun run build:css, .flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer
 - PRs:
