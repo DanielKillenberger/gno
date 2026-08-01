@@ -38,9 +38,10 @@ across two files for no reader benefit.
 
 Reviewer for every row: Sol, canonical model `gpt-5.6-sol`, read-only mode.
 
-## Durable baseline — capture `cap-001`
+## Durable baseline — capture `cap-002`
 
-Captured before any implementation in an isolated detached worktree at base
+Regenerated after implementation because `cap-001`'s scratch logs were no longer
+present to verify. Capture `cap-002` ran in an isolated detached worktree at base
 `bb994b580356a41a31093fea85b06993c1a18e4c` (empty `git status --porcelain`
 there, `bun install --frozen-lockfile` exit 0, `bun.lock` unchanged).
 This is the R17 baseline: the five canonical baseline-compared commands and
@@ -52,11 +53,11 @@ with `fn-112-baseline-receipt.md` as its human-readable twin.
 
 | Command | Exit | Counts | Enumerated failures | Log SHA256 |
 | --- | ---: | --- | --- | --- |
-| `bun run lint:check` | 0 | fail:0 | *(none)* | `ca9866857ce9e65b4e40630162095ab26eb0fbb5bde76da75c5e5169952e5bc4` |
+| `bun run lint:check` | 0 | fail:0 | *(none)* | `75a695bc0fac99fb405494b50f17e3884736c50ec064996d9e562c610fb253fb` |
 | `bunx tsc --noEmit` | 0 | fail:0 | *(none)* | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
-| `bun test` | 0 | 3463 pass / 0 fail / 2 skip | *(none)* | `6388cbbd315c5ac3f0ce434321d68872b20e4199048c705262394b153753ae47` |
-| `bun run test:web` | 0 | 186 pass / 0 fail | *(none)* | `098bdde9f4800f478e22cc5d0f0e2fdff1a2e5f5670f813e55fbefd7a6615283` |
-| `bun run docs:verify` | 0 | 15 pass / 0 fail / 2 skip | *(none)* | `252b59167a56c549a7c59a6c3d3d5f469e37dc10cb99e591ac5f7a662c1acc6d` |
+| `bun test` | 0 | 3463 pass / 0 fail / 2 skip | *(none)* | `734437f3a4c913c465a094a910817500d5175ae379a0bde25acd4d2fdaef7490` |
+| `bun run test:web` | 0 | 186 pass / 0 fail | *(none)* | `dcec45fe466d62070ec0843fdcf39b07fe44e1a33f51a9775f4b83361e49a49d` |
+| `bun run docs:verify` | 0 | 15 pass / 0 fail / 2 skip | *(none)* | `7b554819d88cd16f5183e6b7938beb5505565736b65fe0c8cedc853497d0ced8` |
 
 **Tolerated pre-existing failures: none.** All five commands exited 0 at base,
 so every failure in the final run would have been a new failure.

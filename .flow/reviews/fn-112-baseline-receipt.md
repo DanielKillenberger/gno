@@ -52,3 +52,24 @@
 - dirt: Flow planning artifacts only (spec, tasks, reviews, INVESTIGATION-REPORT.md, `.flow/.gitignore`)
 
 Raw logs: `/tmp/fn112-baseline/cap-001/`
+
+## Capture `cap-002`
+
+Regenerated because the `cap-001` scratch logs were absent and its hashes could
+no longer be re-verified. The detached worktree was clean at exact base
+`bb994b580356a41a31093fea85b06993c1a18e4c`; frozen installation left `bun.lock`
+unchanged.
+
+| Command | Exit | Duration ms | Counts | Failures | Log SHA256 |
+| --- | ---: | ---: | --- | --- | --- |
+| `bun run lint:check` | 0 | 9562 | fail:0 | *(none)* | `75a695bc0fac99fb405494b50f17e3884736c50ec064996d9e562c610fb253fb` |
+| `bunx tsc --noEmit` | 0 | 13538 | fail:0 | *(none)* | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `bun test` | 0 | 95100 | 3463 pass / 0 fail / 2 skip | *(none)* | `734437f3a4c913c465a094a910817500d5175ae379a0bde25acd4d2fdaef7490` |
+| `bun run test:web` | 0 | 4245 | 186 pass / 0 fail | *(none)* | `dcec45fe466d62070ec0843fdcf39b07fe44e1a33f51a9775f4b83361e49a49d` |
+| `bun run docs:verify` | 0 | 840 | 15 pass / 0 fail / 2 skip | *(none)* | `7b554819d88cd16f5183e6b7938beb5505565736b65fe0c8cedc853497d0ced8` |
+
+**Enumerated pre-existing failures:** none. All five CBC commands exited 0 with
+empty `failures[]`. Raw logs: `/private/tmp/fn112-baseline/cap-002/`.
+
+Planning-worktree state is recorded truthfully in the JSON receipt and is
+informational only; this regenerated capture makes no no-product-change claim.

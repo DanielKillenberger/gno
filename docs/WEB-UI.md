@@ -274,9 +274,9 @@ The viewer loads the original file bytes over
 [`GET /api/doc-asset`](API.md#get-document-asset), which supports HTTP `Range`
 requests so PDF.js can fetch a document progressively.
 
-**Fallback.** When a PDF cannot be rendered, GNO switches to the Text view and
-shows a notice explaining why, alongside a **Download original** button. There
-are four reasons:
+**Fallback.** When a PDF cannot be rendered **and extracted text is available**,
+GNO switches to the Text view and shows a notice explaining why, alongside a
+**Download original** button. There are four reasons:
 
 | Reason      | Notice             | When                                                 |
 | :---------- | :----------------- | :--------------------------------------------------- |
@@ -285,8 +285,10 @@ are four reasons:
 | `network`   | Could not load     | The bytes could not be fetched in this session       |
 | `bootstrap` | Viewer unavailable | PDF.js itself could not start in this browser window |
 
-If the document has no extracted text either, GNO shows **"No extracted text for
-this document."** with a **Download original** button instead of an empty pane.
+If the document has no extracted text, the Pages view keeps the designed error
+card and its retry/download actions. Selecting **Text** manually shows **"No
+extracted text for this document."** with a **Download original** button instead
+of an empty pane.
 
 **Limits.** Printing from the viewer is not supported — download the original and
 print it from a PDF reader. Viewer state (page, zoom, fit mode, Pages/Text

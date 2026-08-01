@@ -115,6 +115,90 @@
         "product_path_changes": false,
         "note": "Informational only, non-gating. Dirt is Flow planning state (spec, tasks, reviews, INVESTIGATION-REPORT.md, .flow/.gitignore). No product-path changes — STEP 0 ran before bun add and any product edit."
       }
+    },
+    {
+      "capture_id": "cap-002",
+      "regenerated": true,
+      "reason": "cap-001 raw logs were absent from scratch storage and their hashes could no longer be verified",
+      "base_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+      "worktree": {
+        "path": "/private/tmp/fn112-baseline-cap002",
+        "create_command": "git worktree add --detach /private/tmp/fn112-baseline-cap002 bb994b580356a41a31093fea85b06993c1a18e4c",
+        "head_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+        "status_porcelain_empty": true,
+        "status_output": ""
+      },
+      "setup": {
+        "command": "bun install --frozen-lockfile",
+        "exit_status": 0,
+        "duration_ms": 2983,
+        "bun_lock_unchanged": true,
+        "bun_lock_sha256_before": "99e36e2a654277b39ff37de40cde0a2168e83d357c01a6fd0aa40199bae20736",
+        "bun_lock_sha256_after": "99e36e2a654277b39ff37de40cde0a2168e83d357c01a6fd0aa40199bae20736",
+        "raw_log_path": "/private/tmp/fn112-baseline/cap-002/setup-install.log"
+      },
+      "commands": [
+        {
+          "command": "bun run lint:check",
+          "exit_status": 0,
+          "duration_ms": 9562,
+          "counts": { "pass": null, "fail": 0, "skip": null },
+          "failures": [],
+          "raw_log_path": "/private/tmp/fn112-baseline/cap-002/01-lint.log",
+          "raw_log_sha256": "75a695bc0fac99fb405494b50f17e3884736c50ec064996d9e562c610fb253fb"
+        },
+        {
+          "command": "bunx tsc --noEmit",
+          "exit_status": 0,
+          "duration_ms": 13538,
+          "counts": { "pass": null, "fail": 0, "skip": null },
+          "failures": [],
+          "raw_log_path": "/private/tmp/fn112-baseline/cap-002/02-tsc.log",
+          "raw_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": "bun test",
+          "exit_status": 0,
+          "duration_ms": 95100,
+          "counts": { "pass": 3463, "fail": 0, "skip": 2 },
+          "failures": [],
+          "raw_log_path": "/private/tmp/fn112-baseline/cap-002/03-test.log",
+          "raw_log_sha256": "734437f3a4c913c465a094a910817500d5175ae379a0bde25acd4d2fdaef7490"
+        },
+        {
+          "command": "bun run test:web",
+          "exit_status": 0,
+          "duration_ms": 4245,
+          "counts": { "pass": 186, "fail": 0, "skip": 0 },
+          "failures": [],
+          "raw_log_path": "/private/tmp/fn112-baseline/cap-002/04-test-web.log",
+          "raw_log_sha256": "dcec45fe466d62070ec0843fdcf39b07fe44e1a33f51a9775f4b83361e49a49d"
+        },
+        {
+          "command": "bun run docs:verify",
+          "exit_status": 0,
+          "duration_ms": 840,
+          "counts": { "pass": 15, "fail": 0, "skip": 2 },
+          "failures": [],
+          "raw_log_path": "/private/tmp/fn112-baseline/cap-002/05-docs.log",
+          "raw_log_sha256": "7b554819d88cd16f5183e6b7938beb5505565736b65fe0c8cedc853497d0ced8"
+        }
+      ],
+      "environment": {
+        "bun_version": "1.3.14",
+        "typescript_version": "Version 5.9.3",
+        "platform": "Darwin",
+        "arch": "arm64",
+        "uname": "Darwin Mac.local 27.0.0 Darwin Kernel Version 27.0.0: Wed May 27 02:12:58 PDT 2026; root:xnu-13361.0.0.501.1~2/RELEASE_ARM64_T6041 arm64",
+        "notes": "Regenerated on the current host with the installed Bun binary placed first in PATH so the untrusted temporary-worktree mise config could not intercept the exact canonical commands. GNO_OFFLINE was not set. Pre-existing failures: none."
+      },
+      "started_at": "2026-08-01T21:40:00Z",
+      "finished_at": "2026-08-01T21:45:54Z",
+      "planning_worktree_state": {
+        "head_sha": "936d9c3bf490f10885921b46c4fc692def26552d",
+        "status_porcelain": " M .flow/handoff/fn-112-gno-sh-docs-brief.md\n M .flow/tasks/fn-112-native-pdfjs-document-renderer.6.md\n M .flow/tasks/fn-112-native-pdfjs-document-renderer.7.md\n M CHANGELOG.md\n M docs/WEB-UI.md\n?? .flow/reviews/fn-112-task-7-site-evidence/",
+        "note": "Informational only, non-gating. The planning worktree contains the completed product/test commit plus final documentation, Flow state, and hosted-site QA evidence. Baseline provenance comes solely from the detached clean worktree."
+      }
     }
   ]
 }
