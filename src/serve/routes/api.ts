@@ -5,8 +5,8 @@
  * @module src/serve/routes/api
  */
 
-// node:fs/promises structure ops have no Bun equivalent
-import { readdir } from "node:fs/promises";
+// node:fs/promises structure ops + realpath have no Bun equivalent
+import { readdir, realpath } from "node:fs/promises";
 // node:path has no Bun equivalent
 import { posix as pathPosix } from "node:path";
 
@@ -688,15 +688,57 @@ function isAbsoluteFilesystemPath(pathValue: string): boolean {
   );
 }
 
-async function isPathWithinRoot(
+export type RealpathFn = (path: string) => Promise<string>;
+
+/**
+ * Lexical containment, then realpath containment (symlink-escape defense).
+ * Only candidate ENOENT falls back to the lexical verdict; other realpath
+ * errors fail closed. Both root and candidate are canonicalized when present.
+ * Exported for adversarial unit tests (I1-04 non-ENOENT fail-closed).
+ */
+export async function isPathWithinRoot(
   root: string,
-  candidate: string
+  candidate: string,
+  realpathFn: RealpathFn = realpath
 ): Promise<boolean> {
   const nodePath = await import("node:path"); // no bun equivalent
   const relative = nodePath.relative(root, candidate);
-  return (
+  const lexicallyWithin =
     relative === "" ||
-    (!relative.startsWith("..") && !nodePath.isAbsolute(relative))
+    (!relative.startsWith("..") && !nodePath.isAbsolute(relative));
+  if (!lexicallyWithin) {
+    return false;
+  }
+
+  let resolvedRoot: string;
+  try {
+    resolvedRoot = await realpathFn(root);
+  } catch {
+    // Root must resolve; fail closed
+    return false;
+  }
+
+  let resolvedCandidate: string;
+  try {
+    resolvedCandidate = await realpathFn(candidate);
+  } catch (error) {
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
+    // Genuinely missing file: accept lexical verdict so callers can 404 later
+    if (code === "ENOENT") {
+      return true;
+    }
+    // EACCES, ELOOP, etc. fail closed
+    return false;
+  }
+
+  const resolvedRelative = nodePath.relative(resolvedRoot, resolvedCandidate);
+  return (
+    resolvedRelative === "" ||
+    (!resolvedRelative.startsWith("..") &&
+      !nodePath.isAbsolute(resolvedRelative))
   );
 }
 
@@ -2056,15 +2098,77 @@ export async function handleDoc(
 }
 
 /**
- * GET /api/doc-asset
+ * Parse a single-range `Range: bytes=…` header per RFC 9110.
+ * Multi-range requests are rejected here; the caller returns 416 with
+ * Content-Range `bytes * / <size>` (RFC unsatisfiable form; see serve path).
+ */
+function parseSingleByteRange(
+  rangeHeader: string,
+  size: number
+):
+  | { ok: true; start: number; end: number }
+  | { ok: false; reason: "malformed" | "unsatisfiable" } {
+  const trimmed = rangeHeader.trim();
+  // Multi-range: not supported — signal so caller can return 416
+  if (trimmed.includes(",")) {
+    return { ok: false, reason: "malformed" };
+  }
+  const match = /^bytes=(\d*)-(\d*)$/u.exec(trimmed);
+  if (!match || (match[1] === "" && match[2] === "")) {
+    return { ok: false, reason: "malformed" };
+  }
+  const startTok = match[1] ?? "";
+  const endTok = match[2] ?? "";
+
+  let start: number;
+  let end: number;
+  if (startTok === "") {
+    // suffix: bytes=-N
+    const suffix = Number.parseInt(endTok, 10);
+    if (!Number.isFinite(suffix) || suffix <= 0) {
+      return { ok: false, reason: "malformed" };
+    }
+    if (size === 0) {
+      return { ok: false, reason: "unsatisfiable" };
+    }
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number.parseInt(startTok, 10);
+    if (!Number.isFinite(start) || start < 0) {
+      return { ok: false, reason: "malformed" };
+    }
+    if (endTok === "") {
+      end = size - 1;
+    } else {
+      end = Number.parseInt(endTok, 10);
+      if (!Number.isFinite(end) || end < 0) {
+        return { ok: false, reason: "malformed" };
+      }
+    }
+  }
+
+  if (size === 0 || start >= size || end < start) {
+    return { ok: false, reason: "unsatisfiable" };
+  }
+  end = Math.min(end, size - 1);
+  return { ok: true, start, end };
+}
+
+/**
+ * GET|HEAD /api/doc-asset
  * Query params:
  *   - path (required): relative to current doc, or absolute filesystem path
  *   - uri (required for relative paths): current document uri
+ *
+ * Supports single-range Range requests (206/416). Multi-range → 416 (I1-03).
+ * HEAD mirrors GET status/headers with empty body (I1-02).
  */
 export async function handleDocAsset(
   store: SqliteAdapter,
   config: Config,
-  url: URL
+  url: URL,
+  request?: Request
 ): Promise<Response> {
   const assetPath = url.searchParams.get("path")?.trim();
   if (!assetPath) {
@@ -2139,12 +2243,48 @@ export async function handleDocAsset(
     return errorResponse("NOT_FOUND", "Asset not found", 404);
   }
 
-  return new Response(file, {
-    headers: {
-      "Cache-Control": "no-store",
-      "Content-Type": file.type || "application/octet-stream",
-    },
+  const isHead = (request?.method ?? "GET").toUpperCase() === "HEAD";
+  const filename = resolvedPath.split(/[\\/]/u).at(-1) ?? "document";
+  const headers = new Headers({
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "no-store",
+    "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    "Content-Type": file.type || "application/octet-stream",
   });
+
+  const rangeHeader = request?.headers.get("Range");
+  if (!rangeHeader) {
+    headers.set("Content-Length", String(file.size));
+    if (isHead) {
+      return new Response(null, { status: 200, headers });
+    }
+    return new Response(file, { headers });
+  }
+
+  // Multi-range: unsupported → 416 with bytes */size (I1-03)
+  if (rangeHeader.includes(",")) {
+    headers.set("Content-Range", `bytes */${file.size}`);
+    // No Content-Length for empty 416 body
+    headers.delete("Content-Length");
+    return new Response(null, { status: 416, headers });
+  }
+
+  const parsed = parseSingleByteRange(rangeHeader, file.size);
+  if (!parsed.ok) {
+    headers.set("Content-Range", `bytes */${file.size}`);
+    headers.delete("Content-Length");
+    return new Response(null, { status: 416, headers });
+  }
+
+  const { start, end } = parsed;
+  const length = end - start + 1;
+  headers.set("Content-Length", String(length));
+  headers.set("Content-Range", `bytes ${start}-${end}/${file.size}`);
+  if (isHead) {
+    // Empty body; do not slice/stream the file for HEAD
+    return new Response(null, { status: 206, headers });
+  }
+  return new Response(file.slice(start, end + 1), { status: 206, headers });
 }
 
 /**
@@ -5258,7 +5398,7 @@ export async function routeApi(
   }
 
   if (path === "/api/doc-asset") {
-    return handleDocAsset(store, config, url);
+    return handleDocAsset(store, config, url, req);
   }
 
   if (path === "/api/search" && req.method === "POST") {

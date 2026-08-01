@@ -43,6 +43,11 @@ bindGlobal("ResizeObserver", windowInstance.ResizeObserver);
 bindGlobal("IntersectionObserver", windowInstance.IntersectionObserver);
 bindGlobal("MutationObserver", windowInstance.MutationObserver);
 bindGlobal("DOMRect", windowInstance.DOMRect);
+// pdfjs-dist (TextLayer) requires DOMMatrix in the module scope.
+bindGlobal(
+  "DOMMatrix",
+  (windowInstance as unknown as { DOMMatrix: typeof DOMMatrix }).DOMMatrix
+);
 bindGlobal("DOMParser", windowInstance.DOMParser);
 bindGlobal("HTMLElement", windowInstance.HTMLElement);
 bindGlobal("Element", windowInstance.Element);

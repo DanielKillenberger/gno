@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-07-31T14:09:22.947114Z",
+  "depends_on": [
+    "fn-112-native-pdfjs-document-renderer.6"
+  ],
+  "id": "fn-112-native-pdfjs-document-renderer.7",
+  "priority": null,
+  "spec": "fn-112-native-pdfjs-document-renderer",
+  "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md",
+  "status": "todo",
+  "title": "Documentation, CHANGELOG, and final quality gates",
+  "updated_at": "2026-07-31T14:09:22.947114Z"
+}

@@ -1,0 +1,127 @@
+{
+  "receipt": "fn-112-task-6-plan-repair-round3",
+  "supersedes": "fn-112-task-6-plan-repair-receipt-round2.json",
+  "date": "2026-08-01",
+  "owner": "host harness",
+  "model": "claude-opus-5",
+  "effort": "medium",
+  "session": "572493af-ac2e-4e7e-9804-37f80ea0074e",
+  "branch": "feat/native-pdf-renderer",
+  "base_commit": "bb994b580356a41a31093fea85b06993c1a18e4c",
+  "input_review": ".flow/reviews/fn-112-sol-plan-rereview-task6-performance-round2.json",
+  "input_verdict": "REVISE",
+  "input_open_blockers": ["PR6-PERF-05"],
+  "input_closed_blockers": ["PR6-PERF-01", "PR6-PERF-02", "PR6-PERF-03"],
+  "transaction_scope": "flow_artifacts_and_receipts_only",
+  "verdict": null,
+  "verdict_note": "No verdict issued here. Only Sol reviews.",
+  "lifecycle": {
+    "task_6_status": "in_progress",
+    "task_6_accepted": false,
+    "task_7_status": "todo",
+    "tasks_1_to_5": "accepted, unchanged",
+    "commit": false,
+    "push": false,
+    "pr": false,
+    "subagents_or_other_models_invoked": false,
+    "product_harness_or_test_code_edited": false,
+    "implementation_started": false
+  },
+  "blocker_disposition": {
+    "id": "PR6-PERF-05",
+    "disposition": "repaired",
+    "accepted_finding": "Radix unmounts its portalled listbox on selection, so a second selection cannot be synchronously dispatched at the in-flight observation frame; reopening requires a portal remount whose yield lets the superseded render settle.",
+    "initiation": {
+      "evaluation": "async, single in-page evaluation per attempt",
+      "await_policy": "awaiting inside the evaluation is allowed; no driver round-trip anywhere; nothing awaited between in-flight observation and replacement dispatch",
+      "steps": [
+        "establish and assert entry state, then pre-open the combobox and await portalled listbox + target option mounted and enabled (rung fails if the option never mounts)",
+        "capture baseline snapshot, genId, seqHigh AFTER readiness so no portal-mount latency is inside the measured window",
+        "activate one option as the initiating gesture, asserted enabled and a genuine state change",
+        "rAF-poll snapshot() until a new genId shows a renderStart at seq > seqHigh with no terminal settle",
+        "synchronously, in that frame, dispatch the replacement on a distinct already-mounted control",
+        "confirm a second distinct generation with its own renderStart"
+      ]
+    },
+    "replacement_rule": "never a second combobox selection; always a toolbar control already in the DOM at the observation point (stepped zoom or fit button)",
+    "entry_state_rule": "always 100% / custom, established by selecting 100% from the fit-width default (a real commit because fitMode changes) and letting it settle; no rung ever enters at MAX_ZOOM, so stepped + is always enabled and never a boundary no-op",
+    "runs": [
+      {"run": "A", "kind": "zoom_to_zoom", "entry": "100% / custom", "initiate": "combobox select 200%", "gen1": "200% / custom", "replacement": "mounted toolbar zoom-in +", "gen2": "210% / custom", "non_no_op_basis": "stepZoom(2.0,1)=2.1 != 2.0 and + enabled below MAX_ZOOM"},
+      {"run": "B", "kind": "zoom_to_fit", "entry": "100% / custom", "initiate": "combobox select 300%", "gen1": "300% / custom", "replacement": "mounted toolbar fit-page", "gen2": "fit page", "non_no_op_basis": "initiating select sets fitMode custom, so both fit buttons are unpressed at the observation point; if a variant enters with page active, use the other mounted button fit-width"},
+      {"run": "C", "kind": "heavy_load", "entry": "100% / custom", "initiate": "combobox select 300%", "gen1": "300% / custom", "replacement": "mounted toolbar zoom-in +", "gen2": "310% / custom", "non_no_op_basis": "stepZoom(3.0,1)=3.1; heavy load comes from fixture/viewport/DPR, never from a max-zoom entry"}
+    ],
+    "rejected_alternative": "entering at 400% and using zoom-out 390 -> 380; not adopted because one protocol with no max-zoom entry is coherent across every rung",
+    "ladder_rung_renamed": "the former '200-page fixture at maximum zoom' rung is now the run-C higher-zoom commit, so no rung entry state can disable the replacement control",
+    "pre_dispatch_assertions": ["control present in the DOM", "not disabled", "target differs from current state (data-pressed !== 'true' for fit buttons)"],
+    "per_rung_recorded": ["entry state", "portal readiness proof", "selected initiating option", "mounted replacement control", "expected and observed first/second generations with resulting zoom/fit targets"],
+    "failure_rule": "missing readiness, a failed enabled/non-no-op assertion, or a missing generation transition fails the rung and escalates; never scored",
+    "escalation": ["small fixture run A", "200-page run A", "200-page run C", "run C larger viewport", "run C deviceScaleFactor 2"],
+    "run_coverage": "run B executed at the rung where run A first succeeded, escalating the same way if needed; both runs must succeed — >= 2 overlapped runs is not one run repeated",
+    "preserved_verbatim": [
+      "single page-evaluation attempt",
+      "baseline and seq > seqHigh in-flight proof",
+      "synchronous replacement in the observation frame",
+      "second-generation proof",
+      "renderCancel -> renderSettle(cancelled) -> replacement renderStart ordering",
+      "no completed settle on the superseded generation",
+      "no stale paint",
+      "full ordered event stream per run",
+      "escalation ladder",
+      "no sleeps",
+      "no direct state manipulation",
+      "loud final failure if in-flight is never observable"
+    ]
+  },
+  "closed_items_untouched": {
+    "PR6-PERF-01": "closed by Sol; admission epochs unchanged this round",
+    "PR6-PERF-02": "closed by Sol; pending ownership and timer semantics unchanged this round",
+    "PR6-PERF-03": "closed by Sol; zoom-level combobox and literal P-4a unchanged this round",
+    "N1": "preserved — production-only SCROLL_QUIESCENCE_MS and fake-timer boundary tests (T7)",
+    "N2": "preserved",
+    "N3": "preserved",
+    "N4": "re-run; see validation",
+    "sol_note_close_before_new_entry_ordering": "already covered by T4 (post-close scroll entries stay deferred); carried forward as implementation guidance"
+  },
+  "artifacts_changed": [
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
+    ".flow/reviews/fn-112-task-6-plan-repair-receipt-round3.md",
+    ".flow/reviews/fn-112-task-6-plan-repair-receipt-round3.json"
+  ],
+  "artifacts_left_unmodified": [
+    ".flow/reviews/fn-112-task-6-plan-repair-receipt.md",
+    ".flow/reviews/fn-112-task-6-plan-repair-receipt.json",
+    ".flow/reviews/fn-112-task-6-plan-repair-receipt-round2.md",
+    ".flow/reviews/fn-112-task-6-plan-repair-receipt-round2.json"
+  ],
+  "contracts_unchanged": [
+    "P-3 <= 60 renderStart, zero orphans, dropped === 0",
+    "P-4a <= 500 ms at 19th of 20 ascending samples over the literal 100%<->200% operation",
+    "P-4b mandatory with loud failure",
+    "P-1, P-2, P-5, P-6",
+    "__gnoPdfMetrics schema",
+    "progressive held-Range oracle and range-mode loading policy",
+    "offline zero-non-self posture, security envelope, R8 states, aux-404 semantics, alignment, visual matrix, package smoke",
+    "tasks .1-.5 accepted behavior",
+    "stepped +/- zoom behavior",
+    "admission-epoch and pending-ownership designs closed in round 2",
+    "zoom-level combobox specification closed in round 2"
+  ],
+  "open_implementation_work": [
+    "implement admission epochs, pending ownership, and the ungated startRenderAdmitted split in use-pdf-pages.ts",
+    "add hook tests T1-T7 with individually justified updates to any pre-existing scheduler test",
+    "implement the zoom-level combobox via ADR + frontend-design with component/a11y tests and individually justified pdf-toolbar-zoom-reset test updates",
+    "rework P-4a to 20 alternating direct commits with in-page timestamps",
+    "rework P-4b to whole-attempt async evaluations with pre-opened combobox initiation and already-mounted replacement controls per runs A/B/C",
+    "re-run bun run smoke:pdf-viewer end to end incl. P-5, P-6 and the visual matrix",
+    "gates: bunx tsc --noEmit, bun run lint:check, bun test, bun run test:web, bun run test:e2e:pdf, bun run test:package",
+    "report every budget number, pass or fail"
+  ],
+  "validation": [
+    {"command": ".flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer", "exit": 0, "output": "Tasks: 7, Valid: True"},
+    {"command": "python3 json.load on receipts round1/round2/round3", "exit": 0, "output": "all parse"},
+    {"command": "git diff --check", "exit": 0, "output": "clean"}
+  ],
+  "readiness": "ready_for_sol_round3_targeted_plan_rereview",
+  "boundary": "ends at plan re-review; no implementation started"
+}

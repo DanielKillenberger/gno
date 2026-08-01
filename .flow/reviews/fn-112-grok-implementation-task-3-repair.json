@@ -1,0 +1,108 @@
+{
+  "schema": "fn-112-grok-implementation-task-3-repair",
+  "schema_version": 1,
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.3",
+  "owner": "Grok 4.5",
+  "canonical_model": "grok-4.5",
+  "session_id": "019fb8d5-7418-7a11-963b-1a206a7af924",
+  "branch": "feat/native-pdf-renderer",
+  "prior_review": {
+    "path": ".flow/reviews/fn-112-sol-impl-review-task-3.json",
+    "verdict": "NEEDS_WORK",
+    "blocking": [
+      "I3-01",
+      "I3-02",
+      "I3-03",
+      "I3-04",
+      "I3-05"
+    ]
+  },
+  "prior_implementation_receipt": {
+    "path": ".flow/reviews/fn-112-grok-implementation-task-3.json",
+    "status": "superseded_incomplete"
+  },
+  "dispositions": {
+    "I3-01": {
+      "status": "superseded_incomplete",
+      "summary": "IO drives slot.visible/active; removed setVisiblePages; FakeIntersectionObserver harness with 200 mixed-geometry slots; renderStart only near observed+overscan; lazy getPage; live canvas <=10; eviction zeros canvases."
+    },
+    "I3-02": {
+      "status": "fixed",
+      "summary": "renderStart.scale is logical currentScale; cancelClaim single-owner; exact seq start1<cancel1<cancelledSettle1<start2<terminal2; unique taskIds; monotonic genIds; one settle/start."
+    },
+    "I3-03": {
+      "status": "superseded_incomplete",
+      "summary": "Retained TextLayer: create+render once per page identity; scale uses .update(); cancel on identity teardown/unmount; gen guards after every await; tests assert render once, update on zoom, cancel, stale async no write."
+    },
+    "I3-04": {
+      "status": "fixed",
+      "summary": "One teardown owner per load: never-loaded -> task.destroy only, no documentDestroy; viewer-owned -> proxy.destroy once + documentDestroy once; stale orphan proxy.destroy without metric; exact count tests."
+    },
+    "I3-05": {
+      "status": "fixed",
+      "summary": "Pre-start failures zero canvas + page.cleanup, no renderStart; failed settle once then dispose; disposeAll() awaited barrier; strict tests for null ctx, sync throw, failed promise, disposeAll."
+    }
+  },
+  "changed_files": [
+    "src/serve/public/hooks/use-pdf-document.ts",
+    "src/serve/public/hooks/use-pdf-pages.ts",
+    "src/serve/public/components/pdf/PdfPageView.tsx",
+    "test/serve/public/hooks/use-pdf-document.dom.test.tsx",
+    "test/serve/public/hooks/use-pdf-pages.dom.test.tsx",
+    "test/serve/public/components/pdf/PdfPageView.dom.test.tsx",
+    ".flow/reviews/fn-112-grok-implementation-task-3.json",
+    ".flow/reviews/fn-112-grok-implementation-task-3.md",
+    ".flow/reviews/fn-112-grok-implementation-task-3-repair.json",
+    ".flow/reviews/fn-112-grok-implementation-task-3-repair.md"
+  ],
+  "commands": [
+    {
+      "command": "bun test test/serve/public/components/pdf test/serve/public/hooks",
+      "exit_status": 0,
+      "result": "20 pass, 0 fail"
+    },
+    {
+      "command": "bun run test:web",
+      "exit_status": 0,
+      "result": "227 pass, 0 fail"
+    },
+    {
+      "command": "bun test task .1/.2 focused regressions",
+      "exit_status": 0,
+      "result": "67 pass"
+    },
+    {
+      "command": "bun run lint:check",
+      "exit_status": 0,
+      "result": "0 warnings/errors"
+    },
+    {
+      "command": "bunx tsc --noEmit",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "rg pdfjs-dist imports in src/",
+      "exit_status": 0,
+      "result": "only src/serve/public/lib/pdf.ts"
+    },
+    {
+      "command": ".flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer --json",
+      "exit_status": 0,
+      "result": "valid: true"
+    }
+  ],
+  "task_status_after": "done",
+  "remaining_gate": "independent Sol re-review of task .3",
+  "no_sol_ship_claimed": true,
+  "finished_at": "2026-07-31T17:44:57Z",
+  "status": "superseded_incomplete",
+  "superseded_by": ".flow/reviews/fn-112-grok-implementation-task-3-repair-round2.json",
+  "note": "I3-01 canvas proof and I3-03 stale tests incomplete per Sol rereview; CSS I3-06 open. Superseded by repair-round2."
+}

@@ -157,6 +157,66 @@ export function assertUserGnoStateUnchanged(
   }
 }
 
+/**
+ * Diagnostics only — renders a PRIVACY-SAFE before/after sentinel summary for
+ * durable review artifacts.
+ *
+ * The full in-memory snapshots (including per-file SHA-256) are still captured
+ * and still compared by `assertUserGnoStateUnchanged`; only what gets *written
+ * to a durable artifact* is narrowed here. Deliberately never emitted:
+ *
+ *   - absolute paths (they carry the real user's home directory),
+ *   - any content-derived hash: for a credential-bearing config file that hash
+ *     is a persistent verifier/fingerprint of the secret, and it is not needed
+ *     to prove state is unchanged,
+ *   - filenames, sizes, modes or timestamps of files under the CONFIG root,
+ *     which is the credential-bearing location.
+ *
+ * What remains is sufficient to prove the isolation claim: per-root kind,
+ * existence, file count, byte total, and the actual before/after equality
+ * result. For the data root — product-generated index filenames, no credential
+ * risk — per-file name and size are kept as the "non-sensitive database/stat
+ * evidence" the gate asks for.
+ */
+export function formatUserGnoSentinelSafeDetail(
+  before: UserGnoSentinel,
+  after: UserGnoSentinel
+): string {
+  const lines: string[] = [
+    "[gno-sentinel] privacy-safe before/after summary",
+    "[gno-sentinel]   (absolute paths, content hashes, and all config-root file",
+    "[gno-sentinel]    names/sizes/modes/mtimes are intentionally NOT recorded)",
+  ];
+  for (const [key, beforeRoot] of Object.entries(before.roots)) {
+    const afterRoot = after.roots[key];
+    const kind = beforeRoot.kind;
+    const unchanged =
+      afterRoot !== undefined && Bun.deepEquals(beforeRoot, afterRoot, true);
+    lines.push(
+      `[gno-sentinel]   root <${kind}-root> exists=${beforeRoot.exists} ` +
+        `count(before/after)=${beforeRoot.count}/${afterRoot?.count ?? "n/a"} ` +
+        `bytes(before/after)=${beforeRoot.bytes}/${afterRoot?.bytes ?? "n/a"} ` +
+        `unchanged=${unchanged}`
+    );
+    if (kind === "config") {
+      lines.push(
+        "[gno-sentinel]     <config root contents redacted — credential-bearing;" +
+          " equality proven by the full-snapshot assertion above>"
+      );
+      continue;
+    }
+    for (const file of beforeRoot.files) {
+      const match = afterRoot?.files.find(
+        (f) => f.relativePath === file.relativePath
+      );
+      lines.push(
+        `[gno-sentinel]     ${file.relativePath} size(before/after)=${file.size}/${match?.size ?? "n/a"}`
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
 export function formatUserGnoSentinelProof(sentinel: UserGnoSentinel): string {
   const roots = Object.values(sentinel.roots);
   const files = roots.reduce((total, root) => total + root.count, 0);
@@ -170,4 +230,18 @@ export async function verifyUserGnoStateUnchanged(
   const after = await snapshotUserGnoState();
   assertUserGnoStateUnchanged(before, after);
   return formatUserGnoSentinelProof(after);
+}
+
+/**
+ * Same verification, additionally returning the exact `after` snapshot that was
+ * compared — so a caller can log the real before/after values instead of taking
+ * a second, potentially different snapshot purely for reporting. The assertion
+ * is identical to `verifyUserGnoStateUnchanged`.
+ */
+export async function verifyUserGnoStateUnchangedDetailed(
+  before: UserGnoSentinel
+): Promise<{ proof: string; after: UserGnoSentinel }> {
+  const after = await snapshotUserGnoState();
+  assertUserGnoStateUnchanged(before, after);
+  return { proof: formatUserGnoSentinelProof(after), after };
 }

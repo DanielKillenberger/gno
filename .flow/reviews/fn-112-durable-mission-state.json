@@ -1,0 +1,94 @@
+{
+  "schema": "fn-112-durable-mission-state",
+  "schema_version": 1,
+  "updated_at": "2026-08-01T17:05:00Z",
+  "service": "fn112-pdf-build.service",
+  "major_gate": "task-.6 round-6 repair complete \u2014 awaiting fresh independent Sol round-7 review",
+  "owner": {
+    "orchestrator": "Hermes full process",
+    "writer": "Claude Opus 5 medium \u2014 task-.6 round-6 repair transaction (complete; no writer currently editing)",
+    "reviewer": null,
+    "claude_session": "5ff94573-c8ee-4297-96d9-f8d27360de84"
+  },
+  "repository": {
+    "branch": "feat/native-pdf-renderer",
+    "head": "bb994b580356a41a31093fea85b06993c1a18e4c",
+    "base": "bb994b580356a41a31093fea85b06993c1a18e4c",
+    "working_tree": "coherent uncommitted fn-112 implementation, durable gate artifacts, browser evidence, and Flow receipts"
+  },
+  "flow": {
+    "spec": "fn-112-native-pdfjs-document-renderer",
+    "task_6": "in_progress; round-6 blockers closed by this owner; unaccepted pending Sol",
+    "task_7": "todo (untouched)"
+  },
+  "latest_verified_delta": "Sol round 6 confirmed the four earliest findings RESOLVED but held SOL6-R5-IMPL-01/02 open behind two new blockers, both now closed. SOL6-R6-IMPL-01: both light rail captures had blank PDF canvases because the non-blank wait ran BEFORE data-theme was applied, so a theme-induced rerender could blank them unnoticed. The harness now re-establishes the render after each theme settles and asserts the capture subject (>=1 data-rendered canvas AND the fixture's known glyph run) immediately before every rail capture, for both themes at both widths; themeRailSubjects records 3 rendered canvases and hasKnownGlyphRun=true for all four cells. All 8 PNGs were inspected directly: every rail shows the rendered fixture page in its correct palette, the w900 overview clips show the Overview card, the w1380 clips show the properties rail, and all 8 hashes stay distinct with the round-5 assertions preserved. SOL6-R6-IMPL-02: the concrete sensitive config filename still appeared in the INDEX, both receipts and a source comment; it is now the generic phrase everywhere, verified repo-wide with runtime-constructed patterns printing counts only \u2014 0 occurrences of the filename and 0 of the prior verifier across 3466 files. The aggregate config equality output and the complete in-memory snapshot assertion are unchanged. No production source changed this round.",
+  "durable_artifacts": {
+    "root": ".flow/reviews/fn-112-task-6-gates/",
+    "index": ".flow/reviews/fn-112-task-6-gates/INDEX.md",
+    "negative_control_harness": ".flow/reviews/fn-112-task-6-gates/negative-control.sh",
+    "negative_control_log": ".flow/reviews/fn-112-task-6-gates/negative-control.log",
+    "package": ".flow/reviews/fn-112-task-6-gates/gate-package.log",
+    "browser": ".flow/reviews/fn-112-task-6-gates/gate-e2e.log",
+    "web": ".flow/reviews/fn-112-task-6-gates/gate-test-web.log",
+    "full": ".flow/reviews/fn-112-task-6-gates/gate-full-bun-test.log",
+    "browser_evidence_dir": ".flow/reviews/fn-112-task-6-evidence/",
+    "visual_theme_proof": ".flow/reviews/fn-112-task-6-evidence/visual-theme-proof.json",
+    "scripts_tests": ".flow/reviews/fn-112-task-6-gates/gate-scripts.log"
+  },
+  "tests": [
+    "bun test use-pdf-pages.dom.test.tsx: 14 pass, 0 fail",
+    "bun test lib/pdf.test.ts: 23 pass, 0 fail",
+    "bun test components/pdf: 44 pass, 0 fail",
+    "bun test test/scripts/: 33 pass, 0 fail",
+    "bun run test:web: 295 pass, 0 fail (WEB_EXIT=0)",
+    "bun test (full): 3595 pass, 2 skip, 0 fail, 28590 assertions, 439 files, 163.70s (FULL_EXIT=0)",
+    "bun run test:e2e:pdf: PDF viewer smoke PASSED (E2E_EXIT=0); 8 distinct visual hashes; all 8 PNGs visually verified",
+    "bun run test:package: installed-binary GET/HEAD byte equality + privacy-safe sentinel (PKG_EXIT=0)",
+    "bun run typecheck: exit 0",
+    "bun run lint:check: 0 warnings, 0 errors",
+    "git diff --check: exit 0",
+    "flowctl validate: valid true, 0 errors"
+  ],
+  "measured_budgets": {
+    "p1_small_ms": 388.4,
+    "p1_large_ms": 2087.9,
+    "p2_max_live_canvases": 3,
+    "p3_render_starts": 6,
+    "p3_orphans": 0,
+    "p3_doubles": 0,
+    "p3_dropped": 0,
+    "p3_final_window_rendered": 3,
+    "p4a_19th_of_20_ms": 52.0,
+    "p4b_reset_boundary": {
+      "A": 45,
+      "B": 36
+    },
+    "p6_late_starts": 0,
+    "visual_distinct_screenshot_hashes": 8,
+    "budget_failures": []
+  },
+  "review": {
+    "reviewer": "Sol gpt-5.6-sol",
+    "round": 6,
+    "verdict": "NEEDS_WORK (superseded by this repair; not yet re-reviewed)",
+    "open_findings": [],
+    "closed_findings": [
+      "SOL6-R3-IMPL-01",
+      "SOL6-R3-IMPL-02",
+      "SOL6-R4-IMPL-01",
+      "SOL6-R4-IMPL-02",
+      "SOL6-R5-IMPL-01",
+      "SOL6-R5-IMPL-02",
+      "SOL6-R6-IMPL-01",
+      "SOL6-R6-IMPL-02"
+    ],
+    "next_review_round": 7
+  },
+  "next_action": "Launch fresh independent Sol re-review (round 7) of task .6 against .flow/reviews/fn-112-task-6-transaction-receipt.{md,json}, the durable gates in .flow/reviews/fn-112-task-6-gates/, and the regenerated evidence in .flow/reviews/fn-112-task-6-evidence/ (incl. visual-theme-proof.json themeRailSubjects and the 8 PNGs). Do not accept task .6 without Sol's SHIP.",
+  "publication": {
+    "commits": [],
+    "pushed_sha": null,
+    "pr": null,
+    "merged": false
+  }
+}

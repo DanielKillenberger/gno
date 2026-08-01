@@ -1,0 +1,36 @@
+$ bun scripts/pdf-viewer-smoke.ts
+[pdf-smoke] temp=/tmp/gno-pdf-viewer-smoke-AkeI4a port=44248 artifacts=<home>/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence
+[pdf-smoke] Generating 200-page large fixture…
+[pdf-smoke] large fixture bytes=797319 pages=200 (>131072=2×rangeChunkSize)
+[pdf-smoke] Indexing collection…
+[pdf-smoke] Server healthy
+[pdf-smoke] chromium.launch fallback executablePath=<home>/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome
+[pdf-smoke] CLEAN: viewer-links.pdf (P-1 small)
+[pdf-smoke] CLEAN: standard-font.pdf
+[pdf-smoke] CLEAN: cjk-cmap.pdf
+[pdf-smoke] CLEAN: js-action.pdf
+[pdf-smoke] CLEAN: P-1 large first paint
+[pdf-smoke] CLEAN complete (P-1 small=388ms large=2088ms font=2 cmap=2)
+[pdf-smoke] INTERCEPTION: loading state
+[pdf-smoke] INTERCEPTION: progressive held-Range
+[pdf-smoke] INTERCEPTION: zero-page
+[pdf-smoke] INTERCEPTION: corrupt
+[pdf-smoke] extracted text unavailable for corrupt.pdf — skip fallback notice for corrupt
+[pdf-smoke] INTERCEPTION: password
+[pdf-smoke] extracted text unavailable for password-protected.pdf — skip fallback notice for password
+[pdf-smoke] INTERCEPTION: network abort
+[pdf-smoke] network abort: state-card fixture=zero-page.pdf
+[pdf-smoke] INTERCEPTION: bootstrap worker 404
+[pdf-smoke] INTERCEPTION: aux cMap 404 ×2
+[pdf-smoke] INTERCEPTION: aux standard-font 404 ×2
+[pdf-smoke] INTERCEPTION: alignment
+[pdf-smoke] INTERCEPTION: P-2 live canvas ceiling
+[pdf-smoke] INTERCEPTION: P-3 scroll procedure
+[pdf-smoke] INTERCEPTION: P-4a sequential zoom 100%↔200%
+[pdf-smoke] INTERCEPTION: P-4b cancel ordering
+[pdf-smoke] INTERCEPTION: P-5 canvas caps
+[pdf-smoke] INTERCEPTION: P-6 destroy
+[pdf-smoke] INTERCEPTION: visual QA matrix
+[pdf-smoke] INTERCEPTION complete
+[pdf-smoke] PDF viewer smoke PASSED
+E2E_EXIT=0

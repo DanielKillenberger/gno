@@ -1,0 +1,118 @@
+{
+  "schema": "fn-112-grok-implementation-task-4-repair",
+  "schema_version": 1,
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.4",
+  "owner": "Grok 4.5",
+  "canonical_model": "grok-4.5",
+  "session_id": "019fb8d5-7418-7a11-963b-1a206a7af924",
+  "branch": "feat/native-pdf-renderer",
+  "prior_review": {
+    "path": ".flow/reviews/fn-112-sol-impl-review-task-4.json",
+    "verdict": "NEEDS_WORK",
+    "blocking_open": ["B1", "B2", "B3", "B4"]
+  },
+  "prior_implementation": {
+    "path": ".flow/reviews/fn-112-grok-implementation-task-4.json",
+    "status": "superseded_incomplete"
+  },
+  "dispositions": {
+    "B1": {
+      "status": "fixed",
+      "summary": "loading=status loading only; empty=ready&&numPages===0; progressive=ready&&numPages>0; real usePdfDocument zero-page integration loading→empty"
+    },
+    "B2": {
+      "status": "fixed",
+      "summary": "digits incl 0 clamp 1..N; MIN/MAX zoom button disable; zoom step no-op at bounds no gen/preventDefault; exact tests"
+    },
+    "B3": {
+      "status": "fixed",
+      "summary": "flat StatePanel/loading no rounded/border/bg/shadow Card chrome; error role=alert; loading/empty role=status; class assertions"
+    },
+    "B4": {
+      "status": "fixed",
+      "summary": "PdfViewerProps exactly four keys; pdf-viewer-deps TestDepsProvider internal-only; real usePdfPages gen/cancel metrics integration on viewer zoom"
+    },
+    "responsive_observation": {
+      "status": "fixed",
+      "summary": "structural basis-full lg:hidden break between A+B and C+D; non-vacuous flex-wrap/order/label/input tests"
+    }
+  },
+  "changed_files": [
+    "src/serve/public/components/pdf/PdfViewer.tsx",
+    "src/serve/public/components/pdf/PdfToolbar.tsx",
+    "src/serve/public/components/pdf/pdf-viewer-deps.tsx",
+    "test/serve/public/components/pdf/PdfViewer.dom.test.tsx",
+    "test/serve/public/components/pdf/PdfToolbar.dom.test.tsx",
+    ".flow/reviews/fn-112-grok-implementation-task-4.md",
+    ".flow/reviews/fn-112-grok-implementation-task-4.json",
+    ".flow/reviews/fn-112-grok-implementation-task-4-repair.md",
+    ".flow/reviews/fn-112-grok-implementation-task-4-repair.json"
+  ],
+  "baseline_comparison": {
+    "receipt": ".flow/reviews/fn-112-baseline-receipt.json",
+    "base_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+    "test_web_baseline_pass": 186,
+    "test_web_current_pass": 260,
+    "note": "Additive fn-112 suites; no new failures vs baseline"
+  },
+  "preserved": {
+    "plan_ship": true,
+    "tasks_1_3_sol_ship": true,
+    "no_architecture_edits": true,
+    "no_spec_edits": true,
+    "no_task_5_plus": true,
+    "no_commit_push_pr": true
+  },
+  "commands": [
+    {
+      "command": "bun test test/serve/public/components/pdf",
+      "exit_status": 0,
+      "result": "39 pass, 0 fail"
+    },
+    {
+      "command": "bun test hooks + lib/pdf + fn112 routes + security",
+      "exit_status": 0,
+      "result": "69 pass, 0 fail"
+    },
+    {
+      "command": "bun run test:web",
+      "exit_status": 0,
+      "result": "260 pass, 0 fail (baseline 186)"
+    },
+    {
+      "command": "bun run lint:check",
+      "exit_status": 0,
+      "result": "0 warnings/errors, format clean"
+    },
+    {
+      "command": "bunx tsc --noEmit",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "forbidden greps",
+      "exit_status": 0,
+      "result": "clean (no pdfjs-dist/xl/hex/usePdf*Impl in components)"
+    },
+    {
+      "command": ".flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer",
+      "exit_status": 0,
+      "result": "valid"
+    }
+  ],
+  "no_sol_ship_claimed": true,
+  "remaining_gate": "independent Sol re-review of task .4 repair",
+  "task_status_after": "done",
+  "finished_at": "2026-07-31T19:30:00Z",
+  "status": "superseded_incomplete_for_B4_R2",
+  "superseded_by": ".flow/reviews/fn-112-grok-implementation-task-4-repair-round2.{md,json}",
+  "superseded_reason": "Sol re-review NEEDS_WORK B4-R2: actual-usePdfPages composition test timed out under focused 5s default; production ensureRendered identity did not re-enter after gen cancel",
+  "superseded_at": "2026-07-31T19:40:00Z",
+  "note": "B1–B3 and non-B4-R2 B4 source fixes remain valid; only B4-R2 composition proof/production re-entry superseded"
+}

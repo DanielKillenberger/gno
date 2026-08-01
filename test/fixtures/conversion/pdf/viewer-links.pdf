@@ -1,0 +1,69 @@
+%PDF-1.4
+1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
+2 0 obj<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R 7 0 R] /Count 5 >>endobj
+3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 13 0 R >> >> /Annots [14 0 R 15 0 R 16 0 R] >>endobj
+4 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 9 0 R /Resources << /Font << /F1 13 0 R >> >> >>endobj
+5 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 10 0 R /Resources << /Font << /F1 13 0 R >> >> >>endobj
+6 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 11 0 R /Resources << /Font << /F1 13 0 R >> >> >>endobj
+7 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 12 0 R /Resources << /Font << /F1 13 0 R >> >> >>endobj
+8 0 obj<< /Length 413 >>stream
+BT /F1 20 Tf 50 742 Td (Viewer Link Fixture - Page 1) Tj ET
+BT /F1 14 Tf 50 692 Td (KNOWN_GLYPH_RUN_ALPHA the quick brown fox) Tj ET
+BT /F1 12 Tf 50 662 Td (Selectable text for alignment tests at multiple zooms.) Tj ET
+BT /F1 12 Tf 50 612 Td (External HTTPS link below \(annotation\).) Tj ET
+BT /F1 12 Tf 50 572 Td (JavaScript link \(must be inert\).) Tj ET
+BT /F1 12 Tf 50 532 Td (Internal jump to page 3.) Tj ET
+endstream
+endobj
+9 0 obj<< /Length 218 >>stream
+BT /F1 20 Tf 50 742 Td (Viewer Link Fixture - Page 2) Tj ET
+BT /F1 14 Tf 50 692 Td (KNOWN_GLYPH_RUN_ALPHA the quick brown fox) Tj ET
+BT /F1 12 Tf 50 662 Td (Selectable text for alignment tests at multiple zooms.) Tj ET
+endstream
+endobj
+10 0 obj<< /Length 274 >>stream
+BT /F1 20 Tf 50 742 Td (Viewer Link Fixture - Page 3) Tj ET
+BT /F1 14 Tf 50 692 Td (KNOWN_GLYPH_RUN_ALPHA the quick brown fox) Tj ET
+BT /F1 12 Tf 50 662 Td (Selectable text for alignment tests at multiple zooms.) Tj ET
+BT /F1 16 Tf 50 632 Td (INTERNAL_DEST_PAGE_THREE) Tj ET
+endstream
+endobj
+11 0 obj<< /Length 218 >>stream
+BT /F1 20 Tf 50 742 Td (Viewer Link Fixture - Page 4) Tj ET
+BT /F1 14 Tf 50 692 Td (KNOWN_GLYPH_RUN_ALPHA the quick brown fox) Tj ET
+BT /F1 12 Tf 50 662 Td (Selectable text for alignment tests at multiple zooms.) Tj ET
+endstream
+endobj
+12 0 obj<< /Length 218 >>stream
+BT /F1 20 Tf 50 742 Td (Viewer Link Fixture - Page 5) Tj ET
+BT /F1 14 Tf 50 692 Td (KNOWN_GLYPH_RUN_ALPHA the quick brown fox) Tj ET
+BT /F1 12 Tf 50 662 Td (Selectable text for alignment tests at multiple zooms.) Tj ET
+endstream
+endobj
+13 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
+14 0 obj<< /Type /Annot /Subtype /Link /Rect [50 592 280 622] /Border [0 0 1] /A << /Type /Action /S /URI /URI (https://example.com/gno-pdf-viewer) >> >>endobj
+15 0 obj<< /Type /Annot /Subtype /Link /Rect [50 552 280 582] /Border [0 0 1] /A << /Type /Action /S /URI /URI (javascript:alert\('xss'\)) >> >>endobj
+16 0 obj<< /Type /Annot /Subtype /Link /Rect [50 512 280 542] /Border [0 0 1] /A << /Type /Action /S /GoTo /D [5 0 R /XYZ 0 792 null] >> >>endobj
+xref
+0 17
+0000000000 65535 f 
+0000000009 00000 n 
+0000000056 00000 n 
+0000000135 00000 n 
+0000000291 00000 n 
+0000000416 00000 n 
+0000000542 00000 n 
+0000000668 00000 n 
+0000000794 00000 n 
+0000001256 00000 n 
+0000001523 00000 n 
+0000001847 00000 n 
+0000002115 00000 n 
+0000002383 00000 n 
+0000002452 00000 n 
+0000002612 00000 n 
+0000002763 00000 n 
+trailer<< /Size 17 /Root 1 0 R >>
+startxref
+2909
+%%EOF

@@ -219,6 +219,17 @@ export const NETWORK_BOUNDARY_INVENTORY = [
     enforcement: "loopback_only",
   },
   {
+    // Loopback self-request that warms the SPA shell cache from the server's
+    // own bound port (127.0.0.1). Carries no collection data and never leaves
+    // the host.
+    id: "serve-spa-shell",
+    key: "src/serve/server.ts::fetch#1",
+    path: "src/serve/server.ts",
+    primitive: "fetch",
+    action: "serve",
+    enforcement: "loopback_only",
+  },
+  {
     id: "http-mcp-tools",
     key: "logical::http-mcp-tools",
     path: "src/mcp/http-egress.ts",

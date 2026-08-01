@@ -1,0 +1,32 @@
+{
+  "branch_name": "feat/native-pdf-renderer",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-07-31T13:49:42.072201Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-112-native-pdfjs-document-renderer",
+  "impl_review_rounds": {},
+  "next_task": 6,
+  "plan_review_rounds": 2,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-07-31T23:13:08.613762Z",
+  "ready": true,
+  "spec_path": ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+  "status": "open",
+  "title": "Native PDF.js Document Renderer",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-07-31T23:13:08.613762Z"
+}

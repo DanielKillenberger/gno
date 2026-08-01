@@ -1,0 +1,1918 @@
+{
+  "machine": {
+    "platform": "linux",
+    "arch": "x64",
+    "bun": "1.3.14",
+    "startedAt": "2026-08-01T15:28:07.508Z",
+    "finishedAt": "2026-08-01T15:30:14.874Z"
+  },
+  "modes": {
+    "CLEAN": {
+      "mode": "CLEAN",
+      "pageHeaders": {
+        "content-length": "489",
+        "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; connect-src 'self'",
+        "content-type": "text/html;charset=utf-8",
+        "cross-origin-resource-policy": "same-origin",
+        "date": "Sat, 01 Aug 2026 15:28:11 GMT",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "p1SmallMs": 388.40000009536743,
+      "p1SmallMarks": {
+        "ms": 388.40000009536743,
+        "contentLoadMark": 1433.7000000476837,
+        "firstPaintMark": 1822.1000001430511
+      },
+      "viewerLinksPageIndicator": "1 / 5",
+      "knownGlyphSelection": {
+        "selection": {
+          "top": 406.171875,
+          "left": 395.1875,
+          "width": 369.625,
+          "height": 17
+        },
+        "glyph": {
+          "top": 407.171875,
+          "left": 395.1875,
+          "width": 369.625,
+          "height": 16
+        },
+        "canvas": {
+          "top": 306,
+          "left": 338,
+          "width": 700,
+          "height": 905.875
+        },
+        "pageNumber": "1",
+        "overlapOk": true,
+        "maxDelta": 1
+      },
+      "externalLink": {
+        "href": "https://example.com/gno-pdf-viewer",
+        "target": "_blank",
+        "rel": "noopener noreferrer"
+      },
+      "internalJump": {
+        "before": "1 / 5",
+        "after": "1 / 5"
+      },
+      "standardFontAssets": [
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+          "bodySize": 139512
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+          "bodySize": 139512
+        }
+      ],
+      "cMapAssets": [
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+          "bodySize": 25439
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/cmaps/Adobe-Japan1-UCS2.bcmap",
+          "bodySize": 40951
+        }
+      ],
+      "workerAssets": [
+        "http://127.0.0.1:44248/vendor/pdfjs/pdf.worker.min.mjs",
+        "http://127.0.0.1:44248/vendor/pdfjs/pdf.worker.min.mjs",
+        "http://127.0.0.1:44248/vendor/pdfjs/pdf.worker.min.mjs"
+      ],
+      "allVendorHits": [
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/pdf.worker.min.mjs",
+          "status": 200,
+          "bodySize": 1232303
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+          "status": 200,
+          "bodySize": 139512
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/pdf.worker.min.mjs",
+          "status": 200,
+          "bodySize": 1232303
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+          "status": 200,
+          "bodySize": 139512
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/pdf.worker.min.mjs",
+          "status": 200,
+          "bodySize": 1232303
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap",
+          "status": 200,
+          "bodySize": 25439
+        },
+        {
+          "url": "http://127.0.0.1:44248/vendor/pdfjs/cmaps/Adobe-Japan1-UCS2.bcmap",
+          "status": 200,
+          "bodySize": 40951
+        }
+      ],
+      "standardFontCanvasInk": true,
+      "cjkCanvasInk": true,
+      "cjkTextLayerSample": "ABC",
+      "jsActionDialog": false,
+      "docAssetHeaders": {
+        "status": 200,
+        "accept-ranges": "bytes",
+        "cache-control": "no-store",
+        "content-disposition": "inline; filename*=UTF-8''viewer-links.pdf",
+        "content-length": "3314",
+        "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; connect-src 'self'",
+        "content-type": "application/pdf",
+        "cross-origin-resource-policy": "same-origin",
+        "date": "Sat, 01 Aug 2026 15:28:38 GMT",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "nonSelfRequests": [],
+      "p1LargeMs": 2087.899999856949,
+      "p1LargeMarks": {
+        "ms": 2087.899999856949,
+        "contentLoadMark": 181.30000019073486,
+        "firstPaintMark": 2269.2000000476837
+      }
+    },
+    "INTERCEPTION": {
+      "mode": "INTERCEPTION",
+      "states": {
+        "loading": {
+          "text": "LOADINGPreparing document…"
+        },
+        "progressive": {
+          "hasColumn": true,
+          "rendered": 1,
+          "unrendered": 199,
+          "stateCards": 0,
+          "pending": {
+            "width": 700,
+            "height": 905.875,
+            "ratio": 0.7727335449151373
+          },
+          "ratioTol": 0.01,
+          "heldRanges": 1,
+          "controlLog": [
+            {
+              "action": "request",
+              "range": null,
+              "url": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Flarge-200.pdf&path=large-200.pdf",
+              "method": "GET",
+              "ts": 1785598126466
+            },
+            {
+              "action": "first-no-range-passthrough",
+              "status": 200,
+              "contentLength": "797319",
+              "acceptRanges": "bytes",
+              "total": 797319,
+              "expectedContentLength": "797319",
+              "truncated": false,
+              "headerRewrite": false,
+              "synthetic": false,
+              "firstNoRange": true,
+              "note": "route.fetch() + route.fulfill({response}) verbatim production 200"
+            },
+            {
+              "action": "request",
+              "range": "bytes=0-65535",
+              "url": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Flarge-200.pdf&path=large-200.pdf",
+              "method": "GET",
+              "ts": 1785598126523
+            },
+            {
+              "action": "release",
+              "range": "bytes=0-65535",
+              "start": 0,
+              "end": 65535,
+              "queueDepth": 0,
+              "ts": 1785598130535
+            },
+            {
+              "action": "request",
+              "range": "bytes=786432-797318",
+              "url": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Flarge-200.pdf&path=large-200.pdf",
+              "method": "GET",
+              "ts": 1785598130543
+            },
+            {
+              "action": "release",
+              "range": "bytes=786432-797318",
+              "start": 786432,
+              "end": 797318,
+              "queueDepth": 0,
+              "ts": 1785598136045
+            },
+            {
+              "action": "request",
+              "range": "bytes=65536-131071",
+              "url": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Flarge-200.pdf&path=large-200.pdf",
+              "method": "GET",
+              "ts": 1785598136239
+            },
+            {
+              "action": "release",
+              "range": "bytes=65536-131071",
+              "start": 65536,
+              "end": 131071,
+              "queueDepth": 0,
+              "ts": 1785598136652
+            }
+          ],
+          "firstRequest": "honest-passthrough-200",
+          "laterRangesSyntheticTimingOnly": true,
+          "evidenceScope": "interception: first Range-less response is verbatim production 200; only later Range response *timing* is synthetic — proves progressive rendering contract only; NOT network timing, performance, or zero-non-self",
+          "mediaBoxOracle": [
+            0,
+            0,
+            612,
+            792
+          ],
+          "largeBytes": 797319,
+          "minRangeEligibleBytes": 131072,
+          "pageCount": 200
+        },
+        "empty": {
+          "prevDisabled": true,
+          "nextDisabled": true
+        },
+        "corrupt": {
+          "hasCard": 1,
+          "hasFallback": 0
+        },
+        "password": {
+          "hasCard": 1
+        },
+        "network": {
+          "card": 1,
+          "cardFixture": "zero-page.pdf",
+          "fallbackFixture": "viewer-links.pdf"
+        },
+        "bootstrap": {
+          "text": "VIEWER UNAVAILABLEThe PDF viewer could not start in this window. Download the original to read it.Try againDownload original",
+          "cardFixture": "zero-page.pdf",
+          "fallbackFixture": "viewer-links.pdf"
+        }
+      },
+      "auxCmap404": [
+        {
+          "run": 0,
+          "attempted404": true,
+          "status404": 404,
+          "classification": "warn:10a263cdd2961f57:blank=1:text=0",
+          "warnings": [
+            "Setting the document's base URI to 'http://127.0.0.1:44248/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+            "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+            "Failed to load resource: the server responded with a status of 404 (Not Found)",
+            "Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap\".",
+            "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap"
+          ],
+          "warningSignature": "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap|Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJI",
+          "textLayerLen": 0,
+          "nonBlank": false,
+          "actionable": {
+            "toolbar": true,
+            "toggle": true,
+            "download": true,
+            "crashed": false
+          },
+          "actionProof": {
+            "toggleWorks": true,
+            "zoomBefore": "100%",
+            "zoomAfter": "110%",
+            "downloadHref": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Fcjk-cmap.pdf&path=cjk-cmap.pdf",
+            "downloadStatus": 200,
+            "downloadBytes": 1053
+          },
+          "nonSelfDelta": 0
+        },
+        {
+          "run": 1,
+          "attempted404": true,
+          "status404": 404,
+          "classification": "warn:10a263cdd2961f57:blank=1:text=0",
+          "warnings": [
+            "Setting the document's base URI to 'http://127.0.0.1:44248/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+            "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+            "Failed to load resource: the server responded with a status of 404 (Not Found)",
+            "Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap\".",
+            "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap"
+          ],
+          "warningSignature": "Warning: Error during font loading: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap|Warning: loadFont - translateFont failed: \"UnknownErrorException: Unable to load CMap data at: /vendor/pdfjs/cmaps/UniJI",
+          "textLayerLen": 0,
+          "nonBlank": false,
+          "actionable": {
+            "toolbar": true,
+            "toggle": true,
+            "download": true,
+            "crashed": false
+          },
+          "actionProof": {
+            "toggleWorks": true,
+            "zoomBefore": "100%",
+            "zoomAfter": "110%",
+            "downloadHref": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Fcjk-cmap.pdf&path=cjk-cmap.pdf",
+            "downloadStatus": 200,
+            "downloadBytes": 1053
+          },
+          "nonSelfDelta": 0
+        }
+      ],
+      "auxFont404": [
+        {
+          "run": 0,
+          "attempted404": true,
+          "classification": "warn:cfd1b9925954fb6d:blank=0:text=31",
+          "warnings": [
+            "Setting the document's base URI to 'http://127.0.0.1:44248/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+            "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+            "Failed to load resource: the server responded with a status of 404 (Not Found)",
+            "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf"
+          ],
+          "warningSignature": "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+          "textLayerLen": 31,
+          "nonBlank": true,
+          "actionable": {
+            "toolbar": true,
+            "toggle": true,
+            "download": true,
+            "crashed": false
+          },
+          "actionProof": {
+            "toggleWorks": true,
+            "zoomBefore": "100%",
+            "zoomAfter": "110%",
+            "downloadHref": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Fstandard-font.pdf&path=standard-font.pdf",
+            "downloadStatus": 200,
+            "downloadBytes": 595
+          },
+          "nonSelfDelta": 0
+        },
+        {
+          "run": 1,
+          "attempted404": true,
+          "classification": "warn:cfd1b9925954fb6d:blank=0:text=31",
+          "warnings": [
+            "Setting the document's base URI to 'http://127.0.0.1:44248/' violates the following Content Security Policy directive: \"base-uri 'none'\". The action has been blocked.",
+            "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+            "Failed to load resource: the server responded with a status of 404 (Not Found)",
+            "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf"
+          ],
+          "warningSignature": "Warning: UnknownErrorException: Unable to load font data at: /vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+          "textLayerLen": 31,
+          "nonBlank": true,
+          "actionable": {
+            "toolbar": true,
+            "toggle": true,
+            "download": true,
+            "crashed": false
+          },
+          "actionProof": {
+            "toggleWorks": true,
+            "zoomBefore": "100%",
+            "zoomAfter": "110%",
+            "downloadHref": "http://127.0.0.1:44248/api/doc-asset?uri=gno%3A%2F%2Fnotes%2Fstandard-font.pdf&path=standard-font.pdf",
+            "downloadStatus": 200,
+            "downloadBytes": 595
+          },
+          "nonSelfDelta": 0
+        }
+      ],
+      "alignment": {
+        "tolerancePx": 6,
+        "at100": true,
+        "atFitWidth": true,
+        "at200": true,
+        "last": {
+          "selection": {
+            "top": 482.078125,
+            "left": 438,
+            "width": 369.625,
+            "height": 17
+          },
+          "glyph": {
+            "top": 483.078125,
+            "left": 438,
+            "width": 369.625,
+            "height": 16
+          },
+          "canvas": {
+            "top": 306,
+            "left": 338,
+            "width": 1224,
+            "height": 1584
+          },
+          "pageNumber": "1",
+          "overlapOk": true,
+          "maxDelta": 1
+        }
+      },
+      "p2LiveCanvases": [
+        3,
+        0,
+        2,
+        0,
+        2
+      ],
+      "p3": {
+        "renderStarts": 6,
+        "settles": 6,
+        "orphans": 0,
+        "doubles": 0,
+        "dropped": 0,
+        "docId": "d1",
+        "finalWindowRendered": 3
+      },
+      "p4a": {
+        "samples": [
+          49.09999990463257,
+          40.700000047683716,
+          47.80000019073486,
+          40.200000047683716,
+          45.59999990463257,
+          49.09999990463257,
+          46.10000014305115,
+          52,
+          46.700000047683716,
+          49.5,
+          50.299999952316284,
+          49.299999952316284,
+          46,
+          36.799999952316284,
+          48.5,
+          44.799999952316284,
+          48.90000009536743,
+          67.09999990463257,
+          44.69999980926514,
+          47.09999990463257
+        ],
+        "sorted": [
+          36.799999952316284,
+          40.200000047683716,
+          40.700000047683716,
+          44.69999980926514,
+          44.799999952316284,
+          45.59999990463257,
+          46,
+          46.10000014305115,
+          46.700000047683716,
+          47.09999990463257,
+          47.80000019073486,
+          48.5,
+          48.90000009536743,
+          49.09999990463257,
+          49.09999990463257,
+          49.299999952316284,
+          49.5,
+          50.299999952316284,
+          52,
+          67.09999990463257
+        ],
+        "p95": 52,
+        "p95idx": 18,
+        "correlation": [
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              4
+            ],
+            "ms": 49.1
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              5
+            ],
+            "ms": 40.7
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              6
+            ],
+            "ms": 47.8
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              7
+            ],
+            "ms": 40.2
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              8
+            ],
+            "ms": 45.6
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              9
+            ],
+            "ms": 49.1
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              10
+            ],
+            "ms": 46.1
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              11
+            ],
+            "ms": 52
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              12
+            ],
+            "ms": 46.7
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              13
+            ],
+            "ms": 49.5
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              14
+            ],
+            "ms": 50.3
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              15
+            ],
+            "ms": 49.3
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              16
+            ],
+            "ms": 46
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              17
+            ],
+            "ms": 36.8
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              18
+            ],
+            "ms": 48.5
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              19
+            ],
+            "ms": 44.8
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              20
+            ],
+            "ms": 48.9
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              21
+            ],
+            "ms": 67.1
+          },
+          {
+            "target": 200,
+            "targetScale": 2,
+            "starts": 3,
+            "genIds": [
+              22
+            ],
+            "ms": 44.7
+          },
+          {
+            "target": 100,
+            "targetScale": 1,
+            "starts": 3,
+            "genIds": [
+              23
+            ],
+            "ms": 47.1
+          }
+        ]
+      },
+      "p4b": [
+        {
+          "run": "A",
+          "rungIndex": 0,
+          "rung": {
+            "run": "A",
+            "fixture": "viewer-links.pdf",
+            "viewport": {
+              "width": 1380,
+              "height": 900
+            },
+            "dsf": 1
+          },
+          "expectedTransition": "210%",
+          "superseded": {
+            "taskId": "r19",
+            "genId": 4,
+            "scale": 2
+          },
+          "cancelSeq": 13,
+          "cancelledSettleSeq": 16,
+          "replacementStartSeq": 25,
+          "replacementGenId": 5,
+          "supersededScale": 2,
+          "replacementStartScale": 2.1,
+          "replacementCompletedScale": 2.1,
+          "expectedReplacementScale": 2.1,
+          "paint": {
+            "w": 1285,
+            "h": 1663
+          },
+          "entryProof": {
+            "baselineSeq": 6,
+            "maxGenBefore": 1,
+            "entryGenId": 3,
+            "entryScale": 1,
+            "starts": [
+              {
+                "taskId": "r13",
+                "seq": 31,
+                "scale": 1,
+                "genId": 3,
+                "pageNumber": 1
+              },
+              {
+                "taskId": "r14",
+                "seq": 32,
+                "scale": 1,
+                "genId": 3,
+                "pageNumber": 2
+              },
+              {
+                "taskId": "r15",
+                "seq": 33,
+                "scale": 1,
+                "genId": 3,
+                "pageNumber": 3
+              }
+            ],
+            "settles": [
+              {
+                "taskId": "r13",
+                "seq": 34,
+                "scale": 1,
+                "outcome": "completed"
+              },
+              {
+                "taskId": "r14",
+                "seq": 35,
+                "scale": 1,
+                "outcome": "completed"
+              },
+              {
+                "taskId": "r15",
+                "seq": 36,
+                "scale": 1,
+                "outcome": "completed"
+              }
+            ],
+            "quiescenceSeq": 36,
+            "resetBoundarySeq": 36,
+            "postResetSeqHigh": 0,
+            "postResetEventCount": 0,
+            "resetCapacity": 50000
+          },
+          "events": [
+            {
+              "seq": 1,
+              "t": 2390.100000143051,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r16",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 1,
+              "canvasWidth": 612,
+              "canvasHeight": 792
+            },
+            {
+              "seq": 2,
+              "t": 2390.100000143051,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r17",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 1,
+              "canvasWidth": 612,
+              "canvasHeight": 792
+            },
+            {
+              "seq": 3,
+              "t": 2390.2000000476837,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r18",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 1,
+              "canvasWidth": 612,
+              "canvasHeight": 792
+            },
+            {
+              "seq": 4,
+              "t": 2402.4000000953674,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r16",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 5,
+              "t": 2404.100000143051,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r17",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 6,
+              "t": 2404.2999999523163,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r18",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 7,
+              "t": 2405.4000000953674,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r16",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 8,
+              "t": 2405.5,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r17",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 9,
+              "t": 2405.600000143051,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r18",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 10,
+              "t": 2407.7999999523163,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r19",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2,
+              "canvasWidth": 1224,
+              "canvasHeight": 1584
+            },
+            {
+              "seq": 11,
+              "t": 2408.2999999523163,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r20",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2,
+              "canvasWidth": 1224,
+              "canvasHeight": 1584
+            },
+            {
+              "seq": 12,
+              "t": 2408.9000000953674,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r21",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2,
+              "canvasWidth": 1224,
+              "canvasHeight": 1584
+            },
+            {
+              "seq": 13,
+              "t": 2411.2000000476837,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r19",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 14,
+              "t": 2411.2000000476837,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r20",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 15,
+              "t": 2411.2000000476837,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r21",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 16,
+              "t": 2411.4000000953674,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r19",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 17,
+              "t": 2411.4000000953674,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r20",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 18,
+              "t": 2411.4000000953674,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r21",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 19,
+              "t": 2411.5,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r22",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2,
+              "canvasWidth": 1224,
+              "canvasHeight": 1584
+            },
+            {
+              "seq": 20,
+              "t": 2411.5,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r23",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2,
+              "canvasWidth": 1224,
+              "canvasHeight": 1584
+            },
+            {
+              "seq": 21,
+              "t": 2411.5,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r24",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2,
+              "canvasWidth": 1224,
+              "canvasHeight": 1584
+            },
+            {
+              "seq": 22,
+              "t": 2436.100000143051,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r22",
+              "genId": 5,
+              "kind": "renderSettle",
+              "outcome": "completed",
+              "scale": 2,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 23,
+              "t": 2436.2999999523163,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r23",
+              "genId": 5,
+              "kind": "renderSettle",
+              "outcome": "completed",
+              "scale": 2,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 24,
+              "t": 2436.5,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r24",
+              "genId": 5,
+              "kind": "renderSettle",
+              "outcome": "completed",
+              "scale": 2,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 25,
+              "t": 2470.2999999523163,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r25",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2.1,
+              "canvasWidth": 1285,
+              "canvasHeight": 1663
+            },
+            {
+              "seq": 26,
+              "t": 2477.100000143051,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r26",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2.1,
+              "canvasWidth": 1285,
+              "canvasHeight": 1663
+            },
+            {
+              "seq": 27,
+              "t": 2478.4000000953674,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r27",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 2.1,
+              "canvasWidth": 1285,
+              "canvasHeight": 1663
+            }
+          ]
+        },
+        {
+          "run": "B",
+          "rungIndex": 0,
+          "rung": {
+            "run": "A",
+            "fixture": "viewer-links.pdf",
+            "viewport": {
+              "width": 1380,
+              "height": 900
+            },
+            "dsf": 1
+          },
+          "expectedTransition": "fit-page",
+          "superseded": {
+            "taskId": "r19",
+            "genId": 4,
+            "scale": 3
+          },
+          "cancelSeq": 13,
+          "cancelledSettleSeq": 16,
+          "replacementStartSeq": 25,
+          "replacementGenId": 5,
+          "supersededScale": 3,
+          "replacementStartScale": 0.8257575757575758,
+          "replacementCompletedScale": 0.8257575757575758,
+          "expectedReplacementScale": null,
+          "paint": {
+            "w": 505,
+            "h": 654
+          },
+          "entryProof": {
+            "baselineSeq": 6,
+            "maxGenBefore": 1,
+            "entryGenId": 3,
+            "entryScale": 1,
+            "starts": [
+              {
+                "taskId": "r13",
+                "seq": 31,
+                "scale": 1,
+                "genId": 3,
+                "pageNumber": 1
+              },
+              {
+                "taskId": "r14",
+                "seq": 32,
+                "scale": 1,
+                "genId": 3,
+                "pageNumber": 2
+              },
+              {
+                "taskId": "r15",
+                "seq": 33,
+                "scale": 1,
+                "genId": 3,
+                "pageNumber": 3
+              }
+            ],
+            "settles": [
+              {
+                "taskId": "r13",
+                "seq": 34,
+                "scale": 1,
+                "outcome": "completed"
+              },
+              {
+                "taskId": "r14",
+                "seq": 35,
+                "scale": 1,
+                "outcome": "completed"
+              },
+              {
+                "taskId": "r15",
+                "seq": 36,
+                "scale": 1,
+                "outcome": "completed"
+              }
+            ],
+            "quiescenceSeq": 36,
+            "resetBoundarySeq": 36,
+            "postResetSeqHigh": 0,
+            "postResetEventCount": 0,
+            "resetCapacity": 50000
+          },
+          "events": [
+            {
+              "seq": 1,
+              "t": 1126.5,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r16",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 1,
+              "canvasWidth": 612,
+              "canvasHeight": 792
+            },
+            {
+              "seq": 2,
+              "t": 1126.5999999046326,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r17",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 1,
+              "canvasWidth": 612,
+              "canvasHeight": 792
+            },
+            {
+              "seq": 3,
+              "t": 1126.5999999046326,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r18",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 1,
+              "canvasWidth": 612,
+              "canvasHeight": 792
+            },
+            {
+              "seq": 4,
+              "t": 1139.5999999046326,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r16",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 5,
+              "t": 1144.3999998569489,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r17",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 6,
+              "t": 1145.0999999046326,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r18",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 7,
+              "t": 1146.5,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r16",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 8,
+              "t": 1146.5999999046326,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r17",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 9,
+              "t": 1146.7000000476837,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r18",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 10,
+              "t": 1147.0999999046326,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r19",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 3,
+              "canvasWidth": 1836,
+              "canvasHeight": 2376
+            },
+            {
+              "seq": 11,
+              "t": 1147.5999999046326,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r20",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 3,
+              "canvasWidth": 1836,
+              "canvasHeight": 2376
+            },
+            {
+              "seq": 12,
+              "t": 1148.0999999046326,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r21",
+              "genId": 4,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 3,
+              "canvasWidth": 1836,
+              "canvasHeight": 2376
+            },
+            {
+              "seq": 13,
+              "t": 1150.5,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r19",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 14,
+              "t": 1150.5,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r20",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 15,
+              "t": 1150.5999999046326,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r21",
+              "genId": 4,
+              "kind": "renderCancel",
+              "outcome": null,
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 16,
+              "t": 1150.7000000476837,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r19",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 17,
+              "t": 1150.7999999523163,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r20",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 18,
+              "t": 1150.7999999523163,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r21",
+              "genId": 4,
+              "kind": "renderSettle",
+              "outcome": "cancelled",
+              "scale": null,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 19,
+              "t": 1150.7999999523163,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r22",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 3,
+              "canvasWidth": 1836,
+              "canvasHeight": 2376
+            },
+            {
+              "seq": 20,
+              "t": 1150.7999999523163,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r23",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 3,
+              "canvasWidth": 1836,
+              "canvasHeight": 2376
+            },
+            {
+              "seq": 21,
+              "t": 1150.8999998569489,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r24",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 3,
+              "canvasWidth": 1836,
+              "canvasHeight": 2376
+            },
+            {
+              "seq": 22,
+              "t": 1200.5999999046326,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r22",
+              "genId": 5,
+              "kind": "renderSettle",
+              "outcome": "completed",
+              "scale": 3,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 23,
+              "t": 1201,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r23",
+              "genId": 5,
+              "kind": "renderSettle",
+              "outcome": "completed",
+              "scale": 3,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 24,
+              "t": 1201.2999999523163,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r24",
+              "genId": 5,
+              "kind": "renderSettle",
+              "outcome": "completed",
+              "scale": 3,
+              "canvasWidth": null,
+              "canvasHeight": null
+            },
+            {
+              "seq": 25,
+              "t": 1261.8999998569489,
+              "docId": "d1",
+              "pageNumber": 1,
+              "taskId": "r25",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 0.8257575757575758,
+              "canvasWidth": 505,
+              "canvasHeight": 654
+            },
+            {
+              "seq": 26,
+              "t": 1267.3999998569489,
+              "docId": "d1",
+              "pageNumber": 2,
+              "taskId": "r26",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 0.8257575757575758,
+              "canvasWidth": 505,
+              "canvasHeight": 654
+            },
+            {
+              "seq": 27,
+              "t": 1269,
+              "docId": "d1",
+              "pageNumber": 3,
+              "taskId": "r27",
+              "genId": 5,
+              "kind": "renderStart",
+              "outcome": null,
+              "scale": 0.8257575757575758,
+              "canvasWidth": 505,
+              "canvasHeight": 654
+            }
+          ]
+        }
+      ],
+      "p5": {
+        "devicePixelRatio": 1,
+        "effectiveDpr": 1,
+        "maxDpr": 2,
+        "maxCanvasPixels": 16777216,
+        "liveCanvas": {
+          "w": 1224,
+          "h": 1584,
+          "area": 1938816
+        },
+        "starts": [
+          {
+            "w": 700,
+            "h": 905,
+            "scale": 1.1437908496732025,
+            "area": 633500
+          },
+          {
+            "w": 700,
+            "h": 905,
+            "scale": 1.1437908496732025,
+            "area": 633500
+          },
+          {
+            "w": 700,
+            "h": 905,
+            "scale": 1.1437908496732025,
+            "area": 633500
+          },
+          {
+            "w": 1224,
+            "h": 1584,
+            "scale": 2,
+            "area": 1938816
+          },
+          {
+            "w": 1224,
+            "h": 1584,
+            "scale": 2,
+            "area": 1938816
+          },
+          {
+            "w": 1224,
+            "h": 1584,
+            "scale": 2,
+            "area": 1938816
+          }
+        ]
+      },
+      "p6": {
+        "docId": "d1",
+        "destroySeq": 7,
+        "lateStarts": 0,
+        "dropped": 0
+      },
+      "visual_dark_1380": {
+        "rail": {
+          "toolbar": true,
+          "mobileBreakPresent": true,
+          "fitWidthLabelVisible": true,
+          "fitPageLabelVisible": true,
+          "width": 1380
+        },
+        "surfaces": {
+          "overview": true,
+          "overviewText": "Overview0CollectionnotesSize3.2 KBModifiedAug 1, 2026, 05:28 PMPathgno://notes/viewer-links.pdfCopy linkNo tags",
+          "properties": true,
+          "backlinks": true,
+          "related": true
+        },
+        "overviewShotProof": {
+          "found": true,
+          "inViewport": true,
+          "label": "properties-rail",
+          "rect": {
+            "x": 1107,
+            "y": 205,
+            "width": 237,
+            "height": 216.6875
+          }
+        }
+      },
+      "visual_dark_900": {
+        "rail": {
+          "toolbar": true,
+          "mobileBreakPresent": true,
+          "fitWidthLabelVisible": false,
+          "fitPageLabelVisible": false,
+          "width": 900
+        },
+        "surfaces": {
+          "overview": true,
+          "overviewText": "Overview0CollectionnotesSize3.2 KBModifiedAug 1, 2026, 05:28 PMPathgno://notes/viewer-links.pdfCopy linkNo tags",
+          "properties": true,
+          "backlinks": true,
+          "related": true
+        },
+        "overviewShotProof": {
+          "found": true,
+          "inViewport": true,
+          "label": "mobile-overview-card",
+          "rect": {
+            "x": 40,
+            "y": 185,
+            "width": 820,
+            "height": 321.53125
+          }
+        }
+      },
+      "visual_light_1380": {
+        "rail": {
+          "toolbar": true,
+          "mobileBreakPresent": true,
+          "fitWidthLabelVisible": true,
+          "fitPageLabelVisible": true,
+          "width": 1380
+        },
+        "surfaces": {
+          "overview": true,
+          "overviewText": "Overview0CollectionnotesSize3.2 KBModifiedAug 1, 2026, 05:28 PMPathgno://notes/viewer-links.pdfCopy linkNo tags",
+          "properties": true,
+          "backlinks": true,
+          "related": true
+        },
+        "overviewShotProof": {
+          "found": true,
+          "inViewport": true,
+          "label": "properties-rail",
+          "rect": {
+            "x": 1107,
+            "y": 205,
+            "width": 237,
+            "height": 216.6875
+          }
+        }
+      },
+      "visual_light_900": {
+        "rail": {
+          "toolbar": true,
+          "mobileBreakPresent": true,
+          "fitWidthLabelVisible": false,
+          "fitPageLabelVisible": false,
+          "width": 900
+        },
+        "surfaces": {
+          "overview": true,
+          "overviewText": "Overview0CollectionnotesSize3.2 KBModifiedAug 1, 2026, 05:28 PMPathgno://notes/viewer-links.pdfCopy linkNo tags",
+          "properties": true,
+          "backlinks": true,
+          "related": true
+        },
+        "overviewShotProof": {
+          "found": true,
+          "inViewport": true,
+          "label": "mobile-overview-card",
+          "rect": {
+            "x": 40,
+            "y": 185,
+            "width": 820,
+            "height": 321.53125
+          }
+        }
+      },
+      "themeProbes": {
+        "dark-w1380": {
+          "bodyBackground": "rgb(5, 5, 5)",
+          "bodyColor": "rgb(237, 237, 237)",
+          "backgroundVar": "0 0% 2%",
+          "foregroundVar": "0 0% 93%"
+        },
+        "dark-w900": {
+          "bodyBackground": "rgb(5, 5, 5)",
+          "bodyColor": "rgb(237, 237, 237)",
+          "backgroundVar": "0 0% 2%",
+          "foregroundVar": "0 0% 93%"
+        },
+        "light-w1380": {
+          "bodyBackground": "rgb(252, 250, 248)",
+          "bodyColor": "rgb(36, 33, 30)",
+          "backgroundVar": "40 33% 98%",
+          "foregroundVar": "30 9% 13%"
+        },
+        "light-w900": {
+          "bodyBackground": "rgb(252, 250, 248)",
+          "bodyColor": "rgb(36, 33, 30)",
+          "backgroundVar": "40 33% 98%",
+          "foregroundVar": "30 9% 13%"
+        }
+      },
+      "themeRailSubjects": {
+        "dark-w1380": {
+          "renderedCanvases": 3,
+          "hasKnownGlyphRun": true,
+          "textLength": 490
+        },
+        "dark-w900": {
+          "renderedCanvases": 3,
+          "hasKnownGlyphRun": true,
+          "textLength": 490
+        },
+        "light-w1380": {
+          "renderedCanvases": 3,
+          "hasKnownGlyphRun": true,
+          "textLength": 490
+        },
+        "light-w900": {
+          "renderedCanvases": 3,
+          "hasKnownGlyphRun": true,
+          "textLength": 490
+        }
+      },
+      "themeScreenshotHashes": {
+        "INTERCEPTION__visual-dark-w1380-rail.png": "c9721d484a2d99b7e8ad17d982a6eb03a5757d6e3dce5ab144d912ebbc0628ec",
+        "INTERCEPTION__visual-light-w1380-rail.png": "f3d3548e1fc3142be70d2f18a6f73d97b528110c55415b8aab31fe3679c7b8c6",
+        "INTERCEPTION__visual-dark-w1380-overview.png": "a66ceac2dd1e176b466440fbc17043748b29b7e2c5ad84072960bc97b5e226dc",
+        "INTERCEPTION__visual-light-w1380-overview.png": "f51effc5cd2c76a7c1ec14db27968330c5164cd1d71a826a86ee66c4ca2be6b5",
+        "INTERCEPTION__visual-dark-w900-rail.png": "d7392eabb8b9f0f1770f849765c40923b1944a48616a95f2a194649fefb388dd",
+        "INTERCEPTION__visual-light-w900-rail.png": "746ebe09a89132fc62f1d2f93680fe5084201ccd4005bf3b4c51dc6d6b06fe4c",
+        "INTERCEPTION__visual-dark-w900-overview.png": "20c570d06055ceaad10baaebeb5d66d362f4af5bfbca33557871837a38ba2210",
+        "INTERCEPTION__visual-light-w900-overview.png": "69859c91f05dbbee12d9d8fd1f521c0eaabb715a5d639fc13020eb9f92d65610"
+      }
+    }
+  },
+  "screenshots": [
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__viewer-links-rendered.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__standard-font.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__cjk-cmap.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__js-action.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-loading.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-progressive.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-empty.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-corrupt.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-password.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-network.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-bootstrap.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-100.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-fit-width.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-200.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w1380-rail.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w1380-overview.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w900-rail.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w900-overview.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w1380-rail.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w1380-overview.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w900-rail.png",
+    "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w900-overview.png"
+  ],
+  "screenshotModes": [
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__viewer-links-rendered.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__standard-font.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__cjk-cmap.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/CLEAN__js-action.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-loading.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-progressive.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-empty.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-corrupt.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-password.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-network.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__state-bootstrap.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-100.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-fit-width.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__align-200.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w1380-rail.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w1380-overview.png",
+      "fullPage": true,
+      "docHeight": 0
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w900-rail.png",
+      "fullPage": true,
+      "docHeight": 1489
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-dark-w900-overview.png",
+      "fullPage": true,
+      "docHeight": 0
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w1380-rail.png",
+      "fullPage": true,
+      "docHeight": 1107
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w1380-overview.png",
+      "fullPage": true,
+      "docHeight": 0
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w900-rail.png",
+      "fullPage": true,
+      "docHeight": 1489
+    },
+    {
+      "file": "/home/claw/work/gno-pdf-renderer/.flow/reviews/fn-112-task-6-evidence/INTERCEPTION__visual-light-w900-overview.png",
+      "fullPage": true,
+      "docHeight": 0
+    }
+  ],
+  "failures": [],
+  "budgetFailures": [],
+  "commands": [
+    {
+      "name": "CLEAN",
+      "ok": true
+    },
+    {
+      "name": "INTERCEPTION",
+      "ok": true
+    }
+  ],
+  "artifactHashes": {}
+}

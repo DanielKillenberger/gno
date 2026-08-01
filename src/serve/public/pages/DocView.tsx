@@ -18,7 +18,17 @@ import {
   TextIcon,
   TrashIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import type { PdfFallbackReason } from "../lib/pdf";
 
 import { extractSections } from "../../../core/sections";
 import {
@@ -63,12 +73,78 @@ import {
   buildEditDeepLink,
   parseDocumentDeepLink,
 } from "../lib/deep-links";
+import {
+  buildDocAssetUrl,
+  isExtractedTextAvailable,
+  isPdfDocument,
+} from "../lib/doc-asset-url";
 import { waitForDocumentAvailability } from "../lib/document-availability";
 import {
   downloadPublishArtifactFile,
   type PublishExportResponse,
 } from "../lib/publish-export";
 import { subscribeWorkspaceActionRequest } from "../lib/workspace-events";
+
+/** Lazy so pdfjs is never pulled for non-PDF documents. */
+const PdfViewer = lazy(() => import("./doc-pdf-viewer"));
+
+/** Spec "Canonical fallback-notice copy" — DocView Text branch only. */
+const PDF_FALLBACK_NOTICE: Record<
+  PdfFallbackReason,
+  { eyebrow: string; body: string }
+> = {
+  corrupt: {
+    eyebrow: "CANNOT RENDER",
+    body: "This PDF could not be rendered. View the extracted text or download the original.",
+  },
+  password: {
+    eyebrow: "PASSWORD PROTECTED",
+    body: "This PDF is password protected. Showing the extracted text instead. Download the original to open it in a PDF reader.",
+  },
+  network: {
+    eyebrow: "COULD NOT LOAD",
+    body: "The document could not be loaded from this session. Showing the extracted text instead. Switch to Pages to try again, or download the original.",
+  },
+  bootstrap: {
+    eyebrow: "VIEWER UNAVAILABLE",
+    body: "The PDF viewer could not start in this window. Showing the extracted text instead. Download the original to read it.",
+  },
+};
+
+function PdfFallbackNotice({
+  reason,
+  downloadUrl,
+}: {
+  reason: PdfFallbackReason;
+  downloadUrl: string;
+}) {
+  const copy = PDF_FALLBACK_NOTICE[reason];
+  return (
+    <div
+      className="mb-4 flex max-w-2xl flex-col items-start gap-2 py-2 text-left"
+      data-testid={`pdf-fallback-${reason}`}
+      role="status"
+    >
+      <p className="font-mono text-[10px] text-muted-foreground/60 uppercase tracking-[0.15em]">
+        {copy.eyebrow}
+      </p>
+      <p className="text-[13px] text-foreground/90 leading-relaxed">
+        {copy.body}
+      </p>
+      <Button
+        asChild
+        className="cursor-pointer focus-visible:ring-primary/50"
+        data-testid="pdf-notice-download"
+        size="sm"
+        variant="secondary"
+      >
+        <a download href={downloadUrl || undefined}>
+          Download original
+        </a>
+      </Button>
+    </div>
+  );
+}
 
 interface PageProps {
   navigate: (to: string | number) => void;
@@ -287,6 +363,9 @@ export default function DocView({ navigate }: PageProps) {
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicateWarnings, setDuplicateWarnings] = useState<string[]>([]);
   const [showRawView, setShowRawView] = useState(false);
+  /** DocView-owned PDF fallback reason (null when Pages or no fallback). */
+  const [pdfFallbackReason, setPdfFallbackReason] =
+    useState<PdfFallbackReason | null>(null);
   const [creatingCopy, setCreatingCopy] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [externalChangeNotice, setExternalChangeNotice] = useState<
@@ -422,6 +501,18 @@ export default function DocView({ navigate }: PageProps) {
       ".bash",
     ].includes(doc.source.ext.toLowerCase());
 
+  const isPdf = Boolean(doc && isPdfDocument(doc.source));
+
+  // Spec predicate — evaluated per render, never from mime/ext.
+  const extractedTextAvailable = Boolean(doc && isExtractedTextAvailable(doc));
+
+  const pdfAssetUrl = useMemo(() => {
+    if (!doc || !isPdf) {
+      return null;
+    }
+    return buildDocAssetUrl(doc.uri, doc.relPath);
+  }, [doc, isPdf]);
+
   // Parse frontmatter for markdown files
   const parsedContent = useMemo(() => {
     if (!doc?.content || !isMarkdown) {
@@ -438,6 +529,39 @@ export default function DocView({ navigate }: PageProps) {
       setShowRawView(true);
     }
   }, [currentTarget.lineStart, currentTarget.view]);
+
+  // Clear fallback when the loaded document identity changes.
+  useEffect(() => {
+    setPdfFallbackReason(null);
+  }, [doc?.uri]);
+
+  /**
+   * DocView defends the extractedTextAvailable boundary itself: a spurious
+   * onFallback while the predicate is false must not switch view or store a
+   * reason (viewer/error surface stays mounted).
+   */
+  const handlePdfFallback = useCallback(
+    (reason: PdfFallbackReason) => {
+      // Re-evaluate from current doc identity — never trust a stale closure alone.
+      if (!doc || !isExtractedTextAvailable(doc)) {
+        return;
+      }
+      setPdfFallbackReason(reason);
+      setShowRawView(true);
+    },
+    [doc]
+  );
+
+  /** Pages/Text for PDFs — clearing notice when returning to Pages. */
+  const togglePdfPagesText = useCallback(() => {
+    setShowRawView((prev) => {
+      if (prev) {
+        setPdfFallbackReason(null);
+        return false;
+      }
+      return true;
+    });
+  }, []);
 
   useEffect(() => {
     if (!currentHash || showRawView || loading) {
@@ -1464,6 +1588,20 @@ export default function DocView({ navigate }: PageProps) {
                     Reveal
                   </Button>
                 )}
+                {isPdf && pdfAssetUrl ? (
+                  <Button
+                    asChild
+                    className="gap-1.5 cursor-pointer"
+                    data-testid="pdf-header-download"
+                    size="sm"
+                    variant="outline"
+                  >
+                    <a download href={pdfAssetUrl}>
+                      <SquareArrowOutUpRightIcon className="size-4" />
+                      Download original
+                    </a>
+                  </Button>
+                ) : null}
                 <Button
                   className="gap-1.5 text-muted-foreground hover:text-destructive"
                   onClick={() => setDeleteDialogOpen(true)}
@@ -1579,8 +1717,8 @@ export default function DocView({ navigate }: PageProps) {
 
               {/* Content */}
               <div className="relative">
-                {/* Source/Rendered toggle pill */}
-                {isMarkdown && doc.contentAvailable && (
+                {/* Markdown Source/Rendered pill — unchanged for non-PDF */}
+                {isMarkdown && doc.contentAvailable && !isPdf && (
                   <button
                     className="z-10 flex cursor-pointer items-center gap-1.5 rounded-full border border-border/30 bg-background/80 px-3 py-1 font-mono text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/30 hover:text-primary"
                     onClick={() => setShowRawView(!showRawView)}
@@ -1606,48 +1744,166 @@ export default function DocView({ navigate }: PageProps) {
                   </button>
                 )}
 
-                {!doc.contentAvailable && (
+                {/* PDF Pages/Text pill — DocView sole owner (no PdfToolbar toggle) */}
+                {isPdf && (
+                  <button
+                    className="z-10 flex cursor-pointer items-center gap-1.5 rounded-full border border-border/30 bg-background/80 px-3 py-1 font-mono text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/30 hover:text-primary"
+                    data-testid="pdf-pages-text-toggle"
+                    onClick={togglePdfPagesText}
+                    style={{
+                      position: "absolute",
+                      top: "0.75rem",
+                      right: "0.75rem",
+                      left: "auto",
+                    }}
+                    type="button"
+                  >
+                    {showRawView ? (
+                      <>
+                        <FileText className="size-3" />
+                        Pages
+                      </>
+                    ) : (
+                      <>
+                        <TextIcon className="size-3" />
+                        Text
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* PDF branch: Pages = lazy PdfViewer; Text = extracted + optional notice */}
+                {isPdf && !showRawView && pdfAssetUrl ? (
+                  // Reserve the band the absolutely-positioned Pages/Text pill
+                  // occupies (top 0.75rem + ~1.75rem tall). Without it the
+                  // sticky PdfToolbar (z-10) renders after the pill (also
+                  // z-10) and covers it, leaving the toggle invisible and
+                  // un-clickable on every PDF that renders. Inline (like the
+                  // pill's own positioning above) so the exact clearance is
+                  // explicit: the pill occupies 0.75rem + ~1.75rem, and a
+                  // `pt-10` utility (2.5rem) would leave it 0.14px short.
+                  <div style={{ paddingTop: "2.75rem" }}>
+                    <Suspense
+                      fallback={
+                        <div className="flex items-center gap-2 py-10 text-muted-foreground">
+                          <Loader className="size-4" />
+                          <span className="font-mono text-xs">
+                            Loading viewer…
+                          </span>
+                        </div>
+                      }
+                    >
+                      <PdfViewer
+                        key={doc.uri}
+                        assetUrl={pdfAssetUrl}
+                        downloadUrl={pdfAssetUrl}
+                        extractedTextAvailable={extractedTextAvailable}
+                        onFallback={handlePdfFallback}
+                      />
+                    </Suspense>
+                  </div>
+                ) : null}
+
+                {isPdf && showRawView ? (
+                  <div className="pt-10">
+                    {pdfFallbackReason && extractedTextAvailable ? (
+                      <PdfFallbackNotice
+                        downloadUrl={pdfAssetUrl ?? ""}
+                        reason={pdfFallbackReason}
+                      />
+                    ) : null}
+                    {!doc.contentAvailable ? (
+                      <div className="rounded-lg border border-border/50 bg-muted/30 p-6 text-center">
+                        <p className="text-muted-foreground">
+                          Content not available (document may need re-indexing)
+                        </p>
+                      </div>
+                    ) : null}
+                    {doc.contentAvailable && !extractedTextAvailable ? (
+                      <div
+                        className="rounded-lg border border-border/50 bg-muted/30 p-6 text-center"
+                        data-testid="pdf-no-extracted-text"
+                      >
+                        <p className="text-muted-foreground">
+                          No extracted text for this document.
+                        </p>
+                        {pdfAssetUrl ? (
+                          <div className="mt-3">
+                            <Button
+                              asChild
+                              className="cursor-pointer"
+                              size="sm"
+                            >
+                              <a download href={pdfAssetUrl}>
+                                Download original
+                              </a>
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {extractedTextAvailable ? (
+                      <div className="rounded-lg border border-border/50 bg-muted/30 p-6">
+                        <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
+                          {doc.content}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {/* Non-PDF branches (byte-identical behavior) */}
+                {!isPdf && !doc.contentAvailable && (
                   <div className="rounded-lg border border-border/50 bg-muted/30 p-6 text-center">
                     <p className="text-muted-foreground">
                       Content not available (document may need re-indexing)
                     </p>
                   </div>
                 )}
-                {doc.contentAvailable && isMarkdown && !showRawView && (
-                  <div className="rounded-lg border border-border/40 bg-gradient-to-br from-background to-muted/10 p-4 shadow-inner">
-                    <MarkdownPreview
-                      collection={doc.collection}
-                      content={parsedContent.body}
-                      docUri={doc.uri}
-                      wikiLinks={resolvedWikiLinks}
-                    />
-                  </div>
-                )}
-                {doc.contentAvailable && isMarkdown && showRawView && (
-                  <CodeBlock
-                    code={doc.content ?? ""}
-                    highlightedLines={highlightedLines}
-                    language={"markdown" as BundledLanguage}
-                    scrollToLine={currentTarget.lineStart}
-                    showLineNumbers
-                  >
-                    <CodeBlockCopyButton />
-                  </CodeBlock>
-                )}
-                {doc.contentAvailable && isCodeFile && !isMarkdown && (
-                  <CodeBlock
-                    code={doc.content ?? ""}
-                    highlightedLines={highlightedLines}
-                    language={
-                      getLanguageFromExt(doc.source.ext) as BundledLanguage
-                    }
-                    scrollToLine={currentTarget.lineStart}
-                    showLineNumbers
-                  >
-                    <CodeBlockCopyButton />
-                  </CodeBlock>
-                )}
-                {doc.contentAvailable && !isCodeFile && (
+                {!isPdf &&
+                  doc.contentAvailable &&
+                  isMarkdown &&
+                  !showRawView && (
+                    <div className="rounded-lg border border-border/40 bg-gradient-to-br from-background to-muted/10 p-4 shadow-inner">
+                      <MarkdownPreview
+                        collection={doc.collection}
+                        content={parsedContent.body}
+                        docUri={doc.uri}
+                        wikiLinks={resolvedWikiLinks}
+                      />
+                    </div>
+                  )}
+                {!isPdf &&
+                  doc.contentAvailable &&
+                  isMarkdown &&
+                  showRawView && (
+                    <CodeBlock
+                      code={doc.content ?? ""}
+                      highlightedLines={highlightedLines}
+                      language={"markdown" as BundledLanguage}
+                      scrollToLine={currentTarget.lineStart}
+                      showLineNumbers
+                    >
+                      <CodeBlockCopyButton />
+                    </CodeBlock>
+                  )}
+                {!isPdf &&
+                  doc.contentAvailable &&
+                  isCodeFile &&
+                  !isMarkdown && (
+                    <CodeBlock
+                      code={doc.content ?? ""}
+                      highlightedLines={highlightedLines}
+                      language={
+                        getLanguageFromExt(doc.source.ext) as BundledLanguage
+                      }
+                      scrollToLine={currentTarget.lineStart}
+                      showLineNumbers
+                    >
+                      <CodeBlockCopyButton />
+                    </CodeBlock>
+                  )}
+                {!isPdf && doc.contentAvailable && !isCodeFile && (
                   <div className="rounded-lg border border-border/50 bg-muted/30 p-6">
                     <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
                       {doc.content}

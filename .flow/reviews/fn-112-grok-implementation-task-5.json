@@ -1,0 +1,92 @@
+{
+  "schema": "fn-112-grok-implementation-task-5",
+  "schema_version": 1,
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.5",
+  "owner": "Grok 4.5",
+  "canonical_model": "grok-4.5",
+  "session_id": "019fb8d5-7418-7a11-963b-1a206a7af924",
+  "branch": "feat/native-pdf-renderer",
+  "asset_url_derivation": {
+    "decision": "basename of API relPath as path query param",
+    "rationale": "handleDocAsset resolves path against dirname(resolvedDoc.fullPath); uri selects the document; API relPath already is recordSourcePath ?? relPath",
+    "proof": [
+      "test/serve/public/lib/doc-asset-url.test.ts dirname+basename equals full nested path",
+      "full relPath join double-nests (asserted wrong)",
+      "same-basename sibling URIs produce different /api/doc-asset endpoints",
+      "DocView.dom asset URL cases nested/container/record/sibling"
+    ],
+    "helper": "src/serve/public/lib/doc-asset-url.ts"
+  },
+  "preserved": {
+    "tasks_1_4_sol_ship": true,
+    "pdf_viewer_four_prop_contract": true,
+    "pdf_viewer_internal_deps_boundary": true,
+    "no_task_6_plus": true,
+    "no_commit_push_pr": true,
+    "no_architecture_spec_edits": true
+  },
+  "deliverables": [
+    "src/serve/public/lib/doc-asset-url.ts",
+    "src/serve/public/pages/doc-pdf-viewer.tsx",
+    "src/serve/public/pages/DocView.tsx",
+    "test/serve/public/pages/DocView.dom.test.tsx",
+    "test/serve/public/lib/doc-asset-url.test.ts"
+  ],
+  "baseline_comparison": {
+    "receipt": ".flow/reviews/fn-112-baseline-receipt.json",
+    "test_web_baseline_pass": 186,
+    "test_web_current_pass": 279,
+    "note": "Additive fn-112 suites; no new failures vs baseline"
+  },
+  "commands": [
+    {
+      "command": "bun test test/serve/public/pages/DocView.dom.test.tsx",
+      "exit_status": 0,
+      "result": "14 pass"
+    },
+    {
+      "command": "bun test test/serve/public/lib/doc-asset-url.test.ts",
+      "exit_status": 0,
+      "result": "6 pass"
+    },
+    {
+      "command": "bun test DocView + doc-asset-url + components/pdf",
+      "exit_status": 0,
+      "result": "59 pass"
+    },
+    {
+      "command": "bun run test:web",
+      "exit_status": 0,
+      "result": "279 pass, 0 fail (baseline 186)"
+    },
+    {
+      "command": "bun run lint:check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "bunx tsc --noEmit",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "flowctl validate --spec fn-112-native-pdfjs-document-renderer",
+      "exit_status": 0,
+      "result": "valid"
+    }
+  ],
+  "no_sol_ship_claimed": true,
+  "remaining_gate": "independent Sol implementation review of task .5",
+  "task_status_after": "done",
+  "finished_at": "2026-07-31T19:54:00Z",
+  "status": "superseded_incomplete",
+  "superseded_by": ".flow/reviews/fn-112-grok-implementation-task-5-repair.{md,json}",
+  "superseded_reason": "Sol NEEDS_WORK B5-01 predicate-false defense, B5-02 real handleDocAsset bytes, B5-03 remount/navigation evidence",
+  "superseded_at": "2026-07-31T20:05:00Z"
+}

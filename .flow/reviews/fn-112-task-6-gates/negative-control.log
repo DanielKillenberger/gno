@@ -1,0 +1,104 @@
+=== fn-112 task .6 — guard-only negative control (durable artifact) ===
+utc_start:  2026-08-01T14:24:58Z
+repo:       <home>/work/gno-pdf-renderer
+target:     src/serve/public/hooks/use-pdf-pages.ts
+test file:  test/serve/public/hooks/use-pdf-pages.dom.test.tsx
+test name:  SOL6-IMPL-02: canvas replaced while getPage is pending starts nothing
+git HEAD:   bb994b580356a41a31093fea85b06993c1a18e4c
+branch:     feat/native-pdf-renderer
+
+--- [1] pre-flight: backup + mutation-site uniqueness ---
+backup path:          /tmp/upp-negctl-iXOoBH.ts
+backup sha256:        3212eb7f3047f7f65dc59f45d48c041aa1cc144977fb7e09afb291c38e038f30
+target sha256 before: 3212eb7f3047f7f65dc59f45d48c041aa1cc144977fb7e09afb291c38e038f30
+guard occurrences before: 1
+
+--- [2] fail-safe restoration armed ---
+trap:     EXIT INT TERM HUP -> atomic restore (cp to temp + mv)
+watchdog: detached setsid pid 2933100, unconditional restore after 600s
+
+--- [3] mutation: remove ONLY the canvas identity conjunct ---
+mutation site occurrences: 1
+MUTATION APPLIED (guard conjunct removed; nothing else changed)
+
+--- [3a] exact diff proving ONLY the guard was removed (backup -> mutated) ---
+--- /tmp/upp-negctl-iXOoBH.ts	2026-08-01 16:24:58.110964817 +0200
++++ <home>/work/gno-pdf-renderer/src/serve/public/hooks/use-pdf-pages.ts	2026-08-01 16:24:58.150976362 +0200
+@@ -646,7 +646,6 @@
+         genIdRef.current === currentGen &&
+         epochSeqRef.current === admittedEpochSeq &&
+         computeActiveSet(visibleRef.current, numPages).has(pageNumber) &&
+-        canvasRef.current.get(pageNumber) === canvas &&
+         canvas.isConnected;
+
+       /**
+(diff exit 1 — 1 means 'differs', which is expected here)
+target sha256 mutated: 314c0b73663a717837297dad891e147c8059b591a6c2c65f47ac23ff16fdda49
+guard occurrences while mutated: 0
+
+--- [4] run the intended test against the MUTATED source (expect failure) ---
+command: bun test --smol test/serve/public/hooks/use-pdf-pages.dom.test.tsx -t "SOL6-IMPL-02: canvas replaced while getPage is pending starts nothing"
+bun test v1.3.14 (0d9b296a)
+
+test/serve/public/hooks/use-pdf-pages.dom.test.tsx:
+Warning: Please use the `legacy` build in Node.js environments.
+1350 |       }
+1351 |       return c == null ? "none" : "other";
+1352 |     };
+1353 |
+1354 |     const staleCalls = renderCalls.filter((c) => c.canvas === canvas);
+1355 |     expect(staleCalls.map((c) => c.taskId)).toEqual([]);
+                                                   ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   "r1",
++ ]
+
+- Expected  - 1
++ Received  + 3
+
+      at <anonymous> (<home>/work/gno-pdf-renderer/test/serve/public/hooks/use-pdf-pages.dom.test.tsx:1355:45)
+(fail) use-pdf-pages > SOL6-IMPL-02: canvas replaced while getPage is pending starts nothing [98.33ms]
+
+ 0 pass
+ 13 filtered out
+ 1 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [514.00ms]
+
+NEGATIVE_CONTROL_EXIT=1
+NEGATIVE_CONTROL_VALIDITY=VALID (normal test failure — not a signal/OOM/timeout)
+
+--- [5] restore + prove byte identity ---
+cmp backup vs target:  identical
+target sha256 after:   3212eb7f3047f7f65dc59f45d48c041aa1cc144977fb7e09afb291c38e038f30
+target sha256 before:  3212eb7f3047f7f65dc59f45d48c041aa1cc144977fb7e09afb291c38e038f30
+backup sha256:         3212eb7f3047f7f65dc59f45d48c041aa1cc144977fb7e09afb291c38e038f30
+/tmp/upp.orig.ts sha256: 3212eb7f3047f7f65dc59f45d48c041aa1cc144977fb7e09afb291c38e038f30
+guard occurrences after restore: 1
+git status for target: ?? src/serve/public/hooks/use-pdf-pages.ts
+
+--- [6] restored positive run (same test, same filter — expect PASS) ---
+command: bun test test/serve/public/hooks/use-pdf-pages.dom.test.tsx -t "SOL6-IMPL-02: canvas replaced while getPage is pending starts nothing"
+bun test v1.3.14 (0d9b296a)
+
+test/serve/public/hooks/use-pdf-pages.dom.test.tsx:
+Warning: Please use the `legacy` build in Node.js environments.
+
+ 1 pass
+ 13 filtered out
+ 0 fail
+ 13 expect() calls
+Ran 1 test across 1 file. [486.00ms]
+
+POSITIVE_RERUN_EXIT=0
+
+=== summary ===
+negative control exit: 1 (expected 1)
+positive rerun exit:   0 (expected 0)
+restoration:           identical
+guard restored:        1 occurrence(s)
+utc_end:               2026-08-01T14:24:59Z
+OVERALL=PASS (assertion proven non-vacuous; source restored byte-identical)

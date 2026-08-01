@@ -1,0 +1,267 @@
+{
+  "owner": "Opus 5",
+  "canonical_model_expected": "claude-opus-5",
+  "canonical_model_observed": null,
+  "canonical_model_observation_note": "Not asserted here; the orchestrator verifies structured modelUsage.",
+  "stage": "plan-repair",
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "status": "completed",
+  "gate_state": "needs_work",
+  "implementation_performed": false,
+  "base_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+  "head_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+  "predecessor": {
+    "owner": "Fable",
+    "receipt": ".flow/reviews/fn-112-fable-revision.receipt.json",
+    "outcome": "quota_failed_http_429",
+    "handling": "Partial unapproved edits preserved where sound; every artifact independently re-read, finished, and reconciled."
+  },
+  "frontend_design_plugin": {
+    "invoked": true,
+    "skill": "frontend-design:frontend-design",
+    "when": "before finalizing UI/design and browser-evidence requirements",
+    "design_system_preserved": "Scholarly Dusk (docs/adr/001-scholarly-dusk-design-system.md)",
+    "note": "Direction was pinned by the brief; no new palette, type roles, or signature element introduced."
+  },
+  "dispositions": {
+    "P1": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "Impossible import rule: task .3 required TextLayer from pdfjs-dist while forbidding pdfjs-dist imports outside lib/pdf.ts.",
+      "resolution": "One coherent facade. lib/pdf.ts exports TextLayer, the getDocument wrapper, classifyPdfError, isRenderingCancelled, PdfFallbackReason, and type-only re-exports (PDFDocumentProxy, PDFPageProxy, RenderTask, PageViewport, annotation types), plus __gnoPdfMetrics. PdfPageView imports TextLayer from ../lib/pdf; 'extend the facade, never import pdfjs-dist here' is explicit; rg single-import assertion is an acceptance item in .2 and .3.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.md"
+      ]
+    },
+    "P2": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "Non-executable dependency order: .1 tested pdfjs routes before .2 added the dependency.",
+      "resolution": "Order is .2 -> .1 -> .3 -> .4 -> .5 -> .6 -> .7. Task .2 step 0 records the clean-upstream baseline on the untouched tree at bb994b58 before bun add; .1 consumes the already-pinned lockfile-tracked dependency, no local install or coordination hand-off. Reflected identically in JSON depends_on and the MD execution-order section.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.json",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.json"
+      ]
+    },
+    "P3": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "No genuine cMap / non-embedded-font fixture; route-200 checks do not prove PDF.js uses the served assets.",
+      "resolution": "Deterministic checked-in standard-font.pdf (base-14, no FontFile stream) and cjk-cmap.pdf (Type0, /Encoding /UniJIS-UCS2-H, non-embedded CID) generated in .2. Task .6 requires, in a clean non-intercepted run, a non-blank canvas AND a successful (200, non-empty body) same-origin request to /vendor/pdfjs/standard_fonts/... and /vendor/pdfjs/cmaps/....bcmap, plus zero non-self requests across the run, with resolved asset filenames recorded in the evidence artifact.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md"
+      ]
+    },
+    "P4": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "Browser-evidence task did not cover alignment screenshots, deterministic R8 states, or mobile overview card and rails.",
+      "resolution": "Task .6 separates a clean run from page.route() interception runs; all seven R8 states are driven deterministically (delayed doc-asset, delayed ranges, zero-page fixture, corrupt, password, aborted doc-asset, and three 404-fulfilled bootstrap sub-cases for worker/cmap/standard-font). Alignment screenshots plus selection-vs-glyph overlap assertions at 100%, fit-width, and 200%. Dark and light themes at ~1380px and ~900px with the lg:hidden overview card and all three rails asserted, not merely screenshotted. Task .4 adds stable per-state test hooks so states are drivable without racing.",
+      "artifacts": [
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md"
+      ]
+    },
+    "P5": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "Performance acceptance not objectively implementable: no numeric P-3 bound, no p95 sample protocol, and a post-unmount component counter.",
+      "resolution": "P-3: 200-page fixture at 100% zoom, programmatic scroll top-to-bottom in viewport-height steps at one step per 50 ms then 2 s settle; assert total renderStart <= 60 with zero orphaned starts. P-4: 20 alternating 100%/200% commits, sample = commit to last visible renderSettle(completed), p95 = 19th of the ascending-sorted 20, <= 500 ms, plus cancel-before-restart ordering. Instrumentation is a module-level __gnoPdfMetrics owned by lib/pdf.ts attached once to globalThis (never component state) recording renderStart, renderCancel, renderSettle, pageCleanup, documentDestroy. P-6 asserts documentDestroy plus zero new renderStart in a 1 s post-navigation window. Documented in docs/WEB-UI.md as an unstable diagnostic surface, not an API contract.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md"
+      ]
+    },
+    "P6": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "Contradictory React StrictMode invariant (destroy-in-cleanup plus a 'no duplicate load' assertion).",
+      "resolution": "Invariant stated precisely: two getDocument calls under dev StrictMode are expected and permitted; (a) the first task is destroy()ed promptly by its own cleanup, (b) at most one undestroyed task survives, (c) no state write lands from a destroyed or stale task, guarded by loadingTask.destroyed plus a monotonic effect-generation token, (d) the same token covers URL-change and retry races. Tests use manually settleable deferred promises so the superseded promise settles last in both race shapes.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.md"
+      ]
+    },
+    "P7": {
+      "severity": "blocking",
+      "status": "resolved",
+      "summary": "Fallback contract incomplete: no state or prop carried the explanatory notice into DocView's Text branch.",
+      "resolution": "Explicit DocView-owned flow. PdfViewer receives extractedTextAvailable and onFallback; onFallback(reason: PdfFallbackReason) fires once per failed load only when extracted text exists. DocView owns pdfFallbackReason and sets it together with showRawView = true, rendering a persistent reason-specific notice (four distinct strings for corrupt, password, network, bootstrap) above the extracted text with an adjacent download action; the notice clears on manual toggle back to Pages. When extracted text is unavailable onFallback is not called and the viewer error card stays actionable (retry plus Download original); the combined 'No extracted text' sub-state keeps the download reachable. Tests required for all four reasons and both directions.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md"
+      ]
+    },
+    "P8": {
+      "severity": "blocking",
+      "status": "reconciled_within_authorized_boundary",
+      "summary": "Hosted gno.sh documentation was deferred as a vague follow-up, conflicting with AGENTS.md's same-change requirement.",
+      "resolution": "Reconciled with the user's explicit single-repository / no-publication boundary. /home/claw/work/gno.sh is NOT added to the plan and must not be touched, cloned, edited, gated, or deployed. In-repo documentation is made complete (docs/API.md, docs/WEB-UI.md, src/serve/CLAUDE.md, website/_data/features.yml, CHANGELOG.md, docs:verify) and is the full documentation deliverable. Task .7 additionally produces a ready-to-apply in-repo brief at .flow/handoff/fn-112-gno-sh-docs-brief.md with exact gno.sh files, drafted copy, rationale, and the Live-QA checklist (local drive at :3344, then post-deploy verification). The hosted-site source and deploy procedure is recorded explicitly as an external post-merge owner handoff and explicitly NOT a completion dependency of this spec, because cross-repository work and publication are unauthorized in this run. An acceptance item asserts that no artifact claims hosted docs were updated, QA'd, or deployed.",
+      "gno_sh_touched": false,
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md"
+      ]
+    },
+    "N1": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "Add HEAD behavior tests for the new vendor routes.",
+      "resolution": "GET and HEAD tests required per /vendor/pdfjs/ route (HEAD returns matching headers with an empty body); HEAD verification also carried into the package smoke.",
+      "artifacts": [
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md"
+      ]
+    },
+    "N2": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "Realpath hardening must canonicalize both root and candidate; non-ENOENT errors must fail closed.",
+      "resolution": "Both the configured root and the candidate are canonicalized before containment comparison; only candidate ENOENT falls back to the lexical verdict; every other realpath error (EACCES, ELOOP, ...) fails closed, with a dedicated unit test.",
+      "artifacts": [".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md"]
+    },
+    "N3": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "Assert the no-unsafe-eval condition directly rather than relying on the JS-action browser fixture.",
+      "resolution": "Direct security-test assertion that no CSP directive contains unsafe-eval, explicitly not relying on the task-.6 fixture alone; frame-ancestors 'none', object-src 'none', and X-Frame-Options DENY re-asserted including on a doc-asset response.",
+      "artifacts": [".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md"]
+    },
+    "N4": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "PageUp/PageDown/arrow handling must call preventDefault only when the viewer handles the shortcut.",
+      "resolution": "preventDefault only when handled; out-of-scope cases (focus in page input, disabled/zero-page controls, page boundaries with no action) leave the event unprevented so native scrolling survives. Both halves asserted: handled key -> defaultPrevented true and state changed; unhandled -> defaultPrevented false and no state change.",
+      "artifacts": [".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md"]
+    },
+    "N5": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "basename(doc.relPath) asset-path derivation should be validated against recordSourcePath/container-backed cases.",
+      "resolution": "Derivation must be validated, not assumed: exercised against nested relPath, recordSourcePath-backed, and container-backed documents, plus a same-basename sibling. If basename cannot uniquely resolve, use the full relPath or recorded source path and document the choice. Tests must prove the derived URL resolves the actual indexed PDF and cannot select the sibling.",
+      "artifacts": [".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md"]
+    },
+    "N6": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "Package smoke should launch the installed binary and verify response bodies, not just status and size.",
+      "resolution": "Package smoke launches the installed global binary (not repo source) and asserts each response body is byte-identical (or content-hash equal) to the corresponding file inside the installed pdfjs-dist dependency; HEAD headers checked too.",
+      "artifacts": [".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md"]
+    },
+    "N7": {
+      "severity": "non_blocking",
+      "status": "incorporated",
+      "summary": "Confirm frontend-design plugin availability before tasks .3-.5 or document the blocking escalation path.",
+      "resolution": "The frontend-design:frontend-design availability gate is stated in the spec execution notes and restated as a pre-start gate on task .4 (escalate and flowctl block if unavailable; server-side .1 and lib/fixtures .2 may still proceed). The plugin was invoked during this repair pass and the pinned Scholarly Dusk direction was preserved unchanged.",
+      "artifacts": [
+        ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+        ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md"
+      ]
+    }
+  },
+  "dependency_order": {
+    "linear": [
+      "fn-112-native-pdfjs-document-renderer.2",
+      "fn-112-native-pdfjs-document-renderer.1",
+      "fn-112-native-pdfjs-document-renderer.3",
+      "fn-112-native-pdfjs-document-renderer.4",
+      "fn-112-native-pdfjs-document-renderer.5",
+      "fn-112-native-pdfjs-document-renderer.6",
+      "fn-112-native-pdfjs-document-renderer.7"
+    ],
+    "depends_on": {
+      "fn-112-native-pdfjs-document-renderer.2": [],
+      "fn-112-native-pdfjs-document-renderer.1": ["fn-112-native-pdfjs-document-renderer.2"],
+      "fn-112-native-pdfjs-document-renderer.3": [
+        "fn-112-native-pdfjs-document-renderer.2",
+        "fn-112-native-pdfjs-document-renderer.1"
+      ],
+      "fn-112-native-pdfjs-document-renderer.4": ["fn-112-native-pdfjs-document-renderer.3"],
+      "fn-112-native-pdfjs-document-renderer.5": [
+        "fn-112-native-pdfjs-document-renderer.1",
+        "fn-112-native-pdfjs-document-renderer.4"
+      ],
+      "fn-112-native-pdfjs-document-renderer.6": ["fn-112-native-pdfjs-document-renderer.5"],
+      "fn-112-native-pdfjs-document-renderer.7": ["fn-112-native-pdfjs-document-renderer.6"]
+    },
+    "acyclic": true,
+    "md_json_consistent": true,
+    "all_tasks_status": "todo"
+  },
+  "changed_files": [
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md",
+    ".flow/reviews/fn-112-opus-plan-revision.md",
+    ".flow/reviews/fn-112-opus-plan-revision.json"
+  ],
+  "unchanged_verified_files": [
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.json"
+  ],
+  "validation": {
+    "commands": [
+      {
+        "command": "./.flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer --json",
+        "exit_status": 0,
+        "output": "{\"success\": true, \"spec\": \"fn-112-native-pdfjs-document-renderer\", \"valid\": true, \"errors\": [], \"warnings\": [], \"task_count\": 7}"
+      },
+      {
+        "command": "git diff --check",
+        "exit_status": 0,
+        "output": ""
+      },
+      {
+        "command": "git rev-parse HEAD",
+        "exit_status": 0,
+        "output": "bb994b580356a41a31093fea85b06993c1a18e4c"
+      },
+      {
+        "command": "git status --porcelain .flow/",
+        "exit_status": 0,
+        "output": "Only untracked/modified planning artifacts under .flow/; no product files, no commits."
+      }
+    ],
+    "valid": true,
+    "task_count": 7,
+    "errors": [],
+    "warnings": []
+  },
+  "boundaries_observed": {
+    "product_code_written": false,
+    "dependencies_installed": false,
+    "product_tests_run": false,
+    "committed": false,
+    "pushed": false,
+    "pr_opened": false,
+    "published_or_indexed": false,
+    "gno_or_daniel_os_touched": false,
+    "other_repositories_modified": false,
+    "gno_sh_touched": false,
+    "approval_or_ship_stamped": false
+  },
+  "next_step": "Independent plan re-review of the repaired artifacts. The gate remains needs_work; implementation must not begin until that review passes."
+}

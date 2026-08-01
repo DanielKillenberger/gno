@@ -1,0 +1,26 @@
+{
+  "reviewer": "Sol",
+  "canonical_model": "gpt-5.6-sol",
+  "stage": "implementation-review",
+  "scope": "task",
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.2",
+  "verdict": "NEEDS_WORK",
+  "review_mode": "read-only",
+  "blocking_findings": [
+    {"id":"I2-1","summary":"Task .2 lint and typecheck gates fail in the fixture generator and PDF facade."},
+    {"id":"I2-2","summary":"The focused PDF facade test is ignored by the repository lib/ ignore rule."},
+    {"id":"I2-3","summary":"Existing DOCX, PPTX, XLSX and sample PDF fixtures were nondeterministically regenerated and must be reverted."},
+    {"id":"I2-4","summary":"js-action.pdf contains names-tree JavaScript, not the required catalog OpenAction."},
+    {"id":"I2-5","summary":"viewer-links.pdf and js-action.pdf do not reproduce from the current generator."},
+    {"id":"I2-6","summary":"Opaque per-load document IDs, real-load privacy testing and frozen returned-event evidence are incomplete."},
+    {"id":"I2-7","summary":"Task state and done evidence do not reflect failed gates or implementation review."}
+  ],
+  "tests": [
+    {"command":"bun test test/serve/public/lib/pdf.test.ts","result":"17 pass, 0 fail"},
+    {"command":"bun run lint:check","result":"failed with task .2 errors"},
+    {"command":"bun x tsc --noEmit","result":"failed with task .2 errors"},
+    {"command":"two isolated fixture generations and hash comparison","result":"unrelated fixture churn and two fn-112 mismatches"}
+  ],
+  "repository_files_modified_by_reviewer": []
+}

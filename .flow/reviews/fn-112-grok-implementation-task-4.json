@@ -1,0 +1,112 @@
+{
+  "schema": "fn-112-grok-implementation-task-4",
+  "schema_version": 1,
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_id": "fn-112-native-pdfjs-document-renderer.4",
+  "owner": "Grok 4.5",
+  "canonical_model": "grok-4.5",
+  "session_id": "019fb8d5-7418-7a11-963b-1a206a7af924",
+  "branch": "feat/native-pdf-renderer",
+  "frontend_design_gate": {
+    "status": "satisfied",
+    "recorded_at": "2026-07-31",
+    "receipts": [
+      ".flow/reviews/fn-112-opus-plan-repair-task-4-design.md",
+      ".flow/reviews/fn-112-opus-plan-repair-task-4-design.json"
+    ],
+    "noncanonical_brief": "/home/claw/.claude/plans/use-frontend-design-frontend-design-now-cached-widget.md",
+    "canonical_supersedes_brief": true,
+    "re_invocation": false
+  },
+  "plan_gate": {
+    "path": ".flow/reviews/fn-112-sol-plan-rereview-task4-progressive-final.json",
+    "verdict": "SHIP",
+    "reviewer": "Sol"
+  },
+  "baseline_comparison": {
+    "receipt": ".flow/reviews/fn-112-baseline-receipt.json",
+    "base_sha": "bb994b580356a41a31093fea85b06993c1a18e4c",
+    "test_web_baseline_pass": 186,
+    "test_web_current_pass": 256,
+    "note": "Delta is additive fn-112 DOM suites (.3+.4); no new failures vs baseline"
+  },
+  "preserved": {
+    "tasks_1_3_sol_ship": true,
+    "no_architecture_edits": true,
+    "no_spec_edits": true,
+    "no_task_5_plus": true,
+    "no_commit_push_pr": true
+  },
+  "deliverables": [
+    "src/serve/public/components/pdf/PdfToolbar.tsx",
+    "src/serve/public/components/pdf/PdfViewer.tsx",
+    "test/serve/public/components/pdf/PdfToolbar.dom.test.tsx",
+    "test/serve/public/components/pdf/PdfViewer.dom.test.tsx",
+    "src/serve/public/globals.css"
+  ],
+  "acceptance": {
+    "toolbar": "pass",
+    "keyboard": "pass",
+    "states_exact_copy": "pass",
+    "progressive_no_card": "pass",
+    "fallback_once_all_four_and_false": "pass",
+    "fallback_retry_new_attempt": "pass",
+    "responsive_lg": "pass",
+    "scholarly_dusk_tokens": "pass",
+    "stable_hooks": "pass",
+    "genId_on_zoom_fit": "pass",
+    "reduced_motion_scroll": "pass",
+    "no_view_toggle": "pass",
+    "no_iframe_object_embed": "pass"
+  },
+  "commands": [
+    {
+      "command": "bun test test/serve/public/components/pdf",
+      "exit_status": 0,
+      "result": "35 pass, 0 fail"
+    },
+    {
+      "command": "bun test test/serve/public/hooks test/serve/public/lib/pdf.test.ts test/serve/fn112-production-routes.test.ts test/serve/security.test.ts",
+      "exit_status": 0,
+      "result": "69 pass, 0 fail (.1-.3 regression surface)"
+    },
+    {
+      "command": "bun run test:web",
+      "exit_status": 0,
+      "result": "256 pass, 0 fail (baseline 186)"
+    },
+    {
+      "command": "bun run lint:check",
+      "exit_status": 0,
+      "result": "0 errors, format clean"
+    },
+    {
+      "command": "bunx tsc --noEmit",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "forbidden greps (pdfjs-dist in components, xl/2xl, raw hex, embeds, view-toggle progressive card)",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": ".flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer",
+      "exit_status": 0,
+      "result": "valid"
+    }
+  ],
+  "no_sol_ship_claimed": true,
+  "remaining_gate": "independent Sol implementation review of task .4",
+  "task_status_after": "done",
+  "finished_at": "2026-07-31T19:18:00Z",
+  "status": "superseded_incomplete",
+  "superseded_by": ".flow/reviews/fn-112-grok-implementation-task-4-repair.{md,json}",
+  "superseded_reason": "Sol NEEDS_WORK B1–B4 in .flow/reviews/fn-112-sol-impl-review-task-4.json",
+  "superseded_at": "2026-07-31T19:30:00Z"
+}

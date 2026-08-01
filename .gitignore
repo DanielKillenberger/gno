@@ -20,6 +20,15 @@ logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
+# Flow review process transcripts (keep canonical receipts and evidence)
+.flow/reviews/*.events.jsonl
+.flow/reviews/*.log
+.flow/reviews/*.raw.txt
+.flow/reviews/*.raw.json
+.flow/reviews/*-prompt.md
+.flow/reviews/*.prompt.md
+.flow/reviews/*.schema.json
+
 # dotenv environment variable files
 .env
 .env.development.local
@@ -48,6 +57,9 @@ eggs/
 .eggs/
 lib/
 !src/serve/public/lib/
+# Track focused unit tests under test/**/lib/ (Python lib/ ignore must not hide them)
+!test/serve/public/lib/
+!test/serve/public/lib/**
 lib64/
 parts/
 sdist/

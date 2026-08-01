@@ -1,0 +1,11 @@
+bun test v1.3.14 (0d9b296a)
+
+test/serve/public/hooks/use-pdf-pages.dom.test.tsx:
+Warning: Please use the `legacy` build in Node.js environments.
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+ 14 pass
+ 0 fail
+ 162 expect() calls
+Ran 14 tests across 1 file. [3.66s]

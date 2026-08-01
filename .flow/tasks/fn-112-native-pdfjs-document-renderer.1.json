@@ -1,0 +1,27 @@
+{
+  "created_at": "2026-07-31T14:09:19.206770Z",
+  "depends_on": [
+    "fn-112-native-pdfjs-document-renderer.2"
+  ],
+  "id": "fn-112-native-pdfjs-document-renderer.1",
+  "priority": null,
+  "spec": "fn-112-native-pdfjs-document-renderer",
+  "spec_path": ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md",
+  "status": "done",
+  "title": "Harden doc-asset with Range support and add same-origin pdfjs asset routes plus CSP worker-src",
+  "updated_at": "2026-07-31T17:05:50.316920Z",
+  "last_summary": "Repair round 3 I1-04: single production handlePdfjsVendorRequest for all /vendor/pdfjs/* via server fetch; exact 404/405 envelopes + security headers. Sol round-4 review candidate; no Sol SHIP claimed.",
+  "last_evidence": {
+    "repair_receipt": ".flow/reviews/fn-112-grok-task-1-repair-round3.json",
+    "tests": [
+      "bun test test/serve/fn112-production-routes.test.ts test/serve/api-doc-assets.test.ts test/serve/security.test.ts \u2192 45 pass",
+      "bun test test/serve/public/lib/pdf.test.ts \u2192 22 pass",
+      "bun run lint:check \u2192 0",
+      "bunx tsc --noEmit \u2192 clean",
+      "git diff --check \u2192 clean",
+      ".flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer --json \u2192 valid:true"
+    ],
+    "remaining_gate": "independent Sol re-review round 4",
+    "no_sol_ship_claimed": true
+  }
+}

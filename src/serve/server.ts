@@ -17,6 +17,11 @@ import {
 import { startBackgroundRuntime } from "./background-runtime";
 import { handleContextBuild, handleContextVerify } from "./context-capsule";
 import { DocumentEventBus } from "./doc-events";
+import {
+  createDocAssetRouteHandlers,
+  handlePdfjsVendorRequest,
+  isPdfjsVendorPath,
+} from "./fn112-routes";
 // HTML import - Bun handles bundling TSX/CSS automatically via routes
 import homepage from "./public/index.html";
 import { handleResidentRead } from "./resident-request";
@@ -38,7 +43,6 @@ import {
   handleDeactivateDoc,
   handleDeleteCollection,
   handleDoc,
-  handleDocAsset,
   handleDocSections,
   handleDocsAutocomplete,
   handleDocs,
@@ -135,7 +139,8 @@ interface StartServerDependencies {
  * Get CSP based on environment.
  * Dev mode allows WebSocket connections for HMR.
  */
-function getCspHeader(isDev: boolean): string {
+/** Exported for security tests (CSP contract). */
+export function getCspHeader(isDev: boolean): string {
   // Local fonts only - no Google Fonts for true offline-first
   const base = [
     "default-src 'self'",
@@ -143,6 +148,7 @@ function getCspHeader(isDev: boolean): string {
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: blob:",
+    "worker-src 'self'", // explicit for PDF.js module worker (fn-112)
     "frame-ancestors 'none'",
     "base-uri 'none'", // Prevent base tag injection
     "object-src 'none'", // Prevent plugin execution
@@ -160,20 +166,39 @@ function getCspHeader(isDev: boolean): string {
 
 /**
  * Apply security headers to a Response.
+ * Exported for unit tests that assert the envelope on specific responses.
+ *
+ * Mutates headers on the original Response when possible. Re-wrapping via
+ * `new Response(response.body, …)` breaks Bun.file().slice() range bodies
+ * (the stream re-reads the full file), which would corrupt HTTP 206 slices.
  */
-function withSecurityHeaders(response: Response, isDev: boolean): Response {
-  const headers = new Headers(response.headers);
-  headers.set("Content-Security-Policy", getCspHeader(isDev));
-  headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("X-Frame-Options", "DENY");
-  headers.set("Referrer-Policy", "no-referrer");
-  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+export function withSecurityHeaders(
+  response: Response,
+  isDev: boolean
+): Response {
+  const apply = (headers: Headers): void => {
+    headers.set("Content-Security-Policy", getCspHeader(isDev));
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("X-Frame-Options", "DENY");
+    headers.set("Referrer-Policy", "no-referrer");
+    headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  };
 
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  try {
+    apply(response.headers);
+    return response;
+  } catch {
+    // Headers locked — fall back to a new envelope. Prefer cloning via
+    // arrayBuffer only when body is already consumed is not possible here
+    // (sync API); empty-body responses (HEAD/416) are the common case.
+    const headers = new Headers(response.headers);
+    apply(headers);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
 }
 
 /**
@@ -261,6 +286,62 @@ export async function startServer(
 
   // Start server with try/catch for port-in-use etc.
   let server: ReturnType<typeof Bun.serve>;
+  // Bun HTMLBundle route values cannot carry custom headers. Serve the bundle
+  // on an unguessable internal path, then re-emit public SPA routes through
+  // withSecurityHeaders so document navigations get CSP / XFO / etc.
+  const spaInternalPath = `/__gno_spa_${crypto.randomUUID().replaceAll("-", "")}`;
+  let spaHtmlCache: {
+    body: ArrayBuffer;
+    contentType: string;
+    etag: string | null;
+  } | null = null;
+
+  const serveSpaHtml = async (): Promise<Response> => {
+    if (!isDev && spaHtmlCache) {
+      const headers = new Headers({
+        "Content-Type": spaHtmlCache.contentType,
+      });
+      if (spaHtmlCache.etag) {
+        headers.set("ETag", spaHtmlCache.etag);
+      }
+      return withSecurityHeaders(
+        new Response(spaHtmlCache.body.slice(0), { headers }),
+        isDev
+      );
+    }
+    const boundPort = server.port ?? port;
+    const raw = await fetch(`http://127.0.0.1:${boundPort}${spaInternalPath}`);
+    if (!raw.ok) {
+      return withSecurityHeaders(
+        new Response("SPA unavailable", { status: 503 }),
+        isDev
+      );
+    }
+    if (!isDev) {
+      spaHtmlCache = {
+        body: await raw.arrayBuffer(),
+        contentType:
+          raw.headers.get("content-type") ?? "text/html;charset=utf-8",
+        etag: raw.headers.get("etag"),
+      };
+      const headers = new Headers({
+        "Content-Type": spaHtmlCache.contentType,
+      });
+      if (spaHtmlCache.etag) {
+        headers.set("ETag", spaHtmlCache.etag);
+      }
+      return withSecurityHeaders(
+        new Response(spaHtmlCache.body.slice(0), { headers }),
+        isDev
+      );
+    }
+    return withSecurityHeaders(raw, isDev);
+  };
+
+  const spaPageRoute = {
+    GET: serveSpaHtml,
+  };
+
   try {
     server = (dependencies.serve ?? Bun.serve)({
       port,
@@ -276,18 +357,20 @@ export async function startServer(
           isHttpGatewayLoopbackBind(gatewayConfig.host),
           clipperGateway
         ),
-        // SPA routes - all serve the same React app
-        "/": homepage,
-        "/search": homepage,
-        "/browse": homepage,
-        "/doc": homepage,
-        "/edit": homepage,
-        "/collections": homepage,
-        "/connectors": homepage,
-        "/traces": homepage,
-        "/ask": homepage,
-        "/graph": homepage,
-        "/clipper/pair": homepage,
+        // Internal HTMLBundle (no public links). Public SPA routes wrap it.
+        [spaInternalPath]: homepage,
+        // SPA routes - same React app, security envelope on every document
+        "/": spaPageRoute,
+        "/search": spaPageRoute,
+        "/browse": spaPageRoute,
+        "/doc": spaPageRoute,
+        "/edit": spaPageRoute,
+        "/collections": spaPageRoute,
+        "/connectors": spaPageRoute,
+        "/traces": spaPageRoute,
+        "/ask": spaPageRoute,
+        "/graph": spaPageRoute,
+        "/clipper/pair": spaPageRoute,
 
         // API routes with CSRF protection wrapper
         "/api/health": {
@@ -750,17 +833,17 @@ export async function startServer(
             );
           },
         },
-        "/api/doc-asset": {
-          GET: async (req: Request) => {
-            const url = new URL(req.url);
-            return withSecurityHeaders(
-              await handleResidentRead(runtime as ResidentRuntime, req, () =>
-                handleDocAsset(store, ctxHolder.config, url)
-              ),
-              isDev
-            );
-          },
-        },
+        // fn-112: production factories shared with route-level tests (I1-04)
+        "/api/doc-asset": createDocAssetRouteHandlers({
+          store,
+          getConfig: () => ctxHolder.config,
+          runtime: runtime as ResidentRuntime,
+          isDev,
+          withSecurityHeaders,
+        }),
+        // Vendor assets are NOT mounted as valid-only patterns here.
+        // ALL /vendor/pdfjs/* traffic is handled by handlePdfjsVendorRequest
+        // in the fetch fallback below (same production dispatcher tests use).
         "/api/events": {
           GET: (req: Request) => {
             const residentRuntime = runtime as ResidentRuntime;
@@ -1135,6 +1218,22 @@ export async function startServer(
             );
           },
         },
+      },
+      // Production vendor dispatcher for the entire /vendor/pdfjs prefix.
+      // Covers valid worker/cMap/font AND malformed/unknown/POST — same function
+      // that tests invoke (no test-only fallback path).
+      fetch: async (req: Request): Promise<Response> => {
+        const pathname = new URL(req.url).pathname;
+        if (isPdfjsVendorPath(pathname)) {
+          return handlePdfjsVendorRequest(req, {
+            isDev,
+            withSecurityHeaders,
+          });
+        }
+        return withSecurityHeaders(
+          new Response("Not Found", { status: 404 }),
+          isDev
+        );
       },
     });
   } catch (e) {

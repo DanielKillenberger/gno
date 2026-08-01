@@ -1,0 +1,10 @@
+bun test v1.3.14 (0d9b296a)
+
+test/serve/public/lib/pdf.test.ts:
+Warning: Please use the `legacy` build in Node.js environments.
+Warning: UnknownErrorException: Unable to load font data at: file://<home>/work/gno-pdf-renderer/node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf
+
+ 23 pass
+ 0 fail
+ 173 expect() calls
+Ran 23 tests across 1 file. [532.00ms]

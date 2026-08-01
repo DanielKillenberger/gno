@@ -3,3 +3,6 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# PDF fixtures are binary even when their object streams are plain ASCII.
+*.pdf binary

@@ -1,0 +1,78 @@
+{
+  "reviewer": "Sol",
+  "canonical_model": "gpt-5.6-sol",
+  "stage": "plan-review",
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "verdict": "REVISE",
+  "blocking_findings": [
+    {
+      "id": "P9",
+      "severity": "blocking",
+      "location": ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md Performance evidence P-4; .flow/specs/fn-112-native-pdfjs-document-renderer.md P-4",
+      "finding": "The revised P-4 protocol is internally impossible. Each latency sample waits through the last visible renderSettle(completed), so the next zoom commit has no in-flight render to cancel. Nevertheless, task .6 requires renderCancel to precede the new renderStart on every commit. A correctly implemented renderer may therefore fail the acceptance criterion precisely because the preceding render already completed.",
+      "required_change": "Separate the measurements: retain 20 sequential commit-to-settle samples for p95 latency, but add a distinct deliberately-overlapped zoom/fit sequence that commits again while rendering is demonstrably in flight and asserts cancel → cancelled settle → replacement renderStart ordering. Do not require a cancellation for commits made after prior work settled."
+    },
+    {
+      "id": "P10",
+      "severity": "blocking",
+      "location": ".flow/specs/fn-112-native-pdfjs-document-renderer.md Failure modes/R8; .flow/tasks/fn-112-native-pdfjs-document-renderer.4.md and .6.md bootstrap-failure coverage",
+      "finding": "The plan assumes that fulfilling cMap and standard-font requests with 404 will produce the same classified document-load bootstrap failure as a worker failure. PDF.js can treat missing auxiliary cMap/font data as page-render warnings or degraded output rather than rejecting getDocument, while the proposed classifier and fallback flow only consume document-load errors. Thus the required cMap/font fallback screenshots and notices are not guaranteed to be reachable through the specified architecture.",
+      "required_change": "Define an executable error propagation contract for auxiliary-asset failures, including whether page-render failures are surfaced from use-pdf-pages to PdfViewer and classified as bootstrap errors. Add deterministic tests for that path. Alternatively limit the R8 bootstrap-state proof to worker bootstrap failure, as R18 already states, and test cMap/font 404 behavior according to PDF.js's observed semantics without requiring an unsupported fallback transition."
+    },
+    {
+      "id": "P11",
+      "severity": "blocking",
+      "location": ".flow/specs/fn-112-native-pdfjs-document-renderer.json:branch_name",
+      "finding": "The canonical spec JSON names branch `fn-112-native-pdfjs-document-renderer`, while the user-specified and actual current branch is `feat/native-pdf-renderer`. This is unresolved repository-metadata inconsistency under a gate that explicitly requires MD/JSON consistency and implementation from the current artifacts.",
+      "required_change": "Reconcile `branch_name` with the authorized current branch, or explicitly document why Flow-Next branch metadata intentionally differs and prove the implementation workflow will not create or target the wrong branch."
+    }
+  ],
+  "non_blocking_observations": [
+    {
+      "id": "N8",
+      "location": ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md baseline step",
+      "observation": "The baseline ordering is now executable because task .2 has no dependencies and records the baseline before dependency/product changes. Preserve the baseline artifacts independently of later task cleanup."
+    },
+    {
+      "id": "N9",
+      "location": ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md asset URL derivation",
+      "observation": "The existing endpoint resolves a relative asset path from dirname(recordSourcePath ?? relPath), so a basename is the natural self-PDF path. The demanded nested/container/recordSourcePath and same-basename tests appropriately prevent this from remaining an assumption."
+    },
+    {
+      "id": "N10",
+      "location": ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md; spec Boundaries/R16",
+      "observation": "P8 is appropriately reconciled with the user's explicit single-repository/no-publication authorization: in-repo documentation and a mechanical hosted-site handoff brief are required, while gno.sh mutation, QA, deployment, push, PR, and publication are excluded."
+    }
+  ],
+  "coverage_summary": "P1, P2, P3, P6, P7 and observations N1-N7 are materially incorporated: the facade contract is coherent; dependency order is executable; genuine font/cMap fixtures and behavioral offline proof are required; StrictMode and stale-load races are precise; fallback state is DocView-owned; Range/realpath, CSP/framing, safe-link/no-scripting, accessibility, asset derivation, installed-package smoke, and frontend-design gating are covered. P4/P5 are not fully resolved because the P-4 cancellation protocol is contradictory and auxiliary cMap/font failure states lack a guaranteed propagation path. The spec JSON also disagrees with the active branch. Canonical Grok 4.5 must not begin implementation from these artifacts.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "src/serve/AGENTS.md",
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.1.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.2.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.3.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.6.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.7.json",
+    ".flow/reviews/fn-112-sol-plan-review.json",
+    ".flow/reviews/fn-112-opus-plan-revision.md",
+    ".flow/reviews/fn-112-opus-plan-revision.json",
+    "package.json",
+    "src/serve/routes/api.ts",
+    "src/serve/server.ts",
+    "src/serve/public/pages/DocView.tsx",
+    "scripts/generate-test-fixtures.ts",
+    "scripts/package-smoke.ts",
+    "test/serve/api-doc-assets.test.ts"
+  ]
+}

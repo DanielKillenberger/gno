@@ -1,0 +1,42 @@
+{
+  "owner": "Opus 5",
+  "canonical_model_observed": "claude-opus-5",
+  "provider": "firstParty",
+  "stage": "plan-repair-continuation",
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "status": "blocked_partial_unapproved",
+  "session_id": "e7adf80b-7f3e-4416-990c-deb4bd4f8893",
+  "process_exit_status": 143,
+  "structured_terminal_reason": "aborted_streaming",
+  "structured_subtype": "error_during_execution",
+  "is_error": true,
+  "num_turns": 5,
+  "permission_denials": [],
+  "structured_result": ".flow/reviews/fn-112-opus-plan-repair-continuation.result.json",
+  "stderr_log": ".flow/reviews/fn-112-opus-plan-repair-continuation.stderr.log",
+  "prompt": ".flow/reviews/fn-112-opus-plan-repair-continuation-prompt.md",
+  "receipt_state": {
+    ".flow/reviews/fn-112-opus-plan-revision.json": "in_progress",
+    ".flow/reviews/fn-112-opus-plan-revision.md": "missing"
+  },
+  "flow_validation_after_failure": {
+    "command": "./.flow/bin/flowctl validate --spec fn-112-native-pdfjs-document-renderer --json",
+    "exit_status": 0,
+    "success": true,
+    "valid": true,
+    "errors": [],
+    "warnings": [],
+    "task_count": 7
+  },
+  "git_diff_check_after_failure": {
+    "command": "git diff --check",
+    "exit_status": 0
+  },
+  "gate_state": "needs_work",
+  "plan_transaction_approved": false,
+  "implementation_performed": false,
+  "sol_rereview_dispatched": false,
+  "grok_dispatched": false,
+  "additional_opus_calls_allowed": false,
+  "blocker_summary": "The sole authorized resume call reached canonical claude-opus-5 but aborted during streaming before reconciliation and final receipts completed. Per the user stop rule and no-further-Opus constraint, the lifecycle remains blocked at plan repair."
+}

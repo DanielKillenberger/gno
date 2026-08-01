@@ -1,0 +1,156 @@
+{
+  "artifact": "fn-112-opus-plan-repair-task-4-design",
+  "kind": "plan_clarification",
+  "spec_id": "fn-112-native-pdfjs-document-renderer",
+  "task_in_scope": "fn-112-native-pdfjs-document-renderer.4",
+  "created_at": "2026-07-31T16:45:00.000000Z",
+  "model": "claude-opus-5",
+  "effort": "medium",
+  "session": "4fc6c33e-828c-483a-b431-92956a1f64d2",
+  "frontend_design_gate": {
+    "skill": "frontend-design:frontend-design",
+    "invoked": true,
+    "invocation": "isolated explicit plugin invocation in host session",
+    "result": "success",
+    "gate_satisfied_for_task": "fn-112-native-pdfjs-document-renderer.4",
+    "design_brief_path": "/home/claw/.claude/plans/use-frontend-design-frontend-design-now-cached-widget.md",
+    "brief_is_canonical": false,
+    "note": "Brief is an input; the .flow spec text is authoritative where they could differ."
+  },
+  "gaps_resolved": [
+    {
+      "id": "G1",
+      "title": "Absent canonical state copy referenced as 'verbatim'",
+      "resolution": "Spec gains a 'Canonical state copy' table fixing eyebrow, body, actions, and test hook for all seven states; progressive is defined as placeholder-only with no copy and no card.",
+      "preserved_verbatim_strings": [
+        {
+          "string": "Preparing document…",
+          "home": "viewer loading state (task .4)",
+          "note": "U+2026 ellipsis, not three dots"
+        },
+        {
+          "string": "This PDF could not be rendered. View the extracted text or download the original.",
+          "home": "DocView corrupt-reason fallback notice (task .5)",
+          "rationale": "The viewer error card is only reachable when extractedTextAvailable === false, so it must not point at extracted text that does not exist; the card carries the no-extracted-text variant instead."
+        }
+      ],
+      "new_canonical_strings": {
+        "empty": "This PDF has no pages.",
+        "corrupt_card": "This PDF could not be rendered. Download the original to read it.",
+        "password": "This PDF is password protected. Download the original to open it in a PDF reader.",
+        "network": "The document could not be loaded from this session. Try again, or download the original.",
+        "bootstrap": "The PDF viewer could not start in this window. Download the original to read it."
+      },
+      "fixed_action_labels": ["Try again", "Download original"]
+    },
+    {
+      "id": "G2",
+      "title": "Pages/Text toggle ownership contradiction",
+      "resolution": "DocView is the single owner via the existing showRawView floating pill (DocView.tsx:1583-1607), per R19 and task .5. The design-direction toolbar-contents sentence no longer lists a view toggle; a 'View-toggle ownership' subsection and the PdfToolbar component-table row state that the rail renders none; a duplicate toggle is declared a defect."
+    },
+    {
+      "id": "G3",
+      "title": "Ambiguous arrow-key semantics",
+      "resolution": "ArrowLeft/ArrowRight page alongside PageUp/PageDown; ArrowUp/ArrowDown/Home/End/Space are never handled and never preventDefault()ed so native scrolling survives. Recorded as the authoritative 'Keyboard arrow semantics' N4 table. Adds a JS prefers-reduced-motion guard for programmatic scroll-into-view."
+    },
+    {
+      "id": "G4",
+      "title": "FitMode 'custom' presentation unspecified",
+      "resolution": "Two visible segments over the three-member FitMode; an explicit zoom commit sets 'custom' and leaves both segments aria-pressed=\"false\"."
+    }
+  ],
+  "changed_paths": [
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.json",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md",
+    ".flow/reviews/fn-112-opus-plan-repair-task-4-design.md",
+    ".flow/reviews/fn-112-opus-plan-repair-task-4-design.json"
+  ],
+  "metadata_changes": {
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.json": {
+      "plan_review_status": { "from": "ship", "to": "unknown" },
+      "plan_reviewed_at": { "from": "2026-07-31T15:39:17.828662Z", "to": null },
+      "ready": { "from": true, "to": false },
+      "updated_at": { "from": "2026-07-31T15:39:18.241962Z", "to": "2026-07-31T16:45:00.000000Z" }
+    },
+    "unchanged_fields_preserved": [
+      "status",
+      "next_task",
+      "plan_review_rounds",
+      "impl_review_rounds",
+      "completion_review_status",
+      "completion_reviewed_at",
+      "branch_name",
+      "tracker",
+      "created_at",
+      "spec_path",
+      "title"
+    ],
+    "task_json_modified": false,
+    "task_4_status": "todo",
+    "receipts_preserved": [
+      ".flow/reviews/fn-112-baseline-receipt.json",
+      ".flow/reviews/fn-112-sol-final-plan-review.json"
+    ]
+  },
+  "prior_approval": {
+    "previous_plan_review_status": "ship",
+    "previous_plan_reviewed_at": "2026-07-31T15:39:17.828662Z",
+    "invalidated": true,
+    "reason": "Approved plan text changed by this clarification.",
+    "historical_review_artifacts_edited": false,
+    "status_values_source": "flowctl spec set-plan-review-status choices: ship | needs_work | unknown; readiness is a boolean spec-level flag (flowctl spec ready/unready). No unsupported value invented."
+  },
+  "sources": [
+    "/home/claw/.claude/plans/use-frontend-design-frontend-design-now-cached-widget.md",
+    ".flow/specs/fn-112-native-pdfjs-document-renderer.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.4.md",
+    ".flow/tasks/fn-112-native-pdfjs-document-renderer.5.md",
+    "docs/adr/001-scholarly-dusk-design-system.md",
+    "src/serve/AGENTS.md",
+    "src/serve/CLAUDE.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "src/serve/public/hooks/use-pdf-document.ts",
+    "src/serve/public/hooks/use-pdf-pages.ts",
+    "src/serve/public/lib/pdf.ts",
+    "src/serve/public/components/pdf/PdfPageView.tsx",
+    "src/serve/public/pages/DocView.tsx",
+    "src/serve/public/components/ui/button.tsx",
+    "src/serve/public/components/ui/input.tsx",
+    "src/serve/public/components/ui/tooltip.tsx",
+    "src/serve/public/globals.css"
+  ],
+  "validation": {
+    "bash_available": false,
+    "bash_note": "flowctl and git diff invocations were permission-denied in this session; metadata was edited directly in the documented sidecar shape.",
+    "cli_deviation": "flowctl set-plan-review-status stamps plan_reviewed_at = now(); this repair set it to null instead, because no review occurred at that moment and null is the never-reviewed value.",
+    "flowctl_validate": "pending_independent_orchestrator_run",
+    "diff_check": "pending_independent_orchestrator_run",
+    "read_only_self_checks": {
+      "four_clarifications_present_in_spec_md": true,
+      "four_clarifications_present_in_task_4_md": true,
+      "ownership_clarification_present_in_task_5_md": true,
+      "spec_json_well_formed_with_intended_changes_only": true
+    }
+  },
+  "scope": {
+    "production_code_changed": false,
+    "test_code_changed": false,
+    "task_started": false,
+    "task_completed": false,
+    "committed": false,
+    "pushed": false,
+    "pr_opened": false,
+    "other_agents_invoked": false,
+    "architecture_or_scope_changed": false,
+    "palette_or_type_system_reopened": false
+  },
+  "remaining_gate": {
+    "type": "plan_review",
+    "reviewer_model": "gpt-5.6-sol",
+    "reviewer_role": "Sol independent plan review",
+    "blocking": "fn-112-native-pdfjs-document-renderer.4 implementation must not start until this review returns and spec plan_review_status / ready are restored accordingly."
+  }
+}

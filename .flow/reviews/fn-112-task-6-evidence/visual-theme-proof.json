@@ -1,0 +1,60 @@
+{
+  "themeProbes": {
+    "dark-w1380": {
+      "bodyBackground": "rgb(5, 5, 5)",
+      "bodyColor": "rgb(237, 237, 237)",
+      "backgroundVar": "0 0% 2%",
+      "foregroundVar": "0 0% 93%"
+    },
+    "dark-w900": {
+      "bodyBackground": "rgb(5, 5, 5)",
+      "bodyColor": "rgb(237, 237, 237)",
+      "backgroundVar": "0 0% 2%",
+      "foregroundVar": "0 0% 93%"
+    },
+    "light-w1380": {
+      "bodyBackground": "rgb(252, 250, 248)",
+      "bodyColor": "rgb(36, 33, 30)",
+      "backgroundVar": "40 33% 98%",
+      "foregroundVar": "30 9% 13%"
+    },
+    "light-w900": {
+      "bodyBackground": "rgb(252, 250, 248)",
+      "bodyColor": "rgb(36, 33, 30)",
+      "backgroundVar": "40 33% 98%",
+      "foregroundVar": "30 9% 13%"
+    }
+  },
+  "themeRailSubjects": {
+    "dark-w1380": {
+      "renderedCanvases": 3,
+      "hasKnownGlyphRun": true,
+      "textLength": 490
+    },
+    "dark-w900": {
+      "renderedCanvases": 3,
+      "hasKnownGlyphRun": true,
+      "textLength": 490
+    },
+    "light-w1380": {
+      "renderedCanvases": 3,
+      "hasKnownGlyphRun": true,
+      "textLength": 490
+    },
+    "light-w900": {
+      "renderedCanvases": 3,
+      "hasKnownGlyphRun": true,
+      "textLength": 490
+    }
+  },
+  "screenshotHashes": {
+    "INTERCEPTION__visual-dark-w1380-rail.png": "c9721d484a2d99b7e8ad17d982a6eb03a5757d6e3dce5ab144d912ebbc0628ec",
+    "INTERCEPTION__visual-light-w1380-rail.png": "f3d3548e1fc3142be70d2f18a6f73d97b528110c55415b8aab31fe3679c7b8c6",
+    "INTERCEPTION__visual-dark-w1380-overview.png": "a66ceac2dd1e176b466440fbc17043748b29b7e2c5ad84072960bc97b5e226dc",
+    "INTERCEPTION__visual-light-w1380-overview.png": "f51effc5cd2c76a7c1ec14db27968330c5164cd1d71a826a86ee66c4ca2be6b5",
+    "INTERCEPTION__visual-dark-w900-rail.png": "d7392eabb8b9f0f1770f849765c40923b1944a48616a95f2a194649fefb388dd",
+    "INTERCEPTION__visual-light-w900-rail.png": "746ebe09a89132fc62f1d2f93680fe5084201ccd4005bf3b4c51dc6d6b06fe4c",
+    "INTERCEPTION__visual-dark-w900-overview.png": "20c570d06055ceaad10baaebeb5d66d362f4af5bfbca33557871837a38ba2210",
+    "INTERCEPTION__visual-light-w900-overview.png": "69859c91f05dbbee12d9d8fd1f521c0eaabb715a5d639fc13020eb9f92d65610"
+  }
+}
