@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+## [1.30.2] - 2026-08-02
+
+### Changed
+
+- Updated 34 runtime and development dependencies plus the checkout, cache,
+  Node setup, and dependency-review GitHub Actions. Notable runtime updates
+  include node-llama-cpp 3.19.1, MCP SDK 1.30.0, React 19.2.8,
+  Tailwind CSS 4.3.3, and Playwright 1.62.0.
+- Added BlueOak-1.0.0 to the dependency-review license allowlist for
+  minimatch 10.2.6.
+
+### Fixed
+
+- Kept dependency automation green by treating the Ultracite/Oxlint/Oxfmt
+  policy migration as one tracked upgrade and retaining Ajv 8.17.1 until Bun
+  can resolve it with `ajv-formats` without incompatible duplicate types.
+- Preserved project-profile filesystem metadata narrowing and encrypted-export
+  Web Crypto inputs under the newer Node type definitions pulled by the
+  dependency set.
+
 ## [1.30.1] - 2026-08-02
 
 ### Fixed
@@ -1955,7 +1975,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.1...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.2...HEAD
+[1.30.2]: https://github.com/gmickel/gno/compare/v1.30.1...v1.30.2
 [1.30.1]: https://github.com/gmickel/gno/compare/v1.30.0...v1.30.1
 [1.30.0]: https://github.com/gmickel/gno/compare/v1.29.6...v1.30.0
 [1.29.6]: https://github.com/gmickel/gno/compare/v1.29.5...v1.29.6
