@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+## [1.30.4] - 2026-08-02
+
 ### Fixed
 
 - Gave packed resident shutdown the same lifecycle headroom as the product's
@@ -1998,7 +2000,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.3...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.4...HEAD
+[1.30.4]: https://github.com/gmickel/gno/compare/v1.30.3...v1.30.4
 [1.30.3]: https://github.com/gmickel/gno/compare/v1.30.2...v1.30.3
 [1.30.2]: https://github.com/gmickel/gno/compare/v1.30.1...v1.30.2
 [1.30.1]: https://github.com/gmickel/gno/compare/v1.30.0...v1.30.1
