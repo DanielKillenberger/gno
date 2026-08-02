@@ -1322,4 +1322,250 @@ describe("SqliteAdapter links", () => {
       );
     });
   });
+
+  describe("getGraphNeighborsForSeeds", () => {
+    test("returns one-hop outgoing and backlink neighbors with confidence", async () => {
+      const seedId = await createTestDoc("notes", "seed.md", "Seed");
+      const outId = await createTestDoc("notes", "outgoing.md", "Outgoing");
+      const backId = await createTestDoc("notes", "backlink.md", "Backlink");
+      await createTestDoc("notes", "unrelated.md", "Unrelated");
+
+      await adapter.setDocLinks(
+        seedId,
+        [
+          {
+            targetRef: "Outgoing",
+            targetRefNorm: "outgoing",
+            linkType: "wiki",
+            startLine: 1,
+            startCol: 1,
+            endLine: 1,
+            endCol: 12,
+          },
+        ],
+        "parsed"
+      );
+      await adapter.setDocLinks(
+        backId,
+        [
+          {
+            targetRef: "seed.md",
+            targetRefNorm: "seed.md",
+            linkType: "markdown",
+            startLine: 1,
+            startCol: 1,
+            endLine: 1,
+            endCol: 15,
+          },
+        ],
+        "parsed"
+      );
+      await adapter.setDocLinks(
+        outId,
+        [
+          {
+            targetRef: "Unrelated",
+            targetRefNorm: "unrelated",
+            linkType: "wiki",
+            startLine: 1,
+            startCol: 1,
+            endLine: 1,
+            endCol: 12,
+          },
+        ],
+        "parsed"
+      );
+
+      const seedDoc = await adapter.getDocument("notes", "seed.md");
+      const outDoc = await adapter.getDocument("notes", "outgoing.md");
+      const backDoc = await adapter.getDocument("notes", "backlink.md");
+      expect(seedDoc.ok && seedDoc.value).toBeTruthy();
+      expect(outDoc.ok && outDoc.value).toBeTruthy();
+      expect(backDoc.ok && backDoc.value).toBeTruthy();
+      if (!seedDoc.ok || !seedDoc.value || !outDoc.ok || !outDoc.value) return;
+      if (!backDoc.ok || !backDoc.value) return;
+
+      const neighbors = await adapter.getGraphNeighborsForSeeds({
+        seedDocumentIds: [seedId],
+        collection: "notes",
+      });
+      expect(neighbors.ok).toBe(true);
+      if (!neighbors.ok) return;
+
+      expect(neighbors.value.links).toHaveLength(2);
+      expect(
+        neighbors.value.links.some(
+          (link) =>
+            link.source === seedDoc.value?.docid &&
+            link.target === outDoc.value?.docid &&
+            link.confidence === "explicit"
+        )
+      ).toBe(true);
+      expect(
+        neighbors.value.links.some(
+          (link) =>
+            link.source === backDoc.value?.docid &&
+            link.target === seedDoc.value?.docid &&
+            link.confidence === "explicit"
+        )
+      ).toBe(true);
+      expect(neighbors.value.meta.seedDocumentIds).toEqual([seedId]);
+    });
+
+    test("scans wiki candidates once for all seeds and reports actual work", async () => {
+      const firstSeedId = await createTestDoc(
+        "notes",
+        "first-seed.md",
+        "First Seed"
+      );
+      const secondSeedId = await createTestDoc(
+        "notes",
+        "second-seed.md",
+        "Second Seed"
+      );
+      const backlinkId = await createTestDoc(
+        "notes",
+        "backlink.md",
+        "Backlink"
+      );
+
+      await adapter.setDocLinks(
+        backlinkId,
+        [
+          {
+            targetRef: "vault/First Seed.md",
+            targetRefNorm: "vault/first seed.md",
+            linkType: "wiki",
+            startLine: 1,
+            startCol: 1,
+            endLine: 1,
+            endCol: 24,
+          },
+        ],
+        "parsed"
+      );
+
+      for (let i = 0; i < 200; i++) {
+        const leftId = await createTestDoc(
+          "notes",
+          `noise-left-${i}.md`,
+          `Noise Left ${i}`
+        );
+        await createTestDoc("notes", `noise-right-${i}.md`, `Noise Right ${i}`);
+        await adapter.setDocLinks(
+          leftId,
+          [
+            {
+              targetRef: `Noise Right ${i}`,
+              targetRefNorm: `noise right ${i}`,
+              linkType: "wiki",
+              startLine: 1,
+              startCol: 1,
+              endLine: 1,
+              endCol: 20,
+            },
+          ],
+          "parsed"
+        );
+      }
+
+      const oneSeed = await adapter.getGraphNeighborsForSeeds({
+        seedDocumentIds: [firstSeedId],
+        collection: "notes",
+      });
+      const twoSeeds = await adapter.getGraphNeighborsForSeeds({
+        seedDocumentIds: [firstSeedId, secondSeedId],
+        collection: "notes",
+      });
+      expect(oneSeed.ok).toBe(true);
+      expect(twoSeeds.ok).toBe(true);
+      if (!oneSeed.ok || !twoSeeds.ok) return;
+
+      expect(oneSeed.value.links).toHaveLength(1);
+      expect(twoSeeds.value.links).toHaveLength(1);
+      expect(oneSeed.value.meta.examinedLinkRows).toBe(201);
+      expect(twoSeeds.value.meta.examinedLinkRows).toBe(201);
+    });
+
+    test("matches getGraph confidence for the same seed-adjacent edges", async () => {
+      const seedId = await createTestDoc("notes", "seed.md", "Seed");
+      await createTestDoc("notes", "exact.md", "Exact Title");
+      await createTestDoc("notes", "path-only.md", "Different Title");
+      await createTestDoc("notes", "nested/fallback.md", "Fallback Target");
+      await createTestDoc("notes", "duplicate-a.md", "Duplicate");
+      await createTestDoc("notes", "duplicate-b.md", "Duplicate");
+
+      await adapter.setDocLinks(
+        seedId,
+        [
+          {
+            targetRef: "Exact Title",
+            targetRefNorm: "exact title",
+            linkType: "wiki",
+            startLine: 1,
+            startCol: 1,
+            endLine: 1,
+            endCol: 14,
+          },
+          {
+            targetRef: "path-only.md",
+            targetRefNorm: "path-only.md",
+            linkType: "markdown",
+            startLine: 2,
+            startCol: 1,
+            endLine: 2,
+            endCol: 20,
+          },
+          {
+            targetRef: "fallback",
+            targetRefNorm: "fallback",
+            linkType: "wiki",
+            startLine: 3,
+            startCol: 1,
+            endLine: 3,
+            endCol: 12,
+          },
+          {
+            targetRef: "Duplicate",
+            targetRefNorm: "duplicate",
+            linkType: "wiki",
+            startLine: 4,
+            startCol: 1,
+            endLine: 4,
+            endCol: 13,
+          },
+        ],
+        "parsed"
+      );
+
+      const neighbors = await adapter.getGraphNeighborsForSeeds({
+        seedDocumentIds: [seedId],
+        collection: "notes",
+      });
+      const graph = await adapter.getGraph({
+        collection: "notes",
+        linkedOnly: true,
+      });
+      expect(neighbors.ok).toBe(true);
+      expect(graph.ok).toBe(true);
+      if (!neighbors.ok || !graph.ok) return;
+
+      const neighborKeys = new Map(
+        neighbors.value.links.map((link) => [
+          `${link.source}:${link.target}:${link.type}`,
+          link,
+        ])
+      );
+      for (const link of graph.value.links) {
+        const key = `${link.source}:${link.target}:${link.type}`;
+        const scoped = neighborKeys.get(key);
+        expect(scoped).toBeDefined();
+        expect(scoped?.confidence).toBe(link.confidence);
+        expect(scoped?.audit.resolution).toBe(link.audit.resolution);
+      }
+      expect(
+        new Set(neighbors.value.links.map((link) => link.confidence))
+      ).toEqual(new Set(["explicit", "inferred", "ambiguous"]));
+    });
+  });
 });
