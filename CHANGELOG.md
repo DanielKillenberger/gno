@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.30.7] - 2026-08-02
+
+### Fixed
+
+- Made completed Flow task state portable across fresh clones, so closed work
+  is not rediscovered as ready after runtime state is absent.
+- Allowed keyless Linear MCP issue creation to persist its returned durable ID
+  when GraphQL authentication is unavailable, while retaining mismatch and
+  semantic-error checks when verification is available.
+
 ## [1.30.6] - 2026-08-02
 
 ### Fixed
@@ -2023,7 +2033,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.6...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.7...HEAD
+[1.30.7]: https://github.com/gmickel/gno/compare/v1.30.6...v1.30.7
 [1.30.6]: https://github.com/gmickel/gno/compare/v1.30.5...v1.30.6
 [1.30.5]: https://github.com/gmickel/gno/compare/v1.30.4...v1.30.5
 [1.30.4]: https://github.com/gmickel/gno/compare/v1.30.3...v1.30.4
