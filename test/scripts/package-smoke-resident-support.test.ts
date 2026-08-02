@@ -4,6 +4,8 @@ import {
   isExpectedResidentShutdownExit,
   isValidPackedWarmModelReuse,
   type ResidentStatus,
+  STOP_TIMEOUT_MS,
+  stopResident,
   waitForStatus,
 } from "../../scripts/package-smoke-resident-support";
 
@@ -63,6 +65,41 @@ describe("packed resident shutdown exits", () => {
     expect((startupError as Error).message).toContain("resident stdout");
     expect((startupError as Error).message).toContain("resident stderr");
     expect(performance.now() - startedAt).toBeLessThan(5000);
+  });
+
+  test("keeps shutdown headroom beyond both admission-drain windows", () => {
+    expect(STOP_TIMEOUT_MS).toBe(30_000);
+    expect(STOP_TIMEOUT_MS).toBeGreaterThan(10_000);
+  });
+
+  test("allows graceful shutdown before a supplied deadline", async () => {
+    let markReady: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      markReady = resolve;
+    });
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 75)); process.send?.('ready'); setInterval(() => {}, 1000)",
+      ],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        ipc(message) {
+          if (message === "ready") markReady?.();
+        },
+      }
+    );
+    const running = {
+      child,
+      stdout: new Response(child.stdout).text(),
+      stderr: new Response(child.stderr).text(),
+    };
+
+    await ready;
+    await stopResident(running, "delayed resident", 500);
+    expect(child.exitCode).toBe(0);
   });
 });
 
