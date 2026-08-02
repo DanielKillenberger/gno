@@ -21,7 +21,7 @@ jobs:
     # No continue-on-error - releases must pass on all platforms
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -30,7 +30,7 @@ jobs:
 
       # Cache Bun's global package cache
       - name: Cache Bun packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-cache-${{ runner.os }}-${{ hashFiles('**/bun.lockb') }}
@@ -39,7 +39,7 @@ jobs:
 
       - name: Cache package-smoke embedding model
         if: matrix.os == 'macos-latest'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/gno/package-smoke
           key: package-smoke-embeddinggemma-0f741b5a-${{ runner.os }}
@@ -89,7 +89,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -142,7 +142,7 @@ jobs:
     environment: release
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -216,7 +216,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -224,7 +224,7 @@ jobs:
           bun-version: latest
 
       - name: Cache package-smoke embedding model
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/gno/package-smoke
           key: package-smoke-embeddinggemma-0f741b5a-${{ runner.os }}
@@ -267,11 +267,11 @@ jobs:
       id-token: write # Required for npm trusted publishing (OIDC)
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Need Node.js 24+ for npm OIDC support (npm >= 11.5.1)
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -298,7 +298,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download Windows desktop package
         uses: actions/download-artifact@v8
