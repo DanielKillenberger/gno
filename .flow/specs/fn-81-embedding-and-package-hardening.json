@@ -12,7 +12,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-81-embedding-and-package-hardening.md",
-  "status": "open",
+  "status": "done",
   "title": "Embedding and package hardening",
-  "updated_at": "2026-05-26T11:18:09.773211Z"
+  "updated_at": "2026-08-02T11:39:57.569149Z"
 }

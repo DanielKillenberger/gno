@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-80-cpu-embedding-autoresearch-and.md",
-  "status": "open",
+  "status": "done",
   "title": "CPU embedding autoresearch and optimization",
-  "updated_at": "2026-05-25T16:06:00.647196Z"
+  "updated_at": "2026-08-02T11:39:56.996517Z"
 }

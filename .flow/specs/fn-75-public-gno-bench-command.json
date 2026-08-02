@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-75-public-gno-bench-command.md",
-  "status": "open",
+  "status": "done",
   "title": "Public gno bench command",
-  "updated_at": "2026-04-24T12:28:12.259833Z"
+  "updated_at": "2026-08-02T11:39:55.906189Z"
 }

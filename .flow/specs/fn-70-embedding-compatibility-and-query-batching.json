@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-70-embedding-compatibility-and-query-batching.md",
-  "status": "open",
+  "status": "done",
   "title": "Embedding compatibility profiles, batch fallback, and query batching",
-  "updated_at": "2026-04-07T09:05:00Z"
+  "updated_at": "2026-08-02T11:39:55.022171Z"
 }
