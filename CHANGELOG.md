@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+
+
 ## [1.33.0] - 2026-08-03
 
 ### Added
@@ -78,6 +80,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux subdirectories created after the watcher started (oven-sh/bun#15939,
   which emits no event at all) still need `gno update`.
   Thanks @DanielKillenberger for the report.
+
+## [1.33.0] - 2026-08-03
+
+### Added
+
+- Added bundled local raster attachments to publish export for PNG, JPEG, GIF,
+  WebP, and AVIF, including content-addressed deduplication, exact serialized
+  size accounting, public/secret hosted delivery, and ciphertext-only
+  encrypted reader Blob URLs. Thanks [@DanielKillenberger](https://github.com/DanielKillenberger)
+  for the original contribution.
+
+### Changed
+
+- Publish export now preserves supported local Markdown and Obsidian images
+  instead of dropping them. Unsupported, missing, ambiguous, unsafe, or
+  invite-only hosted-image cases fail closed with explicit diagnostics.
+
+### Fixed
 
 - Aligned encrypted publish ciphertext field bounds to the 100 MiB final
   envelope budget, recognized CommonMark tilde fences during attachment
