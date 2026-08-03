@@ -716,13 +716,50 @@ describe("CollectionWatchService", () => {
  * until the bounded directory-reconciliation path lands in fn-114 task .3.
  * They must not be weakened to go green.
  *
- * Event shapes replayed here were captured from a real recursive
- * `node:fs.watch` (see test/serve/watch-service.fs-smoke.test.ts). On Linux,
- * Bun forwards only the SOURCE (temp) name of an atomic rename and never the
- * destination (oven-sh/bun#36328), so a save that ends as `atomic.md` is
- * reported solely as `.gno-tmp.<id>`. `matchesWalkPath` rejects that name and
- * `src/serve/watch-service.ts:203-212` drops the event, so the final eligible
- * file is never handed to `syncPaths`.
+ * ## Provenance of the replayed sequences
+ *
+ * Every tuple below is a REAL capture, not an assumed shape. They were
+ * recorded by `test/serve/watch-service.fs-smoke.test.ts` on Bun 1.3.11 under
+ * linux 6.10.14 (Debian container, `tmpfs`-backed temp dir, so the events are
+ * genuine inotify and not a degraded bind mount), cross-checked against the
+ * same probe on darwin 25.5.0. Full capture:
+ *
+ * | scenario                   | linux 6.10.14 / Bun 1.3.11        | darwin 25.5.0 / Bun 1.3.11                                |
+ * | -------------------------- | --------------------------------- | --------------------------------------------------------- |
+ * | directCreate               | `direct.md`                       | `direct.md`                                                |
+ * | atomicCreatePlainTemp      | `note.md.tmp`                     | `note.md.tmp`, `note.md`                                   |
+ * | atomicCreateHiddenTemp     | `hidden-atomic.md`                | `.gno-tmp.abc123`, `hidden-atomic.md`                      |
+ * | atomicReplaceNested        | `nested/note.md.tmp`              | `nested/note.md.tmp`, `nested/note.md`, `nested/note.md`   |
+ * | fileDeletion               | `direct.md`                       | `direct.md`                                                |
+ * | recursiveDirectoryDeletion | `dir1`                            | `dir1/b.md`, `dir1/a.md`, `dir1`                           |
+ * | newSubdirectoryWrite       | (nothing)                         | `post/d.md`                                                |
+ * | caseOnlyRename             | `foo.md`                          | `Foo.md`, `foo.md`                                         |
+ *
+ * What the capture actually establishes — some of it contradicts what the spec
+ * assumed, and the tests follow the data:
+ *
+ * 1. oven-sh/bun#36328 is NOT fixed in Bun 1.3.11. For an atomic save through a
+ *    PLAIN temp name, Linux reports only the SOURCE (`note.md.tmp`) and never
+ *    the destination `note.md`. That is the ambiguous event this suite replays.
+ * 2. A DOT-PREFIXED temp name behaves the opposite way, and not because the bug
+ *    is fixed: Bun's Linux watcher never reports dot-prefixed names at all, so
+ *    the source is filtered out and only the destination survives. A fixture
+ *    built on `.gno-tmp.<id>` would therefore replay a sequence Linux never
+ *    produces, and the current code already handles the one it does produce.
+ * 3. A single-file delete DOES name the deleted file on both platforms — which
+ *    is exactly why the existing green deletion test passes. The captured
+ *    stale-active condition is a RECURSIVE DIRECTORY DELETE: Linux reports only
+ *    `dir1`, never `dir1/a.md` or `dir1/b.md`, so both indexed documents stay
+ *    active forever.
+ * 4. Two further defects were captured and are recorded here for task .3 rather
+ *    than asserted by this task: Linux does not extend recursion to
+ *    subdirectories created after the watch began (`newSubdirectoryWrite`
+ *    reported nothing), and operations landing in one watcher read batch
+ *    collapse to a single delivered event (300 rapid writes delivered 20).
+ *
+ * `matchesWalkPath` rejects `note.md.tmp` and `dir1`, and
+ * `src/serve/watch-service.ts:203-212` drops the event, so nothing reaches
+ * `syncPaths`.
  *
  * The collection root is a real temp directory here because reconciliation
  * must read the directory's true final state; the watcher itself is still the
@@ -731,16 +768,24 @@ describe("CollectionWatchService", () => {
 const AMBIGUOUS_EVENT_WAIT_MS = 2000;
 const RED_TEST_TIMEOUT_MS = 15_000;
 
-/** Linux-shaped capture: only the temporary source name is ever reported. */
+/**
+ * Captured linux/Bun-1.3.11 shape: an atomic save through a plain temp name
+ * reports the SOURCE only. Destination `note.md` is never named.
+ */
 const LINUX_ATOMIC_CREATE_SEQUENCE: ReadonlyArray<
   readonly [string, string | null]
-> = [["rename", ".gno-tmp.abc123"]];
+> = [["rename", "note.md.tmp"]];
+/** Same shape for a replacement inside a pre-existing nested directory. */
 const LINUX_ATOMIC_REPLACE_SEQUENCE: ReadonlyArray<
   readonly [string, string | null]
-> = [["rename", "nested/.gno-tmp.def456"]];
-const LINUX_AMBIGUOUS_DELETION_SEQUENCE: ReadonlyArray<
+> = [["rename", "nested/note.md.tmp"]];
+/**
+ * Captured linux/Bun-1.3.11 shape for `rm -rf dir1`: only the directory is
+ * named; the eligible files it held are never reported.
+ */
+const LINUX_DIRECTORY_DELETION_SEQUENCE: ReadonlyArray<
   readonly [string, string | null]
-> = [["rename", ".gno-tmp.ghi789"]];
+> = [["rename", "dir1"]];
 
 function createSyncPathsProbe() {
   const batches: string[][] = [];
@@ -776,7 +821,33 @@ function createSyncPathsProbe() {
   };
 }
 
-function createFakeWatcherService(collection: Collection) {
+/**
+ * Store double exposing only the fn-114 task .2 seam the deletion
+ * reconciliation needs: the ACTIVE indexed direct children of a directory.
+ * This is how the test represents the indexed side — the half a purely
+ * filesystem-shaped fixture cannot express, because a deleted file leaves no
+ * trace on disk to enumerate.
+ */
+function createActiveChildrenStore(activeByDir: Record<string, string[]>): {
+  store: unknown;
+  calls: Array<{ collection: string; dirRelPath: string }>;
+} {
+  const calls: Array<{ collection: string; dirRelPath: string }> = [];
+  return {
+    calls,
+    store: {
+      listActiveDirectChildSourcePaths(collection: string, dirRelPath: string) {
+        calls.push({ collection, dirRelPath });
+        return Promise.resolve({
+          ok: true as const,
+          value: activeByDir[dirRelPath] ?? [],
+        });
+      },
+    },
+  };
+}
+
+function createFakeWatcherService(collection: Collection, store: unknown = {}) {
   let watcherCallback:
     | ((eventType: string, filename: string | null) => void)
     | undefined;
@@ -785,7 +856,7 @@ function createFakeWatcherService(collection: Collection) {
     collections: [collection],
     eventBus: null,
     scheduler: null,
-    store: {} as never,
+    store: store as never,
     watchFactory: ((
       _path: string,
       _options: { recursive: boolean },
@@ -813,7 +884,7 @@ describe("CollectionWatchService ambiguous-event reconciliation (fn-114 RED)", (
       const root = await mkdtemp(join(tmpdir(), "gno-watch-red-create-"));
       // Post-rename disk state: the atomic writer's destination exists, the
       // temp source does not, and an ineligible sibling must stay unindexed.
-      await Bun.write(join(root, "atomic.md"), "# atomic\n");
+      await Bun.write(join(root, "note.md"), "# atomic\n");
       await Bun.write(join(root, "cover.png"), "not markdown");
 
       const probe = createSyncPathsProbe();
@@ -825,7 +896,7 @@ describe("CollectionWatchService ambiguous-event reconciliation (fn-114 RED)", (
         service.start();
         emit(LINUX_ATOMIC_CREATE_SEQUENCE);
 
-        expect(await probe.waitForBatch()).toEqual(["atomic.md"]);
+        expect(await probe.waitForBatch()).toEqual(["note.md"]);
       } finally {
         await service.dispose();
         await rm(root, { recursive: true, force: true });
@@ -862,45 +933,63 @@ describe("CollectionWatchService ambiguous-event reconciliation (fn-114 RED)", (
   );
 
   /**
-   * Deletion coverage, disk-side half.
+   * Deletion coverage — the real stale-active condition, both halves.
    *
    * The existing green case above ("forwards eligible deletion paths for
-   * inactive sync and one notification") passes because the event names the
-   * eligible file: `matchesWalkPath` is filesystem-free
-   * (`src/ingestion/walker.ts:182-186`), so a deleted `deleted.md` still
-   * passes eligibility and reaches `syncPaths`, which marks it inactive.
-   * Production fails when the delete surfaces only as an ambiguous sibling
-   * name in the same directory — then nothing is queued at all and the
-   * document stays active.
+   * inactive sync and one notification") passes because a SINGLE-FILE delete
+   * names the deleted file on every platform we captured: `matchesWalkPath` is
+   * filesystem-free (`src/ingestion/walker.ts:182-186`), so a deleted
+   * `deleted.md` still passes eligibility and reaches `syncPaths`, which marks
+   * it inactive. That case was never the production defect.
    *
-   * This test proves the watcher must reconcile the directory rather than drop
-   * the event. Proving that the *deleted* `stale.md` itself is handed to
-   * `syncPaths` additionally requires the active-indexed-children store query
-   * added in fn-114 task .2 and wired in .3; with `syncPaths` mocked and no
-   * store seam yet, the indexed side cannot be expressed here. That half is
-   * covered by task .4's integrated verification.
+   * The captured defect is a RECURSIVE DIRECTORY delete. On linux/Bun 1.3.11,
+   * `rm -rf dir1` reports ONLY `dir1` — the eligible `dir1/a.md` and
+   * `dir1/b.md` it held are never named. `matchesWalkPath("dir1")` rejects the
+   * directory, the event is dropped, and both indexed documents stay ACTIVE
+   * forever. That is the live stale-active condition.
+   *
+   * The indexed half cannot be expressed from disk state, because the deleted
+   * files leave nothing on disk to enumerate. It is expressed through fn-114
+   * task .2's store seam (`listActiveDirectChildSourcePaths`), which task .3
+   * must call so the vanished children reconcile to inactive.
    */
   test(
-    "reconciles the directory when an eligible deletion surfaces as an ambiguous sibling name",
+    "deactivates indexed children when a recursive directory delete reports only the directory",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "gno-watch-red-delete-"));
-      // `stale.md` was indexed and has been deleted; `kept.md` is its still
-      // present eligible sibling.
+      // Post-delete disk state: `dir1` and everything under it is gone; the
+      // still-present eligible sibling at the root must not be disturbed.
       await Bun.write(join(root, "kept.md"), "# kept\n");
 
       const probe = createSyncPathsProbe();
+      // Indexed side: both children of the vanished directory are still ACTIVE.
+      const { store, calls } = createActiveChildrenStore({
+        dir1: ["dir1/a.md", "dir1/b.md"],
+      });
       const { service, emit } = createFakeWatcherService(
-        createCollection("notes", root)
+        createCollection("notes", root),
+        store
       );
 
       try {
         service.start();
-        emit(LINUX_AMBIGUOUS_DELETION_SEQUENCE);
+        emit(LINUX_DIRECTORY_DELETION_SEQUENCE);
 
         const batch = await probe.waitForBatch();
-        expect(batch).toContain("kept.md");
-        // R4: an ineligible event is not permission to index the ineligible file.
-        expect(batch).not.toContain(".gno-tmp.ghi789");
+        expect(batch).not.toBe("NO_SYNC_WITHIN_TIMEOUT");
+        // Both stale-active documents must be handed to `syncPaths`, which
+        // marks a missing file inactive (`src/ingestion/sync.ts:1218-1267`).
+        expect(batch).toContain("dir1/a.md");
+        expect(batch).toContain("dir1/b.md");
+        // R4: an ineligible event is not permission to index the directory
+        // itself, nor to touch unrelated siblings that did not change.
+        expect(batch).not.toContain("dir1");
+        expect(batch).not.toContain("kept.md");
+        // The indexed side must be consulted for the event's own directory.
+        expect(calls).toContainEqual({
+          collection: "notes",
+          dirRelPath: "dir1",
+        });
       } finally {
         await service.dispose();
         await rm(root, { recursive: true, force: true });
