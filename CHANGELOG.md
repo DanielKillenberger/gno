@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.31.0] - 2026-08-03
+
+### Added
+
+- Added durable document-section targets across the Web UI, REST API, SDK,
+  and MCP. Heading links now resolve exact targets, recover safely after
+  nearby edits, and report ambiguous, invalid, or stale targets explicitly.
+- Added citation-safe section links and copy actions so people and agents can
+  share a stable address for a specific part of an indexed document.
+
 ## [1.30.7] - 2026-08-02
 
 ### Fixed
@@ -2033,7 +2043,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.30.7...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.31.0...HEAD
+[1.31.0]: https://github.com/gmickel/gno/compare/v1.30.7...v1.31.0
 [1.30.7]: https://github.com/gmickel/gno/compare/v1.30.6...v1.30.7
 [1.30.6]: https://github.com/gmickel/gno/compare/v1.30.5...v1.30.6
 [1.30.5]: https://github.com/gmickel/gno/compare/v1.30.4...v1.30.5
