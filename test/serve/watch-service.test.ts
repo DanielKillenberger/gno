@@ -3275,3 +3275,142 @@ describe("CollectionWatchService sync-stage failure attribution (R7)", () => {
     RED_TEST_TIMEOUT_MS
   );
 });
+
+/**
+ * fn-114 corrective coverage - suppression must not swallow deletions, and an
+ * accepted ambiguous event must be visible in `lastEventAt`.
+ *
+ * Both defects shared a shape: an event that the watcher had genuinely
+ * observed was thrown away at the callback, before anything that could tell
+ * what it MEANT had run.
+ *
+ * - Suppression exists so GNO's own writes do not feed back into the watcher.
+ *   Applied as a blanket callback-side drop it also discarded the evidence of
+ *   an unrelated DELETION - and on Bun 1.3.14 a recursive directory delete
+ *   reports one arbitrary child, so if that child happened to be suppressed,
+ *   the whole subtree stayed active and searchable indefinitely.
+ * - `lastEventAt` was written only on the exact-path branch, so the PRIMARY
+ *   scenario this work exists for - an atomic save reported only under its
+ *   ineligible temp name - reconciled correctly while `GET /api/status` still
+ *   claimed the watcher had seen nothing.
+ *
+ * The two cases `lastEventAt` must keep apart are pinned together below: an
+ * event DROPPED (excluded, or ineligible with nothing reconcilable) still
+ * contributes no timestamp, while an event ACCEPTED for reconciliation that
+ * produces real work does.
+ */
+describe("CollectionWatchService suppression and observed-event visibility", () => {
+  test(
+    "classifies a suppressed path that vanished instead of discarding it",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-gone-"));
+      // `archive.md/` and everything under it is already gone from disk; the
+      // untouched root document survives.
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+      const { store, descendantCalls } = createSubtreeStore({
+        descendants: {
+          "archive.md": ["archive.md/child.md", "archive.md/sub/deep.md"],
+        },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // GNO wrote this path itself, so it is inside its suppression window -
+        // and then it was deleted out from under us.
+        harness.service.suppress(join(root, "archive.md"));
+        harness.emit([["rename", "archive.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // Before the fix the event never reached classification at all: no
+        // store lookup, no reconciliation, and both documents stayed active.
+        expect(batch).toContain("archive.md/child.md");
+        expect(batch).toContain("archive.md/sub/deep.md");
+        expect(batch).not.toContain("keep.md");
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "archive.md" },
+        ]);
+        expect(descendantCalls).toEqual(["archive.md"]);
+        // A deletion is a real observed change, whoever wrote the path last.
+        expect(harness.service.getState().lastEventAt).not.toBeNull();
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "still refuses to resync a suppressed path that is still on disk",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-alive-"));
+      // The file EXISTS: this is an ordinary application write feeding back,
+      // which is the case suppression was built for and must keep handling.
+      await Bun.write(join(root, "note.md"), "# written by gno\n");
+      const { store } = createSubtreeStore({ direct: { "": ["note.md"] } });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "note.md"));
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([]);
+        // Nor does an application's own write count as an observed change.
+        expect(harness.service.getState().lastEventAt).toBeNull();
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "advances lastEventAt for an accepted ambiguous event but not a dropped one",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-last-event-"));
+      await Bun.write(join(root, "note.md"), "# atomic save landed\n");
+      const { store } = createSubtreeStore({ direct: { "": ["note.md"] } });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // Dropped: a dot-prefixed area is never walked, so nothing is queued
+        // and nothing was meaningfully observed.
+        harness.emit([["change", ".obsidian/.sync.lock"]]);
+        await Bun.sleep(350);
+        expect(harness.batches).toEqual([]);
+        expect(harness.service.getState().lastEventAt).toBeNull();
+
+        const before = new Date().toISOString();
+        // Accepted: the atomic save is reported only under its temp name, is
+        // reconciled to the real document, and is therefore a real observation.
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["note.md"]]);
+        const { lastEventAt } = harness.service.getState();
+        expect(lastEventAt).not.toBeNull();
+        // The OBSERVATION time is published, not the flush time, so the
+        // debounce window never shows up as latency in the reported state.
+        expect(new Date(lastEventAt ?? 0).getTime()).toBeGreaterThanOrEqual(
+          new Date(before).getTime()
+        );
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});

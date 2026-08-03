@@ -273,6 +273,12 @@ export class CollectionWatchService {
   readonly #syncing = new Set<string>();
   readonly #inFlightSyncs = new Set<Promise<void>>();
   readonly #suppressedPaths = new Map<string, number>();
+  /**
+   * Observation timestamps for events that are not yet known to be real
+   * changes, keyed by collection and promoted to `#lastEventAt` only once a
+   * flush turns them into actual work (see `#promoteProvisionalEvent`).
+   */
+  readonly #provisionalEventAt = new Map<string, string>();
   readonly #watchFactory: typeof watch;
   readonly #resolveVanishedPath: typeof resolveVanishedPathDirectory;
   readonly #failedCollections = new Map<string, string>();
@@ -331,6 +337,7 @@ export class CollectionWatchService {
         // A removed collection or a moved root must never flush queued
         // reconciliation work against the new configuration (R6).
         this.#dirtyByCollection.delete(collectionName);
+        this.#provisionalEventAt.delete(collectionName);
         const timer = this.#timers.get(collectionName);
         if (timer) {
           clearTimeout(timer);
@@ -398,10 +405,25 @@ export class CollectionWatchService {
                 collectionToWalkConfig(currentCollection, 0)
               )
             ) {
-              // Exact-path fast path: unchanged behavior, no directory work.
-              const fullPath = normalize(join(watchedRoot, relPath));
-              const suppressedUntil = this.#suppressedPaths.get(fullPath);
-              if (suppressedUntil && suppressedUntil > Date.now()) {
+              // Exact-path fast path: no directory work.
+              if (this.#isSuppressed(join(watchedRoot, relPath))) {
+                // Suppression exists so GNO's own writes do not feed back into
+                // the watcher as if they were external changes. It must NOT
+                // also swallow DELETION evidence: a suppressed path that has
+                // vanished from disk is not an application write - the app
+                // wrote it, it is gone now, and on Bun 1.3.14 that single
+                // arbitrary child may be the only report a recursive directory
+                // delete ever makes. Dropping it here left every document
+                // beneath the removed directory active and searchable forever.
+                //
+                // So the event is queued for CLASSIFICATION either way, and the
+                // sync-side guarantee is kept where the disk can actually be
+                // consulted: `#widenVanishedExactPaths` drops a suppressed path
+                // that still EXISTS before it can reach `syncPaths`. The
+                // timestamp stays provisional until that same flush proves the
+                // event was a real change.
+                this.#recordProvisionalEvent(collection.name);
+                this.#queueChange(collection.name, relPath);
                 return;
               }
               this.#lastEventAt = new Date().toISOString();
@@ -427,6 +449,54 @@ export class CollectionWatchService {
     this.#suppressedPaths.set(normalize(absPath), Date.now() + ms);
   }
 
+  /** Is this absolute path currently inside its application-write window? */
+  #isSuppressed(absPath: string): boolean {
+    const suppressedUntil = this.#suppressedPaths.get(normalize(absPath));
+    return suppressedUntil !== undefined && suppressedUntil > Date.now();
+  }
+
+  /**
+   * Record WHEN an event was observed without yet claiming it was a real
+   * change.
+   *
+   * Two kinds of event reach the queues without that being known yet:
+   *
+   * - an AMBIGUOUS event, whose reported name is ineligible. `note.md.tmp` (a
+   *   real atomic save reported under its temp name) and `cover.png` (a file
+   *   the collection would never index) are indistinguishable at this point -
+   *   filesystem-free rules cannot tell them apart, which is exactly why the
+   *   reconciliation route exists.
+   * - a SUPPRESSED exact path, which is an application write unless it turns
+   *   out to have vanished.
+   *
+   * Both are held here and promoted by `#promoteProvisionalEvent` once the
+   * flush has produced actual work for the collection. That is what
+   * distinguishes a dropped event (excluded, or ineligible with nothing to
+   * reconcile) from an accepted one: the former never yields a batch and never
+   * advances `lastEventAt`, while an atomic save reported only under its temp
+   * name now correctly stops `GET /api/status` from claiming the watcher has
+   * seen nothing.
+   */
+  #recordProvisionalEvent(collectionName: string): void {
+    this.#provisionalEventAt.set(collectionName, new Date().toISOString());
+  }
+
+  /**
+   * Promote a drained provisional timestamp now that the flush has real work.
+   *
+   * The OBSERVATION time is published, not the flush time - `lastEventAt`
+   * answers "when did the filesystem last change", and the debounce window
+   * must not show up as latency in it.
+   */
+  #promoteProvisionalEvent(observedAt: string | null): void {
+    if (observedAt === null) {
+      return;
+    }
+    if (this.#lastEventAt === null || observedAt > this.#lastEventAt) {
+      this.#lastEventAt = observedAt;
+    }
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) {
       return;
@@ -445,6 +515,7 @@ export class CollectionWatchService {
     this.#collectionFingerprints.clear();
     this.#collections = [];
     this.#pendingByCollection.clear();
+    this.#provisionalEventAt.clear();
     this.#dirtyByCollection.clear();
     await Promise.allSettled(this.#inFlightSyncs);
     this.#syncing.clear();
@@ -590,6 +661,11 @@ export class CollectionWatchService {
     // would never walk it either, so it is covered by the directory alone.
     this.#addDirectoryHint(entry, collection, reported);
     this.#dirtyByCollection.set(collection.name, dirty);
+    // The event was ACCEPTED for reconciliation, so it is a real observation -
+    // but not yet demonstrably a real change (see `#recordProvisionalEvent`).
+    // Every path that returned above was DROPPED and still contributes no
+    // timestamp at all.
+    this.#recordProvisionalEvent(collection.name);
     this.#armFlushTimer(collection.name);
   }
 
@@ -654,11 +730,18 @@ export class CollectionWatchService {
     if (!collection) {
       this.#pendingByCollection.delete(collectionName);
       this.#dirtyByCollection.delete(collectionName);
+      this.#provisionalEventAt.delete(collectionName);
       return;
     }
 
     let exactPaths = pending ? [...pending] : [];
     let dirtyEntries = dirty ? [...dirty.entries()] : [];
+    // Drained with the queues it belongs to: a batch that is later dropped
+    // takes its unpromoted observation with it rather than leaking into the
+    // next window.
+    let provisionalEventAt =
+      this.#provisionalEventAt.get(collectionName) ?? null;
+    this.#provisionalEventAt.delete(collectionName);
     let syncGeneration = this.#collectionGenerations.get(collectionName) ?? 0;
     this.#pendingByCollection.set(collectionName, new Set<string>());
     this.#dirtyByCollection.set(
@@ -723,6 +806,7 @@ export class CollectionWatchService {
       reconciliations = [];
       dirtyEntries = [];
       exactPaths = [];
+      provisionalEventAt = null;
       if (!liveCollection) {
         // The collection is gone: there is nothing left to recover against, so
         // the queues are discarded rather than reflushed.
@@ -735,11 +819,18 @@ export class CollectionWatchService {
 
     try {
       if (exactPaths.length > 0) {
-        dirtyEntries = await this.#widenVanishedExactPaths(
+        const widened = await this.#widenVanishedExactPaths(
           collection,
           exactPaths,
           dirtyEntries
         );
+        dirtyEntries = widened.dirtyEntries;
+        // Suppressed paths that are still on disk are dropped HERE, after
+        // classification: they were queued only so a vanished one could not be
+        // lost, and an application write that still exists must not be resynced.
+        // Both assignments land BEFORE the resume check so a drift-dropped
+        // batch stays dropped - `resumeAfterAwait` clears them.
+        exactPaths = widened.exactPaths;
         if (resumeAfterAwait() === "abort") {
           return;
         }
@@ -769,6 +860,13 @@ export class CollectionWatchService {
         matchesWalkPath(relPath, collectionToWalkConfig(collection, 0))
       );
       const batched = new Set(relPaths);
+      if (relPaths.length > 0) {
+        // The batch is the proof: whatever the provisional events named, they
+        // produced real work against the live rules, so the observation is
+        // published. An empty batch leaves `lastEventAt` untouched - that is
+        // the dropped/ineligible case, and the timestamp was already drained.
+        this.#promoteProvisionalEvent(provisionalEventAt);
+      }
       // A reconciliation that put nothing into the batch cannot be affected by
       // the sync stage, so its outcome is already known: report the successful
       // no-op now (a zero-candidate reconciliation IS a success and must not
@@ -1067,14 +1165,28 @@ export class CollectionWatchService {
    * Nothing is dropped: the exact paths stay in the batch either way, so a
    * plain single-file delete still deactivates exactly that file through the
    * existing `syncPaths` ENOENT branch.
+   *
+   * This is also the one place that can finish the SUPPRESSION decision, which
+   * is why it returns the exact paths as well as the queue. Suppression must
+   * keep an application's own write from being resynced, but it must not
+   * discard the evidence that the path is GONE - and only the disk can tell
+   * those apart, so the watcher callback defers to here. A suppressed path that
+   * vanished stays in the batch (it is a deletion, not an application write,
+   * and it may be the sole report of a removed subtree); a suppressed path that
+   * still exists - or that could not be resolved at all - is dropped from the
+   * returned paths, unchanged in effect from the old callback-side skip.
    */
   async #widenVanishedExactPaths(
     collection: Collection,
     exactPaths: string[],
     dirtyEntries: Array<[string, DirtyDirectoryEntry]>
-  ): Promise<Array<[string, DirtyDirectoryEntry]>> {
+  ): Promise<{
+    dirtyEntries: Array<[string, DirtyDirectoryEntry]>;
+    exactPaths: string[];
+  }> {
     const root = normalize(collection.path);
     const byDirectory = new Map(dirtyEntries);
+    const suppressedSurvivors = new Set<string>();
     for (const relPath of exactPaths) {
       if (this.#disposed) {
         break;
@@ -1082,7 +1194,11 @@ export class CollectionWatchService {
       const outcome = await this.#resolveVanishedPath(relPath, root);
       if (outcome.status !== "removed") {
         // `present` is the hot path; `error` fails closed - an unreadable disk
-        // is never read as "the file is gone".
+        // is never read as "the file is gone", and a suppressed path is kept
+        // suppressed rather than resynced on the strength of a failed stat.
+        if (this.#isSuppressed(join(root, relPath))) {
+          suppressedSurvivors.add(relPath);
+        }
         continue;
       }
       let entry = byDirectory.get(outcome.directory);
@@ -1109,7 +1225,13 @@ export class CollectionWatchService {
         this.#addDirectoryHint(entry, collection, relPath);
       }
     }
-    return [...byDirectory];
+    return {
+      dirtyEntries: [...byDirectory],
+      exactPaths:
+        suppressedSurvivors.size === 0
+          ? exactPaths
+          : exactPaths.filter((relPath) => !suppressedSurvivors.has(relPath)),
+    };
   }
 
   /**
@@ -1485,12 +1607,9 @@ export class CollectionWatchService {
       // Suppression applies to the RESOLVED candidate paths, not to the
       // directory: an application-originated write inside a reconciled
       // directory must stay suppressed.
-      candidates: [...candidates].filter((relPath) => {
-        const suppressedUntil = this.#suppressedPaths.get(
-          normalize(join(root, relPath))
-        );
-        return !(suppressedUntil && suppressedUntil > Date.now());
-      }),
+      candidates: [...candidates].filter(
+        (relPath) => !this.#isSuppressed(join(root, relPath))
+      ),
       enumerationFailed: false,
       started: true,
       // A store failure is already a reported terminal outcome for this

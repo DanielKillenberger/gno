@@ -394,6 +394,15 @@ proportional to the event.
   content-type behavior supplied through existing sync options, and suppression of
   known application-originated writes. Ineligible files remain unindexed even when
   their event causes directory reconciliation.
+
+  Suppression is scoped to SYNCING, not to classification. Its purpose is that an
+  application-originated write is not fed back into the watcher as a change, so a
+  suppressed path that still exists on disk is never re-synced. It must not also
+  discard DELETION evidence: a suppressed path that has VANISHED is not an
+  application write, and under a recursive delete reported through one arbitrary
+  child (Bun 1.3.14) it may be the only report the watcher ever gets. A suppressed
+  path is therefore always classified against the disk, and dropped from the sync
+  batch only when it is found to still exist (or could not be resolved at all).
 - **R5:** Repeated or coalesced filesystem events for the same collection and
   directory result in one bounded reconciliation batch per debounce window. Unchanged
   files produce no duplicate document-change notifications and no redundant embedding
@@ -422,6 +431,17 @@ proportional to the event.
   keep their current shape and remain optional, so present consumers compile
   unchanged. Any public status-schema change ships with matching contract tests and
   documentation in the same commit.
+
+  Reported watcher STATE follows the same receipt-vs-outcome distinction. The
+  existing `lastEventAt` field means "the watcher observed a real change", so it
+  advances for an ambiguous event that was accepted for reconciliation and produced
+  work - an atomic save reported only under its ineligible temp name is the primary
+  case - and does not advance for an event that was dropped (excluded, dot-prefixed,
+  ineligible with nothing reconcilable, or an application's own surviving write).
+  The published timestamp is the OBSERVATION time, not the flush time, so the
+  debounce window is not reported as latency. No status-schema change is implied:
+  `lastEventAt` already exists in `CollectionWatchState` and
+  `spec/output-schemas/status.schema.json`.
 - **R8:** Tests cover exact-path and ambiguous-event paths deterministically without
   fixed sleeps standing in for synchronization. A real temporary-directory smoke test
   captures Bun's event shape and proves the watch-to-index lifecycle where the
@@ -495,10 +515,10 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing, never to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
-| R7  | Diagnostics distinguish event receipt from reconciliation outcome | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4 | — |
+| R7  | Diagnostics distinguish event receipt from reconciliation outcome, including reported `lastEventAt` for accepted-vs-dropped events | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
 | R8  | Deterministic regression coverage + real-FS smoke proof | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.4 | — |
 | R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query and an unstattable collection root | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
