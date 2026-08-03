@@ -83,8 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mount — is deliberately not treated as deleted, so a failed check never
   deactivates anything.
 
-  Two cases still need `gno update`: Linux subdirectories created after the
-  watcher started (oven-sh/bun#15939, which emits no event at all), and a path
+  Three cases still need `gno update`: Linux subdirectories created after the
+  watcher started (oven-sh/bun#15939 — no event at all on Bun 1.3.11, reported
+  and picked up live on Bun 1.3.14), writes into a pre-existing Linux directory
+  renamed after the watcher started (reported under the stale pre-rename path,
+  so the files at the new location are never indexed), and a path
   deleted and recreated inside the same ~300 ms batch. The watcher checks the
   disk once when a batch flushes, so a path that is already back by then reads
   as an ordinary edit; anything else removed in that window and never named by

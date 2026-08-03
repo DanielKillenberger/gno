@@ -3345,6 +3345,112 @@ describe("CollectionWatchService suppression and observed-event visibility", () 
   );
 
   test(
+    "deactivates a suppressed indexed child of a recursively removed directory",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-child-"));
+      // `dir1/` was removed recursively and Bun reported the bare directory,
+      // so the suppressed child is never NAMED by any event - it only appears
+      // as a RESOLVED reconciliation candidate from the indexed side. That is
+      // the second suppression filter, and it used to drop the candidate
+      // unconditionally: `a.md` stayed active and searchable until a full
+      // `gno update`, because the parent fallback cannot see nested
+      // descendants either.
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+      const { store } = createSubtreeStore({
+        descendants: { dir1: ["dir1/a.md", "dir1/b.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // GNO wrote `dir1/a.md` through the capture/API path, so it is inside
+        // its suppression window - and then its whole directory was deleted.
+        harness.service.suppress(join(root, "dir1", "a.md"));
+        harness.emit([["rename", "dir1"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        expect(batch).toContain("dir1/a.md");
+        // The unsuppressed sibling was never in doubt; it pins that the
+        // suppressed one is the only thing this test changed.
+        expect(batch).toContain("dir1/b.md");
+        expect(batch).not.toContain("keep.md");
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps filtering a suppressed candidate that still exists on disk",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-mixed-"));
+      // Both are suppressed application writes; only one still exists. The
+      // rule is the same one the callback route follows - suppression
+      // suppresses SYNCING a write that is still there, never CLASSIFICATION
+      // of one that has vanished - so exactly one of them may be synced.
+      await Bun.write(join(root, "alive.md"), "# written by gno\n");
+      const { store } = createSubtreeStore({
+        direct: { "": ["alive.md", "gone.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "alive.md"));
+        harness.service.suppress(join(root, "gone.md"));
+        // An ineligible temp name, so the whole directory reconciles and both
+        // candidates arrive resolved rather than named.
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["gone.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "fails closed when a suppressed candidate cannot be statted",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-eio-"));
+      // `gone.md` is not on disk, but the disk cannot SAY so: an unreadable
+      // path (EACCES, EIO, a hung mount) is not evidence of absence, so the
+      // suppression stands and nothing is deactivated on the strength of it.
+      const { store } = createSubtreeStore({ direct: { "": ["gone.md"] } });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        resolveVanishedPath: async (): Promise<VanishedPathOutcome> => ({
+          status: "error",
+          cause: new Error("EIO: unreadable"),
+        }),
+      });
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "gone.md"));
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
     "still refuses to resync a suppressed path that is still on disk",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-alive-"));

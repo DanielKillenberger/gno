@@ -536,8 +536,11 @@ whole-collection. A root that is merely unreadable (a permission error, a hung
 mount) is not treated as removed and deactivates nothing.
 Atomic saves and deletions are therefore picked up live, without a manual
 `gno update`, and deleting a directory deactivates everything indexed beneath it
-at any depth. Two cases still need a manual update: on Linux, subdirectories
-created after the watcher started (Bun emits no event for those at all), and a
+at any depth. Three cases still need a manual update: on Linux, subdirectories
+created after the watcher started (no event at all on Bun 1.3.11; reported, and
+so picked up live, on Bun 1.3.14), writes into a pre-existing Linux directory
+renamed after the watcher started (reported under the stale pre-rename path, so
+the new location is never indexed), and a
 path deleted and recreated within the same ~300 ms debounce window, which the
 watcher can only see as an edit. A full sync still
 performs one exact global graph reconciliation. Status aggregation is set-based, concurrent status

@@ -93,13 +93,20 @@ or unmount a watched collection directory and everything indexed under it
 deactivates. A root that cannot be read (permission error, hung mount) is not
 the same thing as a root that is gone, and deactivates nothing.
 
-Two changes still fall outside what the watcher can observe and need a
+Three changes still fall outside what the watcher can observe and need a
 `gno update` or a restart:
 
-- on Linux, subdirectories created after the watcher started, which Bun's
-  recursive watch does not extend to
-  ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939)); no event
-  is emitted for writes inside them at all, so there is nothing to reconcile;
+- on Linux, subdirectories created after the watcher started, on Bun versions
+  whose recursive watch does not extend to them
+  ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939)). Measured
+  on Bun 1.3.11 no event is emitted for writes inside them at all, so there is
+  nothing to reconcile; on Bun 1.3.14 those writes were reported and are picked
+  up live;
+- on Linux, writes into a pre-existing directory that was renamed after the
+  watcher started (measured on Bun 1.3.14). They are reported under the stale
+  pre-rename path, so the watcher deactivates what is gone from the old path
+  but never learns the new one, and the files at their new location stay
+  unindexed;
 - a file or directory deleted and recreated inside the same ~300 ms debounce
   window. The watcher decides whether an event was a removal by checking the
   disk once, when the batch flushes; if the path is back by then, the event

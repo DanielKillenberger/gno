@@ -413,10 +413,18 @@ Common causes:
 Cases the watcher still cannot recover on its own, where `gno update` remains the
 fix:
 
-- **Subdirectories created on Linux after the watcher started.** Bun's recursive
-  watch does not extend to them ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939))
-  and emits no event at all for writes inside them, so there is no hint to
-  reconcile. Restart `gno serve` / `gno daemon`, or run `gno update`.
+- **Subdirectories created on Linux after the watcher started.** On Bun versions
+  whose recursive watch does not extend to them
+  ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939)) no event is
+  emitted at all for writes inside them, so there is no hint to reconcile. That
+  is what we measured on Bun 1.3.11; on Bun 1.3.14 those writes were reported
+  and are picked up live. If your Bun is affected, restart `gno serve` /
+  `gno daemon`, or run `gno update`.
+- **Writes into a directory renamed on Linux after the watcher started.** They
+  are reported under the stale pre-rename path (measured on Bun 1.3.14). The
+  watcher deactivates what is gone from the old path, but nothing ever names the
+  new one, so files under the renamed directory stay unindexed until you run
+  `gno update` or restart.
 - **A path deleted and recreated within the same ~300 ms batch.** The watcher
   decides whether an event was a deletion by checking the disk once, when the
   batch flushes. A file or directory that is already back by then looks like an

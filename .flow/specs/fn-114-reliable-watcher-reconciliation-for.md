@@ -403,6 +403,15 @@ proportional to the event.
   child (Bun 1.3.14) it may be the only report the watcher ever gets. A suppressed
   path is therefore always classified against the disk, and dropped from the sync
   batch only when it is found to still exist (or could not be resolved at all).
+
+  That rule is on the SYNC side, so it binds every route into `syncPaths`, not
+  just the route on which a suppressed path was NAMED by an event. A suppressed
+  path that arrives as a RESOLVED candidate of a reconciled directory — the
+  indexed child of a recursively removed directory, which no event ever names —
+  is subject to the same disk classification and the same fail-closed default.
+  Filtering it out unconditionally there left it active and searchable until a
+  full `gno update`, because the surviving-parent fallback cannot see nested
+  descendants.
 - **R5:** Repeated or coalesced filesystem events for the same collection and
   directory result in one bounded reconciliation batch per debounce window. Unchanged
   files produce no duplicate document-change notifications and no redundant embedding
@@ -515,7 +524,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing, never to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), never to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R7  | Diagnostics distinguish event receipt from reconciliation outcome, including reported `lastEventAt` for accepted-vs-dropped events | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |

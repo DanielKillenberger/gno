@@ -456,6 +456,57 @@ export class CollectionWatchService {
   }
 
   /**
+   * The single sync-side suppression rule, in one place.
+   *
+   * Suppression exists to stop GNO's own writes from feeding back into the
+   * watcher as if they were external changes. It suppresses SYNCING an
+   * application write that STILL EXISTS - never CLASSIFICATION of one that has
+   * VANISHED. A suppressed path that is gone from disk is not an application
+   * write in flight: the app wrote it, it is gone now, and dropping it here
+   * leaves that document active and searchable until a full `gno update`.
+   *
+   * Only the disk can tell those apart, which is why this is async and lives on
+   * the flush side rather than in the watcher callback.
+   *
+   * Fails CLOSED: only a path PROVEN removed escapes suppression. An
+   * unreadable path (`EACCES`, `EIO`, a hung mount, a path that will not even
+   * normalize) stays suppressed rather than being resynced on the strength of a
+   * failed stat - the same rule `#widenVanishedExactPaths` applies to exact
+   * paths.
+   */
+  async #isSuppressedSurvivor(root: string, relPath: string): Promise<boolean> {
+    if (!this.#isSuppressed(join(root, relPath))) {
+      return false;
+    }
+    const outcome = await this.#resolveVanishedPath(relPath, root);
+    return outcome.status !== "removed";
+  }
+
+  /**
+   * Drop the candidates that are suppressed AND still present, keeping the
+   * suppressed-but-vanished ones so they reach `syncPaths` and deactivate.
+   *
+   * The disk is consulted only for paths that are actually suppressed, so the
+   * ordinary reconciliation - where nothing is suppressed - costs no extra
+   * stats at all.
+   */
+  async #dropSuppressedSurvivors(
+    root: string,
+    relPaths: string[]
+  ): Promise<string[]> {
+    if (!relPaths.some((relPath) => this.#isSuppressed(join(root, relPath)))) {
+      return relPaths;
+    }
+    const kept: string[] = [];
+    for (const relPath of relPaths) {
+      if (!(await this.#isSuppressedSurvivor(root, relPath))) {
+        kept.push(relPath);
+      }
+    }
+    return kept;
+  }
+
+  /**
    * Record WHEN an event was observed without yet claiming it was a real
    * change.
    *
@@ -1196,6 +1247,9 @@ export class CollectionWatchService {
         // `present` is the hot path; `error` fails closed - an unreadable disk
         // is never read as "the file is gone", and a suppressed path is kept
         // suppressed rather than resynced on the strength of a failed stat.
+        // This is the same rule as `#isSuppressedSurvivor`, applied inline
+        // because the outcome this route already resolved would otherwise be
+        // stat-ed twice; the two must stay in agreement.
         if (this.#isSuppressed(join(root, relPath))) {
           suppressedSurvivors.add(relPath);
         }
@@ -1606,10 +1660,9 @@ export class CollectionWatchService {
       directory,
       // Suppression applies to the RESOLVED candidate paths, not to the
       // directory: an application-originated write inside a reconciled
-      // directory must stay suppressed.
-      candidates: [...candidates].filter(
-        (relPath) => !this.#isSuppressed(join(root, relPath))
-      ),
+      // directory must stay suppressed - but only while it still EXISTS. See
+      // `#isSuppressedSurvivor`.
+      candidates: await this.#dropSuppressedSurvivors(root, [...candidates]),
       enumerationFailed: false,
       started: true,
       // A store failure is already a reported terminal outcome for this
