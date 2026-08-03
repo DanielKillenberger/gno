@@ -1,7 +1,7 @@
 {
   "branch_name": "fn-114-reliable-watcher-reconciliation-for",
-  "completion_review_status": "needs_work",
-  "completion_reviewed_at": "2026-08-03T15:40:12.564742Z",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-08-03T15:57:18.948588Z",
   "created_at": "2026-08-03T11:53:54.875025Z",
   "default_impl": null,
   "default_review": null,
@@ -14,7 +14,7 @@
     "fn-114-reliable-watcher-reconciliation-for.4": 2
   },
   "next_task": 1,
-  "plan_review_rounds": 1,
+  "plan_review_rounds": 0,
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-08-03T12:50:02.072289Z",
   "review_attempts": [
@@ -157,6 +157,20 @@
       "task": null,
       "timestamp": "2026-08-03T15:40:12.556404Z",
       "verdict": "NEEDS_WORK"
+    },
+    {
+      "backend": "codex",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "head_sha": "61c1808fd7f592912b35d0a720ee18101187d6a6",
+      "kind": "completion",
+      "outcome": "verdict",
+      "output_sha256": "45c6418a39217612a91ccc06e3ae5062f16fd43ef925b9b6a732c63310de5a04",
+      "round_consumed": true,
+      "scope": "completion",
+      "task": null,
+      "timestamp": "2026-08-03T15:57:18.942738Z",
+      "verdict": "SHIP"
     }
   ],
   "review_pending_rounds": {},
@@ -181,5 +195,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-03T15:40:12.564742Z"
+  "updated_at": "2026-08-03T15:57:18.948588Z"
 }
