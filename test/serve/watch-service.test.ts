@@ -1789,4 +1789,250 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
     },
     RED_TEST_TIMEOUT_MS
   );
+
+  /**
+   * R6 - the enumeration window. Candidates are resolved BEFORE an async
+   * enumeration and handed to `syncPaths` AFTER it, so the configuration they
+   * were resolved against can disappear or move in between. Checking only for
+   * disposal there let a removed collection's stale batch sync anyway, and a
+   * moved root sync stale candidates before recovering.
+   *
+   * Both cases mutate the configuration from inside the awaited store seam, the
+   * same controllable point the generation-drift test above uses.
+   */
+  test(
+    "drops the batch when the collection is REMOVED during enumeration",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-mid-removed-"));
+      // An eligible file the enumeration will happily resolve as a candidate.
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const syncCollection = mock(async () => createSyncResult());
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      let harness: ReturnType<typeof createReconcileHarness> | null = null;
+      let removed = false;
+      const store = {
+        listActiveDirectChildSourcePaths() {
+          if (!removed) {
+            removed = true;
+            harness?.service.updateCollections([]);
+          }
+          return Promise.resolve({ ok: true as const, value: [] });
+        },
+      };
+      harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(removed).toBe(true);
+        // The collection no longer exists: nothing may be synced for it, by
+        // either the bounded path or the full-collection recovery.
+        expect(harness.batches).toEqual([]);
+        expect(syncCollection).not.toHaveBeenCalled();
+        // The reconciliation still started, so it still owes exactly one
+        // terminal outcome - a completion reporting that nothing was synced.
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+        expect(harness.completed).toEqual([
+          {
+            collection: "notes",
+            directory: "",
+            candidateCount: 1,
+            syncedCount: 0,
+          },
+        ]);
+        expect(harness.failed).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "drops the batch when the collection ROOT changes during enumeration",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-mid-root-old-"));
+      const moved = await mkdtemp(join(tmpdir(), "gno-watch-mid-root-new-"));
+      // Same relative name under both roots: syncing the stale candidate would
+      // silently resolve against whichever root `syncPaths` is handed.
+      await Bun.write(join(root, "note.md"), "# old root\n");
+      await Bun.write(join(moved, "note.md"), "# new root\n");
+      // Typed parameter so the recovery target itself can be asserted.
+      const syncCollection = mock(async (_collection: Collection) =>
+        createSyncResult()
+      );
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      let harness: ReturnType<typeof createReconcileHarness> | null = null;
+      let swapped = false;
+      const store = {
+        listActiveDirectChildSourcePaths() {
+          if (!swapped) {
+            swapped = true;
+            harness?.service.updateCollections([
+              createCollection("notes", moved),
+            ]);
+          }
+          return Promise.resolve({ ok: true as const, value: [] });
+        },
+      };
+      harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(swapped).toBe(true);
+        // The bounded candidates were enumerated under the OLD root, so they
+        // are synced against neither root.
+        expect(harness.batches).toEqual([]);
+        // A moved root is still generation drift, so the pre-existing
+        // full-collection recovery runs - against the CURRENT collection.
+        expect(syncCollection).toHaveBeenCalledTimes(1);
+        expect(syncCollection.mock.calls[0]?.[0]).toMatchObject({
+          name: "notes",
+          path: moved,
+        });
+        expect(harness.completed).toEqual([
+          {
+            collection: "notes",
+            directory: "",
+            candidateCount: 1,
+            syncedCount: 0,
+          },
+        ]);
+        expect(harness.failed).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+        await rm(moved, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
+   * R7 - exactly one terminal outcome per started reconciliation. Reporting
+   * completion before the shared `syncPaths` produced BOTH "completed" and
+   * "failed" for the same directory when that sync then failed; filtering empty
+   * outcomes away produced NEITHER for a successful no-op.
+   */
+  test(
+    "reports a sync failure without also reporting the directory as completed",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-sync-fail-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+      const attempted: string[][] = [];
+      const syncFailure = new Error("sync stage exploded");
+      defaultSyncService.syncPaths = (async (
+        _collection,
+        _store,
+        relPaths: string[]
+      ) => {
+        attempted.push([...relPaths]);
+        throw syncFailure;
+      }) as typeof defaultSyncService.syncPaths;
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The reconciliation did reach the sync stage, and the sync failed.
+        expect(attempted).toEqual([["note.md"]]);
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+        expect(harness.failed).toEqual([
+          {
+            collection: "notes",
+            directory: "",
+            stage: "sync",
+            cause: syncFailure,
+          },
+        ]);
+        // The load-bearing assertion: no completion for a directory whose batch
+        // failed downstream.
+        expect(harness.completed).toEqual([]);
+
+        // A failed sync leaves the watcher armed.
+        defaultSyncService.syncPaths = (async (
+          _collection,
+          _store,
+          relPaths: string[]
+        ) => {
+          harness.batches.push([...relPaths]);
+          return createSyncResult({
+            filesProcessed: relPaths.length,
+            filesUpdated: relPaths.length,
+          });
+        }) as typeof defaultSyncService.syncPaths;
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+        expect(harness.batches).toEqual([["note.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reports a successful zero-candidate reconciliation as completed",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-empty-ok-"));
+      // Nothing eligible on disk and nothing active indexed: the reconciliation
+      // succeeds and legitimately has no work. That is still an OUTCOME.
+      await Bun.write(join(root, "cover.png"), "not markdown");
+      const { store, calls } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(calls).toContain("");
+        expect(harness.batches).toEqual([]);
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+        // Neither a completion nor a failure was emitted for this directory
+        // before the fix: the reconciliation simply vanished after its start.
+        expect(harness.completed).toEqual([
+          {
+            collection: "notes",
+            directory: "",
+            candidateCount: 0,
+            syncedCount: 0,
+          },
+        ]);
+        expect(harness.failed).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
 });

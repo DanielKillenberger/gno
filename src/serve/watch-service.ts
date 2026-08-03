@@ -135,6 +135,18 @@ interface DirectoryReconciliation {
    * because no deactivation is ever inferred from a failed store query.
    */
   enumerationFailed: boolean;
+  /**
+   * `#reconcileDirectory` ran for this directory, so `onReconcileStart` was
+   * emitted and it owes EXACTLY ONE terminal outcome (R7). A directory the
+   * current rules reject is never started and owes nothing.
+   */
+  started: boolean;
+  /**
+   * A terminal `onReconcileFailed` was already emitted for this directory
+   * (enumerate or store stage). It must not also be reported as completed, and
+   * a later sync-stage failure must not report it twice.
+   */
+  failureReported: boolean;
 }
 
 /** The directory portion of a normalized collection-relative path. */
@@ -588,7 +600,7 @@ export class CollectionWatchService {
       return;
     }
 
-    const exactPaths = pending ? [...pending] : [];
+    let exactPaths = pending ? [...pending] : [];
     const dirtyEntries = dirty ? [...dirty.entries()] : [];
     let syncGeneration = this.#collectionGenerations.get(collectionName) ?? 0;
     this.#pendingByCollection.set(collectionName, new Set<string>());
@@ -602,6 +614,8 @@ export class CollectionWatchService {
     this.#syncing.add(collectionName);
     let relPaths: string[] = [];
     let reconciliations: DirectoryReconciliation[] = [];
+    // Started reconciliations that still owe their single terminal outcome.
+    let outstanding: DirectoryReconciliation[] = [];
 
     try {
       if (dirtyEntries.length > 0) {
@@ -611,6 +625,52 @@ export class CollectionWatchService {
         );
         if (this.#disposed) {
           return;
+        }
+        outstanding = reconciliations;
+
+        // R6: enumeration is the window in which the configuration can move
+        // out from under work that was already resolved. `#disposed` alone is
+        // not enough - re-read the collection, its normalized root, and its
+        // generation BEFORE any bounded candidate can reach `syncPaths`.
+        const liveCollection = this.#collections.find(
+          (entry) => entry.name === collectionName
+        );
+        const liveGeneration =
+          this.#collectionGenerations.get(collectionName) ?? 0;
+        if (!liveCollection) {
+          // The collection was removed while enumerating: the whole batch,
+          // bounded and exact alike, belongs to a configuration that no longer
+          // exists, and there is nothing left to recover against.
+          this.#completeReconciliations(
+            collection.name,
+            outstanding,
+            new Set()
+          );
+          outstanding = [];
+          this.#pendingByCollection.delete(collectionName);
+          this.#dirtyByCollection.delete(collectionName);
+          return;
+        }
+        const rootChanged =
+          normalize(liveCollection.path) !== normalize(collection.path);
+        if (rootChanged || liveGeneration !== syncGeneration) {
+          // The root moved, or the configuration drifted, while enumeration was
+          // in flight. Either way the resolved candidates describe the OLD
+          // configuration, so they are dropped rather than synced against
+          // either root. A root change also invalidates the exact paths drained
+          // from the same window. Both drops are safe because the drift loop
+          // below runs a full `syncCollection`, which is a superset of this
+          // bounded work (R6) - reconciliation adds no second compensating pass.
+          this.#completeReconciliations(
+            collection.name,
+            outstanding,
+            new Set()
+          );
+          outstanding = [];
+          reconciliations = [];
+          if (rootChanged) {
+            exactPaths = [];
+          }
         }
       }
 
@@ -625,18 +685,22 @@ export class CollectionWatchService {
         matchesWalkPath(relPath, collectionToWalkConfig(collection, 0))
       );
       const batched = new Set(relPaths);
-      for (const entry of reconciliations) {
-        this.#notifyDiagnostic(() =>
-          this.#callbacks?.onReconcileComplete?.({
-            collection: collection.name,
-            directory: entry.directory,
-            candidateCount: entry.candidates.length,
-            syncedCount: entry.candidates.filter((relPath) =>
-              batched.has(relPath)
-            ).length,
-          })
-        );
+      // A reconciliation that put nothing into the batch cannot be affected by
+      // the sync stage, so its outcome is already known: report the successful
+      // no-op now (a zero-candidate reconciliation IS a success and must not
+      // vanish). Everything that DID contribute waits for the shared sync, so a
+      // sync failure is never preceded by a completion for the same directory.
+      const contributing: DirectoryReconciliation[] = [];
+      const settledNow: DirectoryReconciliation[] = [];
+      for (const entry of outstanding) {
+        if (entry.candidates.some((relPath) => batched.has(relPath))) {
+          contributing.push(entry);
+        } else {
+          settledNow.push(entry);
+        }
       }
+      this.#completeReconciliations(collection.name, settledNow, batched);
+      outstanding = contributing;
 
       let completionCollection = collection;
       let completionPaths: string[] = [];
@@ -676,6 +740,12 @@ export class CollectionWatchService {
           relPaths,
           result,
         });
+        // The shared sync succeeded, so every directory that contributed to it
+        // now has its one terminal outcome (R7). Reported here rather than
+        // before the sync so a later failure cannot produce both "completed"
+        // and "failed" for the same reconciliation.
+        this.#completeReconciliations(collection.name, outstanding, batched);
+        outstanding = [];
         completionPaths = changedPaths(result, relPaths);
       }
 
@@ -734,17 +804,20 @@ export class CollectionWatchService {
         relPaths,
         error,
       });
-      for (const entry of reconciliations) {
-        if (entry.candidates.length > 0) {
-          this.#notifyDiagnostic(() =>
-            this.#callbacks?.onReconcileFailed?.({
-              collection: collection.name,
-              directory: entry.directory,
-              stage: "sync",
-              cause: error,
-            })
-          );
+      // Only directories that actually reached the failed sync are reported
+      // against it, and only if they do not already own a terminal outcome.
+      for (const entry of outstanding) {
+        if (entry.failureReported) {
+          continue;
         }
+        this.#notifyDiagnostic(() =>
+          this.#callbacks?.onReconcileFailed?.({
+            collection: collection.name,
+            directory: entry.directory,
+            stage: "sync",
+            cause: error,
+          })
+        );
       }
       throw error;
     } finally {
@@ -758,6 +831,45 @@ export class CollectionWatchService {
           this.#notifySettledIfIdle();
         }
       }
+    }
+  }
+
+  /**
+   * Emit the single completion each started reconciliation owes (R7).
+   *
+   * Every directory that emitted `onReconcileStart` must reach exactly ONE
+   * terminal outcome - completion or failure, never both and never neither:
+   *
+   * - a directory that already reported a failed stage is skipped here, so a
+   *   fail-closed enumeration or an unanswered store query is not also claimed
+   *   as a success;
+   * - a successful reconciliation that produced nothing IS reported, with zero
+   *   counts. Dropping it (as an earlier revision did, by filtering empty
+   *   outcomes away) left `onReconcileStart` with no answer at all, which is
+   *   precisely the diagnostic ambiguity R7 exists to prevent.
+   *
+   * Disposal remains the one documented exception: no callback fires after
+   * `dispose()`, for reconciliation as for every other watcher event.
+   */
+  #completeReconciliations(
+    collectionName: string,
+    entries: DirectoryReconciliation[],
+    batched: ReadonlySet<string>
+  ): void {
+    for (const entry of entries) {
+      if (entry.failureReported) {
+        continue;
+      }
+      this.#notifyDiagnostic(() =>
+        this.#callbacks?.onReconcileComplete?.({
+          collection: collectionName,
+          directory: entry.directory,
+          candidateCount: entry.candidates.length,
+          syncedCount: entry.candidates.filter((relPath) =>
+            batched.has(relPath)
+          ).length,
+        })
+      );
     }
   }
 
@@ -862,7 +974,14 @@ export class CollectionWatchService {
             directory,
             indexedFor(directory)
           )
-        : { directory, candidates: [], enumerationFailed: false };
+        : {
+            directory,
+            candidates: [],
+            enumerationFailed: false,
+            // Never started, so it owes no terminal outcome.
+            started: false,
+            failureReported: false,
+          };
       resolved.set(directory, outcome);
       return outcome;
     };
@@ -902,9 +1021,11 @@ export class CollectionWatchService {
       }
     }
 
-    return [...resolved.values()].filter(
-      (outcome) => outcome.candidates.length > 0
-    );
+    // Every STARTED reconciliation is returned, including the ones that
+    // resolved to nothing: the caller owes each of them a terminal outcome, and
+    // filtering empty outcomes away here is what previously made a successful
+    // zero-candidate reconciliation disappear between start and completion.
+    return [...resolved.values()].filter((outcome) => outcome.started);
   }
 
   /**
@@ -939,7 +1060,13 @@ export class CollectionWatchService {
           cause: disk.cause,
         })
       );
-      return { directory, candidates: [], enumerationFailed: true };
+      return {
+        directory,
+        candidates: [],
+        enumerationFailed: true,
+        started: true,
+        failureReported: true,
+      };
     }
 
     const candidates = new Set<string>(
@@ -977,6 +1104,11 @@ export class CollectionWatchService {
         return !(suppressedUntil && suppressedUntil > Date.now());
       }),
       enumerationFailed: false,
+      started: true,
+      // A store failure is already a reported terminal outcome for this
+      // directory: the disk half may still yield candidates, but the
+      // reconciliation was partial and must not also be claimed as complete.
+      failureReported: !indexed.ok,
     };
   }
 
