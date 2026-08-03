@@ -1,0 +1,79 @@
+{
+  "branch_name": "fn-114-reliable-watcher-reconciliation-for",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-08-03T11:53:54.875025Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-114-reliable-watcher-reconciliation-for",
+  "impl_review_rounds": {},
+  "next_task": 1,
+  "plan_review_rounds": 0,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-08-03T12:50:02.072289Z",
+  "review_attempts": [
+    {
+      "backend": "codex",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "head_sha": "816bd9cb4658a0d80eb696f6d4a18302c00891d3",
+      "kind": "plan",
+      "outcome": "verdict",
+      "output_sha256": "649027052584e4b13876b87da821f9746a665775aba6447399764dca9fd1513e",
+      "round_consumed": true,
+      "scope": "plan",
+      "task": null,
+      "timestamp": "2026-08-03T12:41:38.441914Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "backend": "codex",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "head_sha": "816bd9cb4658a0d80eb696f6d4a18302c00891d3",
+      "kind": "plan",
+      "outcome": "verdict",
+      "output_sha256": "385f4707673aa1370de69a5e7e6f888b8f1b3dce44322a114fcc23739dc5ce71",
+      "round_consumed": true,
+      "scope": "plan",
+      "task": null,
+      "timestamp": "2026-08-03T12:46:53.057368Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "backend": "codex",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "head_sha": "816bd9cb4658a0d80eb696f6d4a18302c00891d3",
+      "kind": "plan",
+      "outcome": "verdict",
+      "output_sha256": "ce909aa04cc93cac340d6334a81c6d4a5fd5a279d0ba93d5dabe5db86c4ece20",
+      "round_consumed": true,
+      "scope": "plan",
+      "task": null,
+      "timestamp": "2026-08-03T12:50:02.072236Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_pending_rounds": {},
+  "review_transport_failures": {
+    "plan": 0
+  },
+  "spec_path": ".flow/specs/fn-114-reliable-watcher-reconciliation-for.md",
+  "status": "open",
+  "title": "Reliable watcher reconciliation for atomic writes and deletions",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-08-03T12:50:02.072296Z"
+}
