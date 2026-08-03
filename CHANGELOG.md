@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.32.0] - 2026-08-03
+
+### Added
+
 - Added atomic reference-safe rename and same-collection move across the Web
   UI, REST API, SDK, and write-gated MCP. Every mutation requires a fresh
   preview digest and explicit confirmation; supported wiki and Markdown links
@@ -19,8 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced warning-only note refactors with typed stale-plan, contention,
   rollback/recovery, and post-commit sync-pending outcomes. Duplicate and
   folder creation remain unchanged and do not retarget inbound references.
-
-### Fixed
 
 ## [1.31.0] - 2026-08-03
 
@@ -2054,7 +2060,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.31.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.32.0...HEAD
+[1.32.0]: https://github.com/gmickel/gno/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/gmickel/gno/compare/v1.30.7...v1.31.0
 [1.30.7]: https://github.com/gmickel/gno/compare/v1.30.6...v1.30.7
 [1.30.6]: https://github.com/gmickel/gno/compare/v1.30.5...v1.30.6
