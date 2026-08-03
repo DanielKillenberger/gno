@@ -545,7 +545,7 @@ describe("listActiveDirectChildSourcePaths", () => {
         insert.run("notes", "legacy-root.md", null, 1);
 
         expect(runMigrations(db, migrations, "unicode61").ok).toBe(true);
-        expect(getSchemaVersion(db)).toBe(26);
+        expect(getSchemaVersion(db)).toBe(27);
       } finally {
         db.close();
       }
