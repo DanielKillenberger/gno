@@ -14,10 +14,17 @@ Measured at `35b7b3cf` (origin/main content) on darwin 25.5.0, Bun 1.3.11,
 after a clean `bun install --frozen-lockfile`:
 
 ```
-bun test test/spec    -> 275 pass,   0 fail
-bun test test/serve   -> 471 pass,   0 fail
-bun test test/cli     -> 521 pass, 189 fail
+bun test              -> 3534 pass, 2 skip, 0 fail   <-- the canonical gate is GREEN
+bun test test/spec    ->  275 pass,   0 fail
+bun test test/serve   ->  471 pass,   0 fail
+bun test test/cli     ->  521 pass, 189 fail          <-- only this narrower scope
 ```
+
+**Scope matters and was initially mis-stated.** Running the whole suite is green: the
+`test/cli` files execute inside it and pass. The failure appears only when `test/cli` is
+given its own directory scope, which is exactly what an ordering race predicts — a
+different set of files, in a different order, in that process. Severity is therefore
+"a supported command is broken", not "the repo is red".
 
 Isolation check — the same files, alone:
 
@@ -69,7 +76,7 @@ the shipped CLI calls `setupSqlite` before opening a store.
 ## Acceptance Criteria
 
 - **R1:** `bun test test/cli` passes on macOS as a single directory run, with no
-  reduction in the number of tests executed.
+  reduction in the number of tests executed, and full `bun test` stays green.
 - **R2:** The fix makes the custom-SQLite selection order-independent rather than
   relying on file execution order — a newly added test file that constructs a
   `Database` cannot silently re-break the suite.

@@ -66,9 +66,13 @@ The parent prints `PID <pid>` and exits 0; the child writes to
 gno daemon --no-sync-on-start
 ```
 
-That starts the watcher immediately and only reacts to future file changes.
-Anything already on disk when the daemon starts stays unindexed until the next
-`gno update` or a restart without the flag.
+That skips the initial collection scan and starts the watcher immediately. Files
+already on disk are not enumerated at startup, so anything untouched stays
+unindexed until the next `gno update` or a restart without the flag. A
+pre-existing file is still picked up if it is changed later, or if a later
+ambiguous event reconciles the directory holding it — reconciliation enumerates
+every eligible direct child of that directory, including files that predate
+startup.
 
 "Reacts to future file changes" includes changes the operating system does not
 report cleanly. An event that cannot name an eligible file — an atomic save

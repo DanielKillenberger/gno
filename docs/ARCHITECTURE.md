@@ -182,8 +182,13 @@ save reported under its temporary sibling, or a recursive directory delete
 reported as the bare directory) marks that directory dirty, and the flush
 reconciles the directory's direct eligible children on disk against its active
 indexed direct children before handing the deduplicated union to the same
-path-scoped ingestion. The blast radius stays one directory deep — never the
-whole collection. Periodic/full sync remains
+path-scoped ingestion. In steady state — while the collection's configuration is
+unchanged — the blast radius stays one directory deep rather than the whole
+collection. If the collection configuration changes while a batch is being
+reconciled or synced, the watcher deliberately falls back to a full
+`syncCollection` for that collection, which is a whole-collection walk; that
+recovery is the one case where a watcher batch is not directory-bounded.
+Periodic/full sync remains
 the exact fallback for previously unresolved frontmatter targets. Projection
 yields to the event loop in bounded intervals so HTTP requests remain
 responsive during larger graph rebuilds.

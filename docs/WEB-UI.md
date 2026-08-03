@@ -525,7 +525,11 @@ those documents plus known backlinks. When a filesystem event cannot name an
 eligible file — an atomic save reported under a temporary name, or a directory
 delete reported as the bare directory — the batch is the reconciled contents of
 that one directory (its eligible files on disk unioned with its active indexed
-documents) rather than a single path. It is never a whole-collection walk.
+documents) rather than a single path. While the collection's configuration is
+unchanged, that is as wide as a watcher batch gets — not a whole-collection
+walk. The exception is configuration drift: if the collection changes while a
+batch is reconciling or syncing, the watcher recovers with a full
+`syncCollection` for that collection, which does walk it.
 Atomic saves and deletions are therefore picked up live, without a manual
 `gno update`. Two cases still need one: documents nested deeper than a deleted
 directory's direct children, and, on Linux, subdirectories created after the
