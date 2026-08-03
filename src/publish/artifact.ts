@@ -6,6 +6,10 @@
 
 import type { EgressLineage } from "../core/egress-provenance";
 import type { DocumentRow } from "../store/types";
+import type {
+  KnownPublishRequiredCapability,
+  PublishArtifactAsset,
+} from "./artifact-assets";
 
 import { deriveDocid } from "../app/constants";
 import {
@@ -26,7 +30,37 @@ import {
 
 export { MAX_PUBLISH_SLUG_LENGTH } from "./artifact-validation";
 export { buildExportedMetadata } from "./metadata";
-
+export type {
+  PublishArtifactAsset,
+  PublishArtifactAssetReference,
+  SupportedRasterMediaType,
+} from "./artifact-assets";
+export {
+  BUNDLED_RASTER_ASSETS_CAPABILITY,
+  GNO_ASSET_SENTINEL_PATTERN,
+  MAX_PUBLISH_UPLOAD_BYTES,
+  PUBLISH_ASSET_DIAGNOSTIC_CODES,
+  PUBLISH_ASSET_LIFECYCLE_TERMINALS,
+  PUBLISH_ASSET_VISIBILITY,
+  SUPPORTED_RASTER_MEDIA_TYPES,
+  formatGnoAssetSentinel,
+  measureArtifactUploadBytes,
+  measureSerializedUploadBytes,
+  parseGnoAssetSentinel,
+  serializePublishArtifact,
+  sniffRasterMediaType,
+  validatePublishAssetContract,
+} from "./artifact-assets";
+export {
+  attachAssetsToV1Artifact,
+  buildDeterministicAssets,
+  emptyAssetEgressSummary,
+  summarizeAssetEgress,
+} from "./attachment-resolver";
+export type {
+  AttachmentDiagnostic,
+  PublishAssetEgressSummary,
+} from "./attachment-resolver";
 export type PublishVisibility =
   | "encrypted"
   | "invite-only"
@@ -122,8 +156,10 @@ export interface EncryptedPublishArtifactSpace {
 }
 
 export interface PublishArtifactV1 {
+  assets?: PublishArtifactAsset[];
   egressLineage: EgressLineage;
   exportedAt: string;
+  requiredCapabilities?: KnownPublishRequiredCapability[];
   source: string;
   spaces: PublishArtifactSpace[];
   version: 1;
@@ -132,6 +168,7 @@ export interface PublishArtifactV1 {
 export interface PublishArtifactV2 {
   egressLineage: EgressLineage;
   exportedAt: string;
+  requiredCapabilities?: KnownPublishRequiredCapability[];
   source: string;
   spaces: EncryptedPublishArtifactSpace[];
   version: 2;
@@ -406,17 +443,22 @@ export const buildPublishArtifact = (input: {
 export const buildEncryptedPublishArtifact = (input: {
   egressLineage?: EgressLineage;
   encryptedPayload: EncryptedArtifactPayload;
+  requiredCapabilities?: KnownPublishRequiredCapability[];
   routeSlug: string;
   secretToken: string;
   sourceType: "note" | "collection";
 }): PublishArtifactV2 => {
-  const { egressLineage: providedLineage, ...encryptedInput } = input;
+  const {
+    egressLineage: providedLineage,
+    requiredCapabilities,
+    ...encryptedInput
+  } = input;
   const validated = validateAndProjectEncryptedPublishInput(encryptedInput);
   const egressLineage = egressLineageSchema.parse(
     providedLineage ?? legacyLocalOnlyEgressLineage("legacy")
   );
   const exportedAt = requirePublishDateTime(new Date().toISOString());
-  return {
+  const artifact: PublishArtifactV2 = {
     egressLineage,
     exportedAt,
     source: validated.routeSlug,
@@ -431,6 +473,11 @@ export const buildEncryptedPublishArtifact = (input: {
     ],
     version: 2,
   };
+  // Capability is declared on the outer envelope; plaintext assets stay inside ciphertext.
+  if (requiredCapabilities && requiredCapabilities.length > 0) {
+    artifact.requiredCapabilities = [...requiredCapabilities];
+  }
+  return artifact;
 };
 
 export const derivePublishArtifactFilename = (artifact: PublishArtifact) => {

@@ -9,9 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added bundled local raster attachments to publish export for PNG, JPEG, GIF,
+  WebP, and AVIF, including content-addressed deduplication, exact serialized
+  size accounting, public/secret hosted delivery, and ciphertext-only
+  encrypted reader Blob URLs.
+
 ### Changed
 
+- Publish export now preserves supported local Markdown and Obsidian images
+  instead of dropping them. Unsupported, missing, ambiguous, unsafe, or
+  invite-only hosted-image cases fail closed with explicit diagnostics.
+
 ### Fixed
+
+- Aligned encrypted publish ciphertext field bounds to the 100 MiB final
+  envelope budget, recognized CommonMark tilde fences during attachment
+  discovery, rejected bare `gno-asset:` sentinels, enforced `sourceRef`
+  1..1024, and required AV1-decodable AVIF at producer ingress.
 
 ## [1.32.0] - 2026-08-03
 

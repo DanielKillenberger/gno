@@ -4,7 +4,8 @@
  * @module src/cli/commands/publish
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+// node:fs/promises — directory creation has no Bun-native equivalent.
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { join } from "node:path";
 
@@ -12,10 +13,15 @@ import type {
   PublishArtifact,
   PublishVisibility,
 } from "../../publish/artifact";
+import type { PublishAssetEgressSummary } from "../../publish/attachment-resolver";
 import type { SanitizeWarning } from "../../publish/obsidian-sanitize";
 
 import { resolveDownloadsDir } from "../../core/user-dirs";
-import { derivePublishArtifactFilename, slugify } from "../../publish/artifact";
+import {
+  derivePublishArtifactFilename,
+  serializePublishArtifact,
+  slugify,
+} from "../../publish/artifact";
 import { exportPublishArtifact } from "../../publish/export-service";
 import { formatSanitizeWarnings } from "../../publish/obsidian-sanitize";
 import { initStore } from "./shared";
@@ -37,6 +43,7 @@ export type PublishExportResult =
       success: true;
       data: {
         artifact: PublishArtifact;
+        assetSummary: PublishAssetEgressSummary;
         outPath: string;
         preview?: string;
         uploadUrl: string;
@@ -64,6 +71,15 @@ export async function buildDefaultPublishExportPath(
   );
 }
 
+/** Write exactly the canonical byte sequence used by upload-size accounting. */
+export async function writePublishArtifactFile(
+  outPath: string,
+  artifact: PublishArtifact
+): Promise<void> {
+  await mkdir(dirname(outPath), { recursive: true });
+  await Bun.write(outPath, serializePublishArtifact(artifact));
+}
+
 export async function publishExport(
   target: string,
   options: PublishExportOptions
@@ -79,7 +95,7 @@ export async function publishExport(
   const { collections, store } = initResult;
 
   try {
-    const { artifact, warnings } = await exportPublishArtifact({
+    const { artifact, assetSummary, warnings } = await exportPublishArtifact({
       collections,
       options: {
         routeSlug: options.slug,
@@ -104,6 +120,7 @@ export async function publishExport(
         success: true,
         data: {
           artifact,
+          assetSummary,
           outPath: "",
           preview,
           uploadUrl: "https://gno.sh/studio",
@@ -116,13 +133,13 @@ export async function publishExport(
     const outPath =
       options.out?.trim() || (await buildDefaultPublishExportPath(artifact));
 
-    await mkdir(dirname(outPath), { recursive: true });
-    await writeFile(outPath, JSON.stringify(artifact, null, 2));
+    await writePublishArtifactFile(outPath, artifact);
 
     return {
       success: true,
       data: {
         artifact,
+        assetSummary,
         outPath,
         uploadUrl: "https://gno.sh/studio",
         warnings,
@@ -159,19 +176,37 @@ export function formatPublishExport(
     return JSON.stringify(result.data, null, 2);
   }
 
-  const { artifact, outPath, preview, uploadUrl, warningsDisplay } =
-    result.data;
+  const {
+    artifact,
+    assetSummary,
+    outPath,
+    preview,
+    uploadUrl,
+    warningsDisplay,
+  } = result.data;
   const space = artifact.spaces[0];
   const warningsSection =
     warningsDisplay.length > 0
       ? ["", "Preprocessor notes:", ...warningsDisplay]
       : [];
+  const assetSection = [
+    "",
+    "Asset summary:",
+    `  assets=${assetSummary.assetCount} refs=${assetSummary.referenceCount} external=${assetSummary.externalCount}`,
+    `  rawBytes=${assetSummary.rawBytes} encodedBytes=${assetSummary.encodedBytes} finalBytes=${assetSummary.finalUploadBytes}`,
+    `  dedupSavedBytes=${assetSummary.dedupSavedBytes} unresolved=${assetSummary.diagnostics.length}`,
+    ...assetSummary.diagnostics.map(
+      (diagnostic) =>
+        `  [${diagnostic.code}] ${diagnostic.noteSlug}: ${diagnostic.sourceRef} — ${diagnostic.message}`
+    ),
+  ];
 
   if (preview !== undefined) {
     return [
       `Preview (no file written) — ${space?.sourceType ?? "artifact"}`,
       `Route slug: ${space?.routeSlug ?? slugify(artifact.source)}`,
       `Visibility: ${space?.visibility ?? "public"}`,
+      ...assetSection,
       ...warningsSection,
       "",
       "─── sanitized markdown ───",
@@ -185,6 +220,7 @@ export function formatPublishExport(
     `Visibility: ${space?.visibility ?? "public"}`,
     `Filename: ${derivePublishArtifactFilename(artifact)}`,
     `Next: open ${uploadUrl} and drop ${outPath} into the upload zone.`,
+    ...assetSection,
     ...warningsSection,
   ].join("\n");
 }

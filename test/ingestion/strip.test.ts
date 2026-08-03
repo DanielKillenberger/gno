@@ -80,7 +80,48 @@ unclosed code
 no closing fence`;
       const ranges = getExcludedRanges(markdown);
       const codeBlocks = ranges.filter((r) => r.kind === "fenced_code");
-      expect(codeBlocks.length).toBe(0);
+      expect(codeBlocks).toHaveLength(1);
+      expect(markdown.slice(codeBlocks[0]!.start, codeBlocks[0]!.end)).toBe(
+        markdown
+      );
+    });
+
+    test("identifies CommonMark tilde fences with matching closer length", () => {
+      const markdown = `before
+~~~md
+![secret](../escape.png)
+~~~
+after
+~~~~long
+![also](x.png)
+~~~
+still open
+~~~~
+done`;
+      const ranges = getExcludedRanges(markdown);
+      const codeBlocks = ranges.filter((r) => r.kind === "fenced_code");
+      expect(codeBlocks.length).toBe(2);
+      expect(
+        markdown.slice(codeBlocks[0]!.start, codeBlocks[0]!.end)
+      ).toContain("~~~md");
+      expect(
+        markdown.slice(codeBlocks[0]!.start, codeBlocks[0]!.end)
+      ).toContain("../escape.png");
+      expect(
+        markdown.slice(codeBlocks[1]!.start, codeBlocks[1]!.end)
+      ).toContain("~~~~long");
+      // Shorter ~~~ must not close the ~~~~ opener early.
+      expect(
+        markdown.slice(codeBlocks[1]!.start, codeBlocks[1]!.end)
+      ).toContain("still open");
+    });
+
+    test("does not close backtick fences with tilde closers", () => {
+      const markdown = "```\n![x](a.png)\n~~~\n";
+      const ranges = getExcludedRanges(markdown);
+      const fenced = ranges.filter((r) => r.kind === "fenced_code");
+      expect(fenced).toHaveLength(1);
+      expect(markdown.slice(fenced[0]!.start, fenced[0]!.end)).toBe(markdown);
     });
   });
 
@@ -105,6 +146,37 @@ no closing fence`;
       const ranges = getExcludedRanges(markdown);
       const inlines = ranges.filter((r) => r.kind === "inline_code");
       expect(inlines.length).toBe(0);
+    });
+
+    test("matches equal-length delimiters across inner backtick runs", () => {
+      const markdown = "Use `` ` ![x](../secret.png) ` `` safely.";
+      const ranges = getExcludedRanges(markdown);
+      const inline = ranges.find((range) => range.kind === "inline_code");
+      expect(markdown.slice(inline!.start, inline!.end)).toBe(
+        "`` ` ![x](../secret.png) ` ``"
+      );
+    });
+
+    test("does not pair unmatched fenced backticks with later prose", () => {
+      const markdown = [
+        "~~~md",
+        "unmatched `",
+        "~~~",
+        "visible [link](note.md)",
+        "then `code`",
+      ].join("\n");
+      const ranges = getExcludedRanges(markdown);
+      const inlines = ranges.filter((range) => range.kind === "inline_code");
+
+      expect(inlines).toHaveLength(1);
+      expect(markdown.slice(inlines[0]!.start, inlines[0]!.end)).toBe("`code`");
+      expect(
+        rangeIntersectsExcluded(
+          markdown.indexOf("[link]"),
+          markdown.indexOf("[link]") + "[link]".length,
+          ranges
+        )
+      ).toBe(false);
     });
   });
 
