@@ -3,7 +3,7 @@ import type { WatchListener } from "node:fs";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 // node:fs/promises is used for mkdtemp/mkdir/rm: Bun has no native equivalents
 // for temp-directory creation or filesystem structure operations.
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -992,6 +992,590 @@ describe("CollectionWatchService ambiguous-event reconciliation (fn-114 RED)", (
         });
       } finally {
         await service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * fn-114 task .3 — acceptance coverage for the bounded reconciliation path.
+ *
+ * These sit alongside the RED cases above and pin the behavior the RED tests do
+ * not: that the exact-path flow is untouched, that repeated events coalesce
+ * into ONE reconciliation batch (never asserted through delivered event counts,
+ * which Bun collapses per watcher read batch), that the R12 direct-children
+ * boundary is a tested limitation rather than a silent gap, and that every
+ * degraded path fails closed, stays visible through the new diagnostics, and
+ * leaves the watcher armed.
+ */
+
+interface ReconcileHarnessOptions {
+  store?: unknown;
+  eventBus?: { emit: (event: unknown) => void } | null;
+  scheduler?: { notifySyncComplete: (relPaths: string[]) => void } | null;
+  syncResult?: (relPaths: string[]) => CollectionSyncResult;
+}
+
+function createReconcileHarness(
+  collection: Collection,
+  options: ReconcileHarnessOptions = {}
+) {
+  const batches: string[][] = [];
+  const ambiguous: Array<{
+    collection: string;
+    directory: string | null;
+    reason: string;
+  }> = [];
+  const started: Array<{ collection: string; directory: string }> = [];
+  const completed: Array<{
+    collection: string;
+    directory: string;
+    candidateCount: number;
+    syncedCount: number;
+  }> = [];
+  const failed: Array<{
+    collection: string;
+    directory: string | null;
+    stage: string;
+    cause: unknown;
+  }> = [];
+
+  defaultSyncService.syncPaths = (async (_collection, _store, relPaths) => {
+    batches.push([...relPaths]);
+    return (
+      options.syncResult?.(relPaths) ??
+      createSyncResult({
+        filesProcessed: relPaths.length,
+        filesUpdated: relPaths.length,
+        files: relPaths.map((relPath) => ({ relPath, status: "updated" })),
+      })
+    );
+  }) as typeof defaultSyncService.syncPaths;
+
+  let notifySettled: (() => void) | null = null;
+  let watcherCallback:
+    | ((eventType: string, filename: string | null) => void)
+    | undefined;
+
+  const service = new CollectionWatchService({
+    collections: [collection],
+    eventBus: (options.eventBus ?? null) as never,
+    scheduler: (options.scheduler ?? null) as never,
+    store: (options.store ?? {}) as never,
+    callbacks: {
+      onSettled: () => {
+        const resolve = notifySettled;
+        notifySettled = null;
+        resolve?.();
+      },
+      onAmbiguousEvent: (event) => {
+        ambiguous.push(event);
+      },
+      onReconcileStart: (event) => {
+        started.push(event);
+      },
+      onReconcileComplete: (event) => {
+        completed.push(event);
+      },
+      onReconcileFailed: (event) => {
+        failed.push(event);
+      },
+    },
+    watchFactory: ((
+      _path: string,
+      _options: { recursive: boolean },
+      callback: WatchListener<string>
+    ) => {
+      watcherCallback = callback as typeof watcherCallback;
+      return { close: () => undefined };
+    }) as never,
+  });
+
+  return {
+    service,
+    batches,
+    ambiguous,
+    started,
+    completed,
+    failed,
+    emit(sequence: ReadonlyArray<readonly [string, string | null]>): void {
+      for (const [eventType, filename] of sequence) {
+        watcherCallback?.(eventType, filename);
+      }
+    },
+    /**
+     * Resolves on the watcher's own settle signal, so no assertion below is
+     * timed against a fixed sleep. The race only bounds a hang.
+     */
+    async settle(): Promise<"settled" | "NO_SETTLE_WITHIN_TIMEOUT"> {
+      const settled = new Promise<"settled">((resolve) => {
+        notifySettled = () => resolve("settled");
+      });
+      return await Promise.race([
+        settled,
+        Bun.sleep(AMBIGUOUS_EVENT_WAIT_MS).then(
+          () => "NO_SETTLE_WITHIN_TIMEOUT" as const
+        ),
+      ]);
+    },
+  };
+}
+
+/** Store double recording every active-children lookup it is asked for. */
+function createRecordingStore(
+  activeByDir: Record<string, string[]>,
+  behavior: "ok" | "fail" = "ok"
+) {
+  const calls: string[] = [];
+  return {
+    calls,
+    store: {
+      listActiveDirectChildSourcePaths(
+        _collection: string,
+        dirRelPath: string
+      ) {
+        calls.push(dirRelPath);
+        return Promise.resolve(
+          behavior === "ok"
+            ? { ok: true as const, value: activeByDir[dirRelPath] ?? [] }
+            : {
+                ok: false as const,
+                error: { code: "QUERY_FAILED", message: "store offline" },
+              }
+        );
+      },
+    },
+  };
+}
+
+describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () => {
+  test(
+    "keeps exact eligible events on the per-path flow with no directory work",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-exact-"));
+      await Bun.write(join(root, "doc.md"), "# doc\n");
+      await Bun.write(join(root, "neighbour.md"), "# neighbour\n");
+      const { store, calls } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "doc.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // Only the reported path syncs: no enumeration, no store lookup, and
+        // the eligible neighbour on disk is never pulled in.
+        expect(harness.batches).toEqual([["doc.md"]]);
+        expect(calls).toEqual([]);
+        expect(harness.started).toEqual([]);
+        expect(harness.ambiguous).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "coalesces repeated ambiguous events for one directory into a single batch",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-coalesce-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // Deliberately asserting RECONCILIATION BATCHES, not delivered events:
+        // Bun collapses whatever lands in one watcher read batch (fn-114 .1
+        // measured 300 rapid writes delivered as 20 events), so an event-count
+        // assertion would measure the platform, not the debounce.
+        for (let index = 0; index < 25; index += 1) {
+          harness.emit([["rename", `note.md.tmp.${index}`]]);
+        }
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["note.md"]]);
+        expect(harness.ambiguous).toHaveLength(25);
+        // One reconciliation of the collection root, not 25.
+        expect(
+          harness.completed.filter((event) => event.directory === "")
+        ).toHaveLength(1);
+        expect(harness.completed[0]).toMatchObject({
+          collection: "notes",
+          directory: "",
+          candidateCount: 1,
+          syncedCount: 1,
+        });
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "deactivates only the DIRECT indexed children of a deleted directory (R12 boundary)",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-r12-"));
+      const { store, calls } = createRecordingStore({
+        dir1: ["dir1/a.md"],
+        "dir1/sub": ["dir1/sub/deep.md"],
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["dir1/a.md"]]);
+        // DOCUMENTED LIMITATION (R12): staying directory-bounded means a
+        // document nested deeper than one level below the deleted directory is
+        // NOT deactivated here and still needs `gno update`. Asserted so the
+        // boundary is tested rather than silently assumed.
+        expect(harness.batches[0]).not.toContain("dir1/sub/deep.md");
+        expect(calls).not.toContain("dir1/sub");
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "dedupes an exact event and its ambiguous sibling into one batch",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-dedupe-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const { store } = createRecordingStore({ "": ["note.md"] });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([
+          ["rename", "note.md"],
+          ["rename", "note.md.tmp"],
+        ]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["note.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps suppressed application writes suppressed inside a reconciled directory",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-"));
+      await Bun.write(join(root, "note.md"), "# written by gno\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "note.md"));
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reports a store failure and infers no deactivation from it",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-store-fail-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const { store } = createRecordingStore({}, "fail");
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The disk side still works, so the atomic save is picked up; nothing
+        // is deactivated, because the indexed side never answered.
+        expect(harness.batches).toEqual([["note.md"]]);
+        expect(harness.failed.some((event) => event.stage === "store")).toBe(
+          true
+        );
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test.skipIf(process.getuid?.() === 0)(
+    "fails closed on an unreadable directory, reports it, and stays armed",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-eacces-"));
+      await mkdir(join(root, "locked"), { recursive: true });
+      await Bun.write(join(root, "locked", "note.md"), "# locked\n");
+      await Bun.write(join(root, "after.md"), "# after\n");
+      await chmod(join(root, "locked"), 0o000);
+      const { store, calls } = createRecordingStore({
+        locked: ["locked/note.md"],
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "locked"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // An unreadable directory is never read as an authoritative empty
+        // directory: nothing syncs, nothing deactivates, the cause is visible,
+        // and the indexed side is not even consulted for it.
+        expect(harness.batches).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(harness.failed).toHaveLength(1);
+        expect(harness.failed[0]).toMatchObject({
+          collection: "notes",
+          directory: "locked",
+          stage: "enumerate",
+        });
+
+        // The watcher is still armed after the failure.
+        harness.emit([["change", "after.md"]]);
+        expect(await harness.settle()).toBe("settled");
+        expect(harness.batches).toEqual([["after.md"]]);
+      } finally {
+        await chmod(join(root, "locked"), 0o700).catch(() => undefined);
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "drops a null filename without throwing and reports it as ambiguous",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-null-"));
+      await Bun.write(join(root, "note.md"), "# note\n");
+      const { store, calls } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        expect(() => harness.emit([["change", null]])).not.toThrow();
+
+        // Deterministic, no sleep: a dropped event queues nothing at all.
+        expect(harness.service.getState().queuedCollections).toEqual([]);
+        expect(harness.ambiguous).toEqual([
+          { collection: "notes", directory: null, reason: "missing-filename" },
+        ]);
+        expect(calls).toEqual([]);
+        expect(harness.batches).toEqual([]);
+
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+        expect(harness.batches).toEqual([["note.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "drops queued reconciliation when the collection root changes before the flush",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-root-change-"));
+      const moved = await mkdtemp(join(tmpdir(), "gno-watch-root-moved-"));
+      await Bun.write(join(root, "note.md"), "# stale\n");
+      const { store, calls } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(harness.service.getState().queuedCollections).toEqual(["notes"]);
+
+        harness.service.updateCollections([createCollection("notes", moved)]);
+        expect(harness.service.getState().queuedCollections).toEqual([]);
+
+        await Bun.sleep(350);
+        expect(harness.batches).toEqual([]);
+        expect(calls).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+        await rm(moved, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "honors collection filters changed before a queued reconciliation flushes",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-live-rules-"));
+      await mkdir(join(root, "drafts"), { recursive: true });
+      await Bun.write(join(root, "drafts", "note.md"), "# draft\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "drafts/note.md.tmp"]]);
+        const excluded = createCollection("notes", root);
+        excluded.exclude = ["drafts"];
+        harness.service.updateCollections([excluded]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "emits nothing for unchanged neighbours pulled into a reconciliation batch",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-neighbour-"));
+      await Bun.write(join(root, "changed.md"), "# changed\n");
+      await Bun.write(join(root, "neighbour.md"), "# unchanged\n");
+      const emit = mock((_event: unknown) => undefined);
+      const notifySyncComplete = mock((_relPaths: string[]) => undefined);
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        eventBus: { emit },
+        scheduler: { notifySyncComplete },
+        syncResult: (relPaths) =>
+          createSyncResult({
+            filesProcessed: relPaths.length,
+            filesUpdated: 1,
+            filesUnchanged: relPaths.length - 1,
+            files: relPaths.map((relPath) => ({
+              relPath,
+              status: relPath === "changed.md" ? "updated" : "unchanged",
+            })),
+          }),
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "changed.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["changed.md", "neighbour.md"]]);
+        expect(emit).toHaveBeenCalledTimes(1);
+        expect(emit.mock.calls[0]?.[0]).toMatchObject({
+          relPath: "changed.md",
+        });
+        expect(notifySyncComplete).toHaveBeenCalledTimes(1);
+        expect(notifySyncComplete).toHaveBeenCalledWith(["changed.md"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reconciles a deleted record container through its physical source path (R10)",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-records-"));
+      const collection = createCollection("notes", root);
+      collection.pattern = "**/*.jsonl";
+      collection.include = [".jsonl"];
+      // The store seam returns the DISTINCT effective source path
+      // (COALESCE(record_source_path, rel_path)), so every logical record
+      // derived from the container reconciles through the one physical path.
+      const { store } = createRecordingStore({
+        records: ["records/export.jsonl"],
+      });
+      const harness = createReconcileHarness(collection, { store });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "records"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["records/export.jsonl"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "causes no unbounded collection work for unrelated excluded-path noise",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-noise-"));
+      await mkdir(join(root, ".obsidian"), { recursive: true });
+      await Bun.write(join(root, "note.md"), "# note\n");
+      const syncCollection = mock(async () => createSyncResult());
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+      const collection = createCollection("notes", root);
+      collection.exclude = [".obsidian"];
+      const { store, calls } = createRecordingStore({});
+      const harness = createReconcileHarness(collection, { store });
+
+      try {
+        harness.service.start();
+        harness.emit([
+          ["change", ".obsidian/workspace.json"],
+          ["change", ".obsidian/.sync.lock"],
+        ]);
+
+        // Excluded and dot-prefixed areas are never walked by a full sync
+        // either, so they queue no reconciliation at all - deterministic,
+        // no sleep required.
+        expect(harness.service.getState().queuedCollections).toEqual([]);
+        expect(harness.batches).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(syncCollection).not.toHaveBeenCalled();
+      } finally {
+        await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
       }
     },

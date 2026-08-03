@@ -43,6 +43,27 @@ type DaemonDeps = {
   logger?: DaemonLogger;
 };
 
+const MAX_LOGGED_DIRECTORY_LENGTH = 120;
+// Filenames come from the filesystem and are untrusted: strip control
+// characters (including anything that could rewrite a terminal line) and bound
+// the length before a watcher directory reaches a log line.
+// oxlint-disable-next-line no-control-regex -- sanitizing control characters is the point
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/g;
+
+/** Render an untrusted watcher directory for a log line. */
+export function formatWatchDirectory(directory: string | null): string {
+  if (directory === null) {
+    return "<unknown>";
+  }
+  if (directory === "") {
+    return "<collection root>";
+  }
+  const sanitized = directory.replaceAll(CONTROL_CHARACTERS, "?");
+  return sanitized.length > MAX_LOGGED_DIRECTORY_LENGTH
+    ? `${sanitized.slice(0, MAX_LOGGED_DIRECTORY_LENGTH)}...`
+    : sanitized;
+}
+
 function formatCollectionSyncSummary(result: CollectionSyncResult): string {
   return `${result.collection}: ${result.filesAdded} added, ${result.filesUpdated} updated, ${result.filesUnchanged} unchanged, ${result.filesErrored} errors`;
 }
@@ -162,6 +183,40 @@ export async function daemon(
       onSyncError: ({ collection, error }) => {
         logger.error(
           `watch sync failed: ${collection}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      },
+      // fn-114: an event that cannot name an eligible path is a hint about a
+      // changed directory. These four make the hint, the bounded work it
+      // caused, and any failed stage visible in production, not only in tests.
+      onAmbiguousEvent: ({ collection, directory, reason }) => {
+        if (!options.quiet) {
+          logger.log(
+            `watch ambiguous event: ${collection} (${reason}) -> ${formatWatchDirectory(directory)}`
+          );
+        }
+      },
+      onReconcileStart: ({ collection, directory }) => {
+        if (options.verbose && !options.quiet) {
+          logger.log(
+            `watch reconcile started: ${collection} -> ${formatWatchDirectory(directory)}`
+          );
+        }
+      },
+      onReconcileComplete: ({
+        collection,
+        directory,
+        candidateCount,
+        syncedCount,
+      }) => {
+        if (!options.quiet) {
+          logger.log(
+            `watch reconciled: ${collection} -> ${formatWatchDirectory(directory)} (${candidateCount} candidate${candidateCount === 1 ? "" : "s"}, ${syncedCount} synced)`
+          );
+        }
+      },
+      onReconcileFailed: ({ collection, directory, stage, cause }) => {
+        logger.error(
+          `watch reconcile failed (${stage}): ${collection} -> ${formatWatchDirectory(directory)}: ${cause instanceof Error ? cause.message : String(cause)}`
         );
       },
     },

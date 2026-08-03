@@ -202,6 +202,127 @@ describe("daemon command", () => {
     expect(cleanupOrder).toEqual(["server", "gateway", "runtime"]);
   });
 
+  test("logs watcher reconciliation diagnostics from the new callbacks", async () => {
+    const controller = new AbortController();
+    const logs: string[] = [];
+    let watchCallbacks:
+      | import("../../src/serve/watch-service").CollectionWatchCallbacks
+      | undefined;
+
+    setTimeout(() => {
+      controller.abort();
+    }, 0);
+
+    const result = await daemon(
+      { noSyncOnStart: true, signal: controller.signal, verbose: true },
+      {
+        ...gatewayDeps(),
+        startBackgroundRuntime: (async (
+          startOptions: Parameters<StartBackgroundRuntimeFn>[0]
+        ) => {
+          watchCallbacks = startOptions?.watchCallbacks;
+          return {
+            success: true,
+            runtime: {
+              config: { collections: [] },
+              store: {} as never,
+              actualConfigPath: "/tmp/config/index.yml",
+              ctxHolder: {} as never,
+              scheduler: {} as never,
+              eventBus: null,
+              watchService: {
+                getState: () => ({
+                  expectedCollections: [],
+                  activeCollections: [],
+                  failedCollections: [],
+                  queuedCollections: [],
+                  syncingCollections: [],
+                  lastEventAt: null,
+                  lastSyncAt: null,
+                }),
+              } as never,
+              syncAll: async () => ({ syncResult: null, embedResult: null }),
+              dispose: async () => undefined,
+            },
+          };
+        }) as unknown as StartBackgroundRuntimeFn,
+        logger: {
+          log: (message) => {
+            logs.push(message);
+          },
+          error: (message) => {
+            logs.push(`ERR:${message}`);
+          },
+        },
+      }
+    );
+
+    expect(result).toEqual({ success: true });
+    // The daemon is the production consumer of the fn-114 diagnostics: without
+    // this wiring the events would exist only in tests.
+    watchCallbacks?.onAmbiguousEvent?.({
+      collection: "notes",
+      directory: "",
+      reason: "ineligible-path",
+    });
+    watchCallbacks?.onAmbiguousEvent?.({
+      collection: "notes",
+      directory: null,
+      reason: "missing-filename",
+    });
+    watchCallbacks?.onReconcileStart?.({
+      collection: "notes",
+      // Untrusted filenames must not carry control characters into a log line.
+      directory: "dir1/we\u0007ird",
+    });
+    watchCallbacks?.onReconcileComplete?.({
+      collection: "notes",
+      directory: "dir1",
+      candidateCount: 2,
+      syncedCount: 2,
+    });
+    watchCallbacks?.onReconcileFailed?.({
+      collection: "notes",
+      directory: "dir1",
+      stage: "enumerate",
+      cause: new Error("EACCES"),
+    });
+
+    expect(
+      logs.some((line) =>
+        line.includes(
+          "watch ambiguous event: notes (ineligible-path) -> <collection root>"
+        )
+      )
+    ).toBe(true);
+    expect(
+      logs.some((line) =>
+        line.includes(
+          "watch ambiguous event: notes (missing-filename) -> <unknown>"
+        )
+      )
+    ).toBe(true);
+    expect(
+      logs.some((line) =>
+        line.includes("watch reconcile started: notes -> dir1/we?ird")
+      )
+    ).toBe(true);
+    expect(
+      logs.some((line) =>
+        line.includes(
+          "watch reconciled: notes -> dir1 (2 candidates, 2 synced)"
+        )
+      )
+    ).toBe(true);
+    expect(
+      logs.some((line) =>
+        line.includes(
+          "ERR:watch reconcile failed (enumerate): notes -> dir1: EACCES"
+        )
+      )
+    ).toBe(true);
+  });
+
   test("skips initial sync when requested", async () => {
     const controller = new AbortController();
     const syncAll = mock(async () => ({
