@@ -8,6 +8,9 @@
  * @module src/publish/attachment-raster
  */
 
+// node:zlib is required because Bun.inflateSync has no bounded-output option.
+import { inflateSync } from "node:zlib";
+
 import {
   MAX_PUBLISH_UPLOAD_BYTES,
   MAX_RASTER_DIMENSION_PX,
@@ -350,12 +353,15 @@ const validatePngPixels = (
   }
   const passes = interlace === 0 ? ([[0, 0, 1, 1]] as const) : pngPasses;
   const rowLengths: number[] = [];
+  let expectedLength = 0;
   for (const [startX, startY, stepX, stepY] of passes) {
     const passWidth = width <= startX ? 0 : Math.ceil((width - startX) / stepX);
     const passHeight =
       height <= startY ? 0 : Math.ceil((height - startY) / stepY);
     if (passWidth === 0 || passHeight === 0) continue;
     const rowBytes = Math.ceil((passWidth * channels * bitDepth) / 8);
+    expectedLength += (rowBytes + 1) * passHeight;
+    if (expectedLength > MAX_PUBLISH_UPLOAD_BYTES) return false;
     for (let row = 0; row < passHeight; row += 1) rowLengths.push(rowBytes);
   }
   const compressedLength = idatChunks.reduce(
@@ -370,14 +376,13 @@ const validatePngPixels = (
   }
   let inflated: Uint8Array;
   try {
-    inflated = Bun.inflateSync(compressed, { windowBits: 15 });
+    inflated = inflateSync(compressed, {
+      maxOutputLength: expectedLength,
+      windowBits: 15,
+    });
   } catch {
     return false;
   }
-  const expectedLength = rowLengths.reduce(
-    (total, length) => total + length + 1,
-    0
-  );
   if (inflated.length !== expectedLength) return false;
   let rowOffset = 0;
   for (const rowLength of rowLengths) {
@@ -496,7 +501,8 @@ const skipGifSubBlocks = (bytes: Uint8Array, start: number): number | null => {
 const validateGifLzwSubBlocks = (
   bytes: Uint8Array,
   start: number,
-  minimumCodeSize: number
+  minimumCodeSize: number,
+  expectedPixels: number
 ): number | null => {
   const compressed: number[] = [];
   let offset = start;
@@ -522,7 +528,13 @@ const validateGifLzwSubBlocks = (
   let nextCode = endCode + 1;
   let bitOffset = 0;
   let previousCode: number | null = null;
+  let previousLength = 0;
+  let decodedPixels = 0;
   let sawClear = false;
+  const dictionaryLengths = new Uint16Array(4096);
+  for (let code = 0; code < clearCode; code += 1) {
+    dictionaryLengths[code] = 1;
+  }
   while (bitOffset + codeSize <= compressed.length * 8) {
     let code = 0;
     for (let bit = 0; bit < codeSize; bit += 1) {
@@ -536,21 +548,34 @@ const validateGifLzwSubBlocks = (
       codeSize = minimumCodeSize + 1;
       nextCode = endCode + 1;
       previousCode = null;
+      previousLength = 0;
       continue;
     }
     if (!sawClear) return null;
-    if (code === endCode) return offset;
+    if (code === endCode) {
+      return decodedPixels === expectedPixels ? offset : null;
+    }
     if (previousCode === null) {
       if (code >= clearCode) return null;
       previousCode = code;
+      previousLength = 1;
+      decodedPixels += 1;
       continue;
     }
     if (code > nextCode) return null;
+    const decodedLength =
+      code === nextCode ? previousLength + 1 : (dictionaryLengths[code] ?? 0);
+    if (decodedLength === 0 || decodedPixels + decodedLength > expectedPixels) {
+      return null;
+    }
+    decodedPixels += decodedLength;
     if (nextCode < 4096) {
+      dictionaryLengths[nextCode] = previousLength + 1;
       nextCode += 1;
       if (nextCode === 1 << codeSize && codeSize < 12) codeSize += 1;
     }
     previousCode = code;
+    previousLength = decodedLength;
   }
   return null;
 };
@@ -576,6 +601,9 @@ const isCompleteGif = (bytes: Uint8Array): boolean => {
       continue;
     }
     if (introducer !== 0x2c || offset + 9 > bytes.length) return false;
+    const frameWidth = readU16LE(bytes, offset + 4);
+    const frameHeight = readU16LE(bytes, offset + 6);
+    if (frameWidth === 0 || frameHeight === 0) return false;
     const packed = bytes[offset + 8] ?? 0;
     offset += 9;
     if (packed & 0x80) offset += 3 * 2 ** ((packed & 0x07) + 1);
@@ -584,7 +612,12 @@ const isCompleteGif = (bytes: Uint8Array): boolean => {
     if (minimumCodeSize < 2 || minimumCodeSize > 8) return false;
     offset += 1;
     if ((bytes[offset] ?? 0) === 0) return false;
-    const next = validateGifLzwSubBlocks(bytes, offset, minimumCodeSize);
+    const next = validateGifLzwSubBlocks(
+      bytes,
+      offset,
+      minimumCodeSize,
+      frameWidth * frameHeight
+    );
     if (next === null) return false;
     offset = next;
     sawImage = true;

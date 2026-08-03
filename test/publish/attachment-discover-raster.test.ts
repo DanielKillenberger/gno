@@ -21,6 +21,45 @@ import {
   writeU32BE,
 } from "./helpers/attachment-fixtures";
 
+const pngCrc32 = (bytes: Uint8Array): number => {
+  let crc = 0xffffffff;
+  for (const value of bytes) {
+    crc ^= value;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const replacePngIdat = (data: Uint8Array): Uint8Array => {
+  let offset = 8;
+  while (offset + 12 <= PNG_1X1.length) {
+    const length = Number.parseInt(
+      Array.from(PNG_1X1.subarray(offset, offset + 4), (byte) =>
+        byte.toString(16).padStart(2, "0")
+      ).join(""),
+      16
+    );
+    const type = String.fromCharCode(
+      ...PNG_1X1.subarray(offset + 4, offset + 8)
+    );
+    if (type === "IDAT") {
+      const typeBytes = PNG_1X1.subarray(offset + 4, offset + 8);
+      return concatBytes(
+        PNG_1X1.subarray(0, offset),
+        writeU32BE(data.length),
+        typeBytes,
+        data,
+        writeU32BE(pngCrc32(concatBytes(typeBytes, data))),
+        PNG_1X1.subarray(offset + 12 + length)
+      );
+    }
+    offset += 12 + length;
+  }
+  throw new Error("PNG fixture has no IDAT chunk");
+};
+
 const pngWithInvalidCompressedData = (): Uint8Array => {
   const bytes = new Uint8Array(PNG_1X1);
   let offset = 8;
@@ -504,6 +543,15 @@ describe("attachment raster validation", () => {
       validateRasterBytesStructural(gifWithInvalidFirstLzwCode)
     ).toMatchObject({ ok: false, code: "ASSET_CORRUPT" });
 
+    const gifWithTooFewDecodedPixels = Uint8Array.from([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x02, 0x00, 0x02, 0x00, 0x80, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x2c, 0x00, 0x00, 0x00, 0x00,
+      0x02, 0x00, 0x02, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+    ]);
+    expect(
+      validateRasterBytesStructural(gifWithTooFewDecodedPixels)
+    ).toMatchObject({ ok: false, code: "ASSET_CORRUPT" });
+
     const vp8xWithEmptyAnimationFrame = Uint8Array.from([
       0x52, 0x49, 0x46, 0x46, 0x2e, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
       0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
@@ -514,6 +562,27 @@ describe("attachment raster validation", () => {
     expect(
       validateRasterBytesStructural(vp8xWithEmptyAnimationFrame)
     ).toMatchObject({
+      ok: false,
+      code: "ASSET_CORRUPT",
+    });
+  });
+
+  test("bounds PNG decompression to the declared pixel payload", () => {
+    const oversizedInflatedData = Bun.deflateSync(new Uint8Array(1024));
+    expect(
+      validateRasterBytesStructural(replacePngIdat(oversizedInflatedData))
+    ).toMatchObject({ ok: false, code: "ASSET_CORRUPT" });
+
+    const decodedSizeBomb = new Uint8Array(PNG_1X1);
+    decodedSizeBomb.set(writeU32BE(MAX_RASTER_DIMENSION_PX), 16);
+    decodedSizeBomb.set(writeU32BE(MAX_RASTER_DIMENSION_PX), 20);
+    decodedSizeBomb[24] = 16;
+    decodedSizeBomb[25] = 6;
+    decodedSizeBomb.set(
+      writeU32BE(pngCrc32(decodedSizeBomb.subarray(12, 29))),
+      29
+    );
+    expect(validateRasterBytesStructural(decodedSizeBomb)).toMatchObject({
       ok: false,
       code: "ASSET_CORRUPT",
     });
