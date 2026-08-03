@@ -58,6 +58,89 @@ export const ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL = `SELECT DISTINCT ${SOURCE_PA
    WHERE collection = ? AND ${SOURCE_PARENT_PATH_EXPR} = ? AND active = 1`;
 
 /**
+ * Effective source paths of ACTIVE documents anywhere beneath a directory -
+ * direct children AND deeper descendants.
+ *
+ * Used when a dirty directory is GONE from disk: the whole removed subtree has
+ * to deactivate, and a direct-children lookup would strand everything nested
+ * below it (the limitation fn-114 originally documented as R12).
+ *
+ * Bounds, in order of what each one is for:
+ *
+ * - `parent >= :dir AND parent < :dirUpper` is the INDEX-DRIVING range. Every
+ *   descendant's parent directory is either `dir` itself or starts with
+ *   `dir/`, and `'/'` (0x2F) is immediately below `'0'` (0x30), so appending
+ *   `'0'` to `dir` is the tight exclusive upper bound of that whole family.
+ * - the `= :dir OR substr(...) = :dirPrefix` residual is the CORRECTNESS
+ *   filter. The range alone also spans sibling names that merely share the
+ *   prefix and sort below `dir/` (`dir1!x`, `dir1.x`, and - crucially - it must
+ *   not be widened into a bare `LIKE 'dir1%'`, which would swallow `dir10`).
+ *   It runs over the handful of rows the range already isolated.
+ *
+ * No `DISTINCT`: over a range the parent expression cannot satisfy it from
+ * index order, and SQLite would add `USE TEMP B-TREE FOR DISTINCT`, which R11
+ * forbids. The adapter dedupes in memory, exactly as the batched
+ * direct-children statement does.
+ *
+ * Parameters: `collection`, `dir`, `dir || '0'`, `dir`, `length(dir) + 1`,
+ * `dir || '/'` - see {@link activeDescendantSourcePathParams}.
+ */
+export const ACTIVE_DESCENDANT_SOURCE_PATHS_SQL = `SELECT ${SOURCE_PATH_EXPR} AS source_path
+   FROM documents INDEXED BY ${SOURCE_PARENT_INDEX_NAME}
+   WHERE collection = ?
+     AND ${SOURCE_PARENT_PATH_EXPR} >= ?
+     AND ${SOURCE_PARENT_PATH_EXPR} < ?
+     AND (${SOURCE_PARENT_PATH_EXPR} = ?
+          OR substr(${SOURCE_PARENT_PATH_EXPR}, 1, ?) = ?)
+     AND active = 1`;
+
+/**
+ * Bind parameters for {@link ACTIVE_DESCENDANT_SOURCE_PATHS_SQL}.
+ *
+ * `dir` must already be normalized and non-empty; the collection root has no
+ * meaningful "subtree" bound and is never queried this way.
+ */
+export function activeDescendantSourcePathParams(
+  collection: string,
+  dir: string
+): [string, string, string, string, number, string] {
+  const prefix = `${dir}/`;
+  // '/' + 1 === '0': the first string that sorts above every `dir/...` path.
+  const upperBound = `${dir}0`;
+  return [collection, dir, upperBound, dir, prefix.length, prefix];
+}
+
+/**
+ * Batched form of the descendant lookup: the removed-subtree answer for several
+ * directories in one statement, tagged with the key it belongs to.
+ *
+ * The keys arrive as a `VALUES` co-routine and drive a nested loop, so each key
+ * contributes its OWN bounded range probe of the parent index rather than one
+ * shared scan - `EXPLAIN QUERY PLAN` shows `SEARCH documents USING INDEX
+ * idx_documents_source_parent_path (collection=? AND <expr>>? AND <expr><?)` at
+ * every key count, never `SCAN documents` and never a temp B-tree.
+ *
+ * The watcher needs the batch because a whole flush's ambiguous hints must be
+ * discriminated at once: a vanished name is either a dead temp file or a
+ * recursively deleted directory, and only the indexed side tells them apart.
+ * Asking per hint would put one query behind every unique temp filename.
+ *
+ * Parameters: the `dirCount` directory keys, then `collection`.
+ */
+export function activeDescendantSourcePathsBatchSql(dirCount: number): string {
+  const values = Array.from({ length: dirCount }, () => "(?)").join(", ");
+  return `WITH keys(k) AS (VALUES ${values})
+   SELECT keys.k AS key, ${SOURCE_PATH_EXPR} AS source_path
+   FROM keys JOIN documents INDEXED BY ${SOURCE_PARENT_INDEX_NAME}
+     ON documents.collection = ?
+    AND ${SOURCE_PARENT_PATH_EXPR} >= keys.k
+    AND ${SOURCE_PARENT_PATH_EXPR} < keys.k || '0'
+    AND (${SOURCE_PARENT_PATH_EXPR} = keys.k
+         OR substr(${SOURCE_PARENT_PATH_EXPR}, 1, length(keys.k) + 1) = keys.k || '/')
+   WHERE documents.active = 1`;
+}
+
+/**
  * Directory keys per batched statement.
  *
  * SQLite's `SQLITE_LIMIT_VARIABLE_NUMBER` defaults to 999; one parameter is

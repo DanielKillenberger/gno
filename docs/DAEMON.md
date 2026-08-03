@@ -84,11 +84,15 @@ up live; the collection's `pattern`, `include`, `exclude`, and dotfile and
 reserved-path rules are re-applied, so an ineligible file is never indexed just
 because its event triggered reconciliation.
 
-Two changes still fall outside what the watcher can observe and need a
+Deleting a directory deactivates every indexed document beneath it, at any
+depth, whichever way the runtime reports the deletion (as the directory, as one
+arbitrary child of it, or as both): a reported path that no longer exists on
+disk is treated as one sample of a larger removal, and the watcher reconciles
+the whole removed subtree.
+
+One change still falls outside what the watcher can observe and needs a
 `gno update` or a restart:
 
-- documents nested deeper than one level under a deleted directory — only the
-  deleted directory's direct indexed children deactivate;
 - on Linux, subdirectories created after the watcher started, which Bun's
   recursive watch does not extend to
   ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939)); no event

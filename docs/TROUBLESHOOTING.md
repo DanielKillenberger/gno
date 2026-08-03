@@ -393,7 +393,12 @@ that reports only its temporary sibling, or a directory delete that reports only
 the directory — GNO reconciles that one directory: it lists the eligible files
 directly inside it and the active indexed documents directly inside it, and syncs
 the union. Atomic saves and deletions therefore no longer need a manual
-`gno update`.
+`gno update`. Deleting a whole directory deactivates every indexed document
+beneath it, at any depth: deleting `notes/archive/` also deactivates the
+documents inside `archive/2024/`. This holds however the runtime reports the
+deletion — as the directory, as one arbitrary child, or as children plus the
+directory — because a reported path that has vanished from disk is treated as
+one sample of a larger removal rather than as a complete report.
 
 Common causes:
 
@@ -404,10 +409,6 @@ Common causes:
 Cases the watcher still cannot recover on its own, where `gno update` remains the
 fix:
 
-- **Documents nested deeper than one level under a deleted directory.** Deleting
-  `notes/archive/` deactivates the indexed documents directly inside `archive/`,
-  but not those inside `archive/2024/`. Reconciliation is deliberately bounded to
-  the one affected directory.
 - **Subdirectories created on Linux after the watcher started.** Bun's recursive
   watch does not extend to them ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939))
   and emits no event at all for writes inside them, so there is no hint to

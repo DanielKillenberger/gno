@@ -531,9 +531,9 @@ walk. The exception is configuration drift: if the collection changes while a
 batch is reconciling or syncing, the watcher recovers with a full
 `syncCollection` for that collection, which does walk it.
 Atomic saves and deletions are therefore picked up live, without a manual
-`gno update`. Two cases still need one: documents nested deeper than a deleted
-directory's direct children, and, on Linux, subdirectories created after the
-watcher started (Bun emits no event for those at all). A full sync still
+`gno update`, and deleting a directory deactivates everything indexed beneath it
+at any depth. One case still needs a manual update: on Linux, subdirectories
+created after the watcher started (Bun emits no event for those at all). A full sync still
 performs one exact global graph reconciliation. Status aggregation is set-based, concurrent status
 requests share the same in-flight build, and the dashboard reuses that response
 for its model selector instead of issuing a duplicate request.

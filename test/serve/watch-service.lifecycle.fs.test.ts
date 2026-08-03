@@ -385,4 +385,66 @@ describe("watch-to-index lifecycle on a real filesystem", () => {
     },
     HARD_TIMEOUT_MS
   );
+
+  lifecycleTest(
+    "a deleted directory's DEEPLY nested children become inactive too",
+    async () => {
+      await withLifecycleHarness("delete-dir-deep", {
+        seed: async (root) => {
+          await mkdir(join(root, "dir1", "sub", "deeper"), { recursive: true });
+          await Bun.write(join(root, "dir1", "a.md"), "# A\n\ncranberry\n");
+          await Bun.write(
+            join(root, "dir1", "sub", "c.md"),
+            "# C\n\ncranberry\n"
+          );
+          await Bun.write(
+            join(root, "dir1", "sub", "deeper", "d.md"),
+            "# D\n\ncranberry\n"
+          );
+          await Bun.write(join(root, "keep.md"), "# Keep\n\ncranberry\n");
+        },
+        body: async (harness) => {
+          expect((await harness.searchRelPaths("cranberry")).sort()).toEqual([
+            "dir1/a.md",
+            "dir1/sub/c.md",
+            "dir1/sub/deeper/d.md",
+            "keep.md",
+          ]);
+
+          await harness.confirmChainLive();
+
+          // The whole subtree goes at once. Whatever the runtime reports for
+          // it - the bare directory (Bun 1.3.11), one arbitrary child at some
+          // depth (1.3.14), or children plus directory (macOS) - every indexed
+          // document beneath the removed directory must end up inactive. Only
+          // depth ONE was guaranteed before this change; `dir1/sub/deeper/d.md`
+          // is what proves the depth limit is gone.
+          await rm(join(harness.root, "dir1"), {
+            recursive: true,
+            force: true,
+          });
+
+          await harness.waitFor(
+            "every document under the deleted directory marked inactive",
+            async () =>
+              !(
+                (await harness.isActive("dir1/a.md")) ||
+                (await harness.isActive("dir1/sub/c.md")) ||
+                (await harness.isActive("dir1/sub/deeper/d.md"))
+              ),
+            () => harness.snapshot()
+          );
+
+          expect(await harness.isActive("dir1/a.md")).toBe(false);
+          expect(await harness.isActive("dir1/sub/c.md")).toBe(false);
+          expect(await harness.isActive("dir1/sub/deeper/d.md")).toBe(false);
+          expect(await harness.isActive("keep.md")).toBe(true);
+          expect(await harness.searchRelPaths("cranberry")).toEqual([
+            "keep.md",
+          ]);
+        },
+      });
+    },
+    HARD_TIMEOUT_MS
+  );
 });

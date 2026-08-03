@@ -14,6 +14,12 @@ import { afterAll, describe, expect, test } from "bun:test";
  * degraded bind mount). See the fixture comment in `watch-service.test.ts` for
  * the recorded tuples the RED tests replay.
  *
+ * The shapes are ALSO not stable across Bun PATCH releases: 1.3.14 on Linux
+ * reports a recursive directory delete as one arbitrary surviving child name
+ * rather than the directory. Assertions here are therefore kept to what held on
+ * every capture; the fn-114 outcome guarantees live in
+ * `watch-service.lifecycle.fs.test.ts`, which never asserts a shape.
+ *
  * ## Synchronization (R8: no fixed sleep as a settle signal)
  *
  * The end of a scenario is established in two observed steps, never by a fixed
@@ -416,12 +422,33 @@ describe("recursive fs.watch event shapes", () => {
             "recursiveDirectoryDeletion",
             capture.recursiveDirectoryDeletion
           );
-          // Universal: the directory itself is named. Whether the removed
-          // CHILDREN are also named is the divergence (macOS: yes; Linux: no),
-          // and the Linux shape is the stale-active reproduction.
+          // NOT stable across Bun PATCH releases - this is a capture, not a
+          // contract. Three shapes have been observed for the same `rm -rf`:
+          //
+          //   Bun 1.3.11 / Linux  -> ["dir1"]              (directory only)
+          //   Bun 1.3.14 / Linux  -> ["dir1/b.md"]         (ONE ARBITRARY child;
+          //                          a container on the same version reported
+          //                          `dir1/a.md` instead - which child is named
+          //                          is not deterministic either)
+          //   macOS               -> children + "dir1"
+          //
+          // An earlier revision asserted `toContain("dir1")` and started failing
+          // on 1.3.14 with `Received: [ "dir1/b.md" ]`. The only invariant that
+          // held on every capture is that SOMETHING under the removed directory
+          // is named - so that, and only that, is asserted. The OUTCOME the fix
+          // actually promises (every indexed document beneath the removed
+          // directory becomes inactive) is asserted in
+          // `watch-service.lifecycle.fs.test.ts`, which is shape-independent by
+          // construction.
+          const reported = capture.recursiveDirectoryDeletion
+            .map(([, name]) => name)
+            .filter((name): name is string => name !== null);
           expect(
-            capture.recursiveDirectoryDeletion.map(([, name]) => name)
-          ).toContain("dir1");
+            reported.some(
+              (name) => name === "dir1" || name.startsWith("dir1/")
+            ),
+            `recursiveDirectoryDeletion named nothing under dir1: ${JSON.stringify(reported)}`
+          ).toBe(true);
         },
       });
     },

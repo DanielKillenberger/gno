@@ -2036,3 +2036,324 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
     RED_TEST_TIMEOUT_MS
   );
 });
+
+/**
+ * fn-114 follow-up - full-subtree deletion reconciliation.
+ *
+ * The original design split events into "ineligible => hint" and "eligible =>
+ * authoritative". Bun 1.3.14 disproved the second half. Measured on the
+ * maintainer's Linux/ext4 hardware with real inotify, `rm -rf dir1/` holding
+ * `a.md` and `b.md` reports:
+ *
+ *   Bun 1.3.11 -> [["rename", "dir1"]]      (the directory)
+ *   Bun 1.3.14 -> [["rename", "dir1/b.md"]] (ONE arbitrary child; a container
+ *                                            on the same version reported
+ *                                            `dir1/a.md` instead)
+ *
+ * The reported child is ELIGIBLE, so it took the exact-path fast path, no
+ * reconciliation ran, and every unnamed sibling stayed active forever - live,
+ * `a.md` vanished from search while `b.md` was still retrievable 30s later.
+ *
+ * The rule these tests pin: an event naming a path that no longer EXISTS is one
+ * sample of a larger removal, so the watcher walks up to the shallowest removed
+ * ancestor and reconciles that whole subtree. A path that still exists is
+ * unchanged - the live-edit hot path never widens.
+ */
+
+/**
+ * Store double exposing BOTH indexed seams: direct children (a surviving
+ * directory) and descendants (a removed subtree). `descendantCalls` records
+ * every subtree lookup so a test can prove a live edit never triggers one.
+ */
+function createSubtreeStore(options: {
+  direct?: Record<string, string[]>;
+  descendants?: Record<string, string[]>;
+}) {
+  const direct = options.direct ?? {};
+  const descendants = options.descendants ?? {};
+  const directCalls: string[] = [];
+  const descendantCalls: string[] = [];
+
+  return {
+    directCalls,
+    descendantCalls,
+    store: {
+      listActiveDirectChildSourcePathsBatch(
+        _collection: string,
+        dirRelPaths: string[]
+      ) {
+        const byDirectory = new Map<string, string[]>();
+        for (const dirRelPath of dirRelPaths) {
+          directCalls.push(dirRelPath);
+          byDirectory.set(dirRelPath, direct[dirRelPath] ?? []);
+        }
+        return Promise.resolve({ ok: true as const, value: byDirectory });
+      },
+      listActiveDescendantSourcePaths(_collection: string, dirRelPath: string) {
+        descendantCalls.push(dirRelPath);
+        return Promise.resolve({
+          ok: true as const,
+          value: descendants[dirRelPath] ?? [],
+        });
+      },
+      listActiveDescendantSourcePathsBatch(
+        _collection: string,
+        dirRelPaths: string[]
+      ) {
+        const byDirectory = new Map<string, string[]>();
+        for (const dirRelPath of dirRelPaths) {
+          descendantCalls.push(dirRelPath);
+          byDirectory.set(dirRelPath, descendants[dirRelPath] ?? []);
+        }
+        return Promise.resolve({ ok: true as const, value: byDirectory });
+      },
+    },
+  };
+}
+
+describe("CollectionWatchService full-subtree deletion reconciliation", () => {
+  test(
+    "deactivates every sibling when the delete names one arbitrary child",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-subtree-child-"));
+      // Post-delete disk state: `dir1` and both its files are gone; the
+      // untouched sibling directory and root file are still there.
+      await mkdir(join(root, "dir2"), { recursive: true });
+      await Bun.write(join(root, "dir2", "other.md"), "# other\n");
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+
+      const { store, descendantCalls } = createSubtreeStore({
+        descendants: { dir1: ["dir1/a.md", "dir1/b.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // The production 1.3.14 shape: ONE arbitrary eligible child, nothing
+        // else. Whether it is `a.md` or `b.md` is not stable, so neither may be
+        // the thing correctness depends on.
+        harness.emit([["rename", "dir1/b.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toHaveLength(1);
+        const batch = harness.batches[0] ?? [];
+        // The UNNAMED sibling is the whole point: before the fix it stayed
+        // active forever because the event never mentioned it.
+        expect(batch).toContain("dir1/a.md");
+        expect(batch).toContain("dir1/b.md");
+        // Bounded: the untouched sibling directory and the root file are not
+        // dragged in.
+        expect(batch).not.toContain("dir2/other.md");
+        expect(batch).not.toContain("keep.md");
+        expect(descendantCalls).toEqual(["dir1"]);
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "dir1" },
+        ]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "walks up to the removed ancestor when the delete names a deeply nested child",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-subtree-deep-"));
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+
+      const { store, descendantCalls } = createSubtreeStore({
+        descendants: {
+          dir1: ["dir1/a.md", "dir1/sub/c.md", "dir1/sub/deeper/d.md"],
+        },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // The reported child sits two levels down, and its own parent is gone
+        // too - a single `dirname` would reconcile `dir1/sub` and strand
+        // `dir1/a.md`.
+        harness.emit([["rename", "dir1/sub/c.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        expect(batch).toContain("dir1/a.md");
+        expect(batch).toContain("dir1/sub/c.md");
+        // No depth limit: this is what removes the old "direct children only"
+        // limitation rather than moving it one level down.
+        expect(batch).toContain("dir1/sub/deeper/d.md");
+        expect(batch).not.toContain("keep.md");
+        // The SHALLOWEST removed ancestor is the reconciled area.
+        expect(descendantCalls).toEqual(["dir1"]);
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "dir1" },
+        ]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps a single-file delete inside its surviving directory",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-subtree-single-"));
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await mkdir(join(root, "dir2"), { recursive: true });
+      // `dir1/gone.md` was deleted; its directory and neighbour survive.
+      await Bun.write(join(root, "dir1", "neighbour.md"), "# neighbour\n");
+      await Bun.write(join(root, "dir2", "other.md"), "# other\n");
+
+      const { store, directCalls, descendantCalls } = createSubtreeStore({
+        direct: { dir1: ["dir1/gone.md", "dir1/neighbour.md"] },
+        descendants: { dir1: ["dir1/gone.md", "dir1/neighbour.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/gone.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // The deleted file still reaches `syncPaths`, which marks it inactive.
+        expect(batch).toContain("dir1/gone.md");
+        // Widening stops at the directory the file lived in: it survived, so
+        // no subtree lookup is made and nothing outside it is touched.
+        expect(descendantCalls).toEqual([]);
+        expect(directCalls).toEqual(["dir1"]);
+        expect(batch).not.toContain("dir2/other.md");
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "dir1" },
+        ]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "never widens a live edit of a file that still exists",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-subtree-edit-"));
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await Bun.write(join(root, "dir1", "doc.md"), "# doc\n");
+      await Bun.write(join(root, "dir1", "neighbour.md"), "# neighbour\n");
+
+      const { store, directCalls, descendantCalls } = createSubtreeStore({
+        direct: { dir1: ["dir1/doc.md", "dir1/neighbour.md"] },
+        descendants: { dir1: ["dir1/doc.md", "dir1/neighbour.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "dir1/doc.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // R1's hot path, intact: the file exists, so the event named the whole
+        // change. One path synced, no enumeration, no store lookup of either
+        // kind, and no reconciliation diagnostics at all.
+        expect(harness.batches).toEqual([["dir1/doc.md"]]);
+        expect(directCalls).toEqual([]);
+        expect(descendantCalls).toEqual([]);
+        expect(harness.started).toEqual([]);
+        expect(harness.ambiguous).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "leaves an untouched sibling directory entirely alone",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-subtree-sibling-"));
+      await mkdir(join(root, "dir2", "sub"), { recursive: true });
+      await Bun.write(join(root, "dir2", "sub", "other.md"), "# other\n");
+
+      const { store, directCalls, descendantCalls } = createSubtreeStore({
+        direct: { dir2: [], "dir2/sub": ["dir2/sub/other.md"] },
+        descendants: {
+          dir1: ["dir1/a.md", "dir1/sub/c.md"],
+          dir2: ["dir2/sub/other.md"],
+        },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/sub/c.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        expect(batch.sort()).toEqual(["dir1/a.md", "dir1/sub/c.md"]);
+        // `dir2` shares nothing but the parent: it is never enumerated, never
+        // queried, and never reconciled. (`dir1` itself is asked about on both
+        // seams - the direct-children answer is prefetched with the flush,
+        // before the disk reports the directory gone.)
+        expect(descendantCalls).toEqual(["dir1"]);
+        expect(directCalls).not.toContain("dir2");
+        expect(descendantCalls).not.toContain("dir2");
+        expect(harness.started.map((event) => event.directory)).not.toContain(
+          "dir2"
+        );
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "a prefix-sharing sibling directory is not swept in by the subtree query",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-subtree-prefix-"));
+      await mkdir(join(root, "dir10"), { recursive: true });
+      await Bun.write(join(root, "dir10", "x.md"), "# x\n");
+
+      // The store double answers exactly what the real indexed query answers:
+      // `dir1`'s subtree, never `dir10`'s. The watcher must ask for `dir1` and
+      // nothing broader - the SQL-level prefix guard is pinned separately in
+      // `test/store/active-descendants.test.ts`.
+      const { store, descendantCalls } = createSubtreeStore({
+        descendants: { dir1: ["dir1/a.md"], dir10: ["dir10/x.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/a.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches[0]).toEqual(["dir1/a.md"]);
+        expect(descendantCalls).toEqual(["dir1"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});

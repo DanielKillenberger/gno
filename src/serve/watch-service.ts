@@ -21,6 +21,7 @@ import {
   defaultSyncService,
   listEligibleDirectChildren,
   matchesWalkPath,
+  resolveVanishedPathDirectory,
 } from "../ingestion";
 
 export interface CollectionWatchState {
@@ -601,7 +602,7 @@ export class CollectionWatchService {
     }
 
     let exactPaths = pending ? [...pending] : [];
-    const dirtyEntries = dirty ? [...dirty.entries()] : [];
+    let dirtyEntries = dirty ? [...dirty.entries()] : [];
     let syncGeneration = this.#collectionGenerations.get(collectionName) ?? 0;
     this.#pendingByCollection.set(collectionName, new Set<string>());
     this.#dirtyByCollection.set(
@@ -618,6 +619,17 @@ export class CollectionWatchService {
     let outstanding: DirectoryReconciliation[] = [];
 
     try {
+      if (exactPaths.length > 0) {
+        dirtyEntries = await this.#widenVanishedExactPaths(
+          collection,
+          exactPaths,
+          dirtyEntries
+        );
+        if (this.#disposed) {
+          return;
+        }
+      }
+
       if (dirtyEntries.length > 0) {
         reconciliations = await this.#reconcileDirtyDirectories(
           collection,
@@ -874,6 +886,56 @@ export class CollectionWatchService {
   }
 
   /**
+   * Widen the exact-path batch wherever the DISK says the event was not a
+   * complete report.
+   *
+   * The original design read an event naming an eligible path as authoritative.
+   * That is provably wrong for deletions. Measured on Bun 1.3.14 (Linux, ext4,
+   * real inotify), a recursive delete of `dir1/` holding `a.md` and `b.md`
+   * reports ONE ARBITRARY child - `dir1/b.md` on hardware, `dir1/a.md` in a
+   * container - and nothing else. That path is eligible, so it took the
+   * exact-path fast path, no reconciliation ran, and every unnamed sibling
+   * stayed active forever. Bun 1.3.11 reported the bare directory instead. The
+   * event SHAPE is not stable across Bun patch releases, so it cannot be the
+   * thing correctness rests on.
+   *
+   * The disk is. A path that still exists named a real, complete change - the
+   * live-edit hot path stays exactly as narrow as before, at the cost of one
+   * `stat` per pending path. A path that has VANISHED is treated as one sample
+   * of a larger removal: its shallowest removed ancestor (or its surviving
+   * parent directory, when only the file went) is queued as dirty, and the
+   * ordinary bounded reconciliation takes it from there.
+   *
+   * Nothing is dropped: the exact paths stay in the batch either way, so a
+   * plain single-file delete still deactivates exactly that file through the
+   * existing `syncPaths` ENOENT branch.
+   */
+  async #widenVanishedExactPaths(
+    collection: Collection,
+    exactPaths: string[],
+    dirtyEntries: Array<[string, DirtyDirectoryEntry]>
+  ): Promise<Array<[string, DirtyDirectoryEntry]>> {
+    const root = normalize(collection.path);
+    const byDirectory = new Map(dirtyEntries);
+    for (const relPath of exactPaths) {
+      if (this.#disposed) {
+        break;
+      }
+      const outcome = await resolveVanishedPathDirectory(relPath, root);
+      if (outcome.status !== "removed") {
+        // `present` is the hot path; `error` fails closed - an unreadable disk
+        // is never read as "the file is gone".
+        continue;
+      }
+      if (byDirectory.has(outcome.directory)) {
+        continue;
+      }
+      byDirectory.set(outcome.directory, { root, hints: new Set() });
+    }
+    return [...byDirectory];
+  }
+
+  /**
    * Resolve queued dirty directories into concrete candidate relative paths.
    *
    * The discriminator, and why it is batched
@@ -949,6 +1011,29 @@ export class CollectionWatchService {
       return [];
     }
 
+    // The SUBTREE answer, for the same flush and in the same one round trip.
+    // Hints are the only keys asked for here: a hint is the candidate DELETED
+    // DIRECTORY, and what makes it one is that indexed documents live beneath
+    // it - at ANY depth. Discriminating on direct children alone left a
+    // directory whose documents all sit one level deeper looking exactly like a
+    // dead temp name. The collection root is never a hint, so no key here can
+    // degenerate into "every active document in the collection".
+    const hintKeys = new Set<string>();
+    for (const [, entry] of live) {
+      for (const hint of entry.hints) {
+        if (hint !== "" && this.#isReconcilableDirectory(hint, collection)) {
+          hintKeys.add(hint);
+        }
+      }
+    }
+    const descendants = await this.#listActiveDescendantsBatch(
+      collection.name,
+      [...hintKeys]
+    );
+    if (this.#disposed) {
+      return [];
+    }
+
     /**
      * The indexed answer for one directory, in the same shape the unbatched
      * seam returned. A failed lookup is propagated per directory rather than
@@ -959,6 +1044,38 @@ export class CollectionWatchService {
       indexed.ok
         ? { ok: true, value: indexed.value.get(directory) ?? [] }
         : { ok: false, error: indexed.error };
+
+    /**
+     * The subtree answer for one directory: from the batch when it was a hint,
+     * fetched on demand otherwise (a dirty directory that turns out to be gone
+     * is rare enough not to be worth widening every flush's batch for).
+     * `null` means the store predates the seam - the caller then degrades to
+     * the direct-child answer rather than inferring anything.
+     */
+    const descendantCache = new Map<string, StoreResult<string[]> | null>();
+    if (descendants !== null) {
+      for (const hint of hintKeys) {
+        descendantCache.set(
+          hint,
+          descendants.ok
+            ? { ok: true, value: descendants.value.get(hint) ?? [] }
+            : { ok: false, error: descendants.error }
+        );
+      }
+    }
+    const descendantsFor = async (
+      directory: string
+    ): Promise<StoreResult<string[]> | null> => {
+      if (descendantCache.has(directory)) {
+        return descendantCache.get(directory) ?? null;
+      }
+      const fetched = await this.#listActiveDescendants(
+        collection.name,
+        directory
+      );
+      descendantCache.set(directory, fetched);
+      return fetched;
+    };
 
     const reconcile = async (
       directory: string
@@ -972,7 +1089,8 @@ export class CollectionWatchService {
             collection,
             walkConfig,
             directory,
-            indexedFor(directory)
+            indexedFor(directory),
+            descendantsFor
           )
         : {
             directory,
@@ -997,11 +1115,13 @@ export class CollectionWatchService {
         if (this.#disposed) {
           break;
         }
-        const hintIndexed = indexedFor(hint);
+        // Subtree-aware where the store supports it, direct children where it
+        // does not. Either way an unanswered store query is never read as
+        // "nothing is there".
+        const hintIndexed = (await descendantsFor(hint)) ?? indexedFor(hint);
         if (!(hintIndexed.ok && hintIndexed.value.length > 0)) {
-          // Nothing active is indexed under this hint (or the store could not
-          // answer, which is never read as "nothing is there"): it is not a
-          // deleted indexed directory, so the event means a file changed in the
+          // Nothing active is indexed under this hint: it is not a deleted
+          // indexed directory, so the event means a file changed in the
           // affected directory.
           needsDirectory = true;
           continue;
@@ -1039,7 +1159,8 @@ export class CollectionWatchService {
     collection: Collection,
     walkConfig: WalkConfig,
     directory: string,
-    indexed: StoreResult<string[]>
+    indexed: StoreResult<string[]>,
+    descendantsFor: (directory: string) => Promise<StoreResult<string[]> | null>
   ): Promise<DirectoryReconciliation> {
     this.#notifyDiagnostic(() =>
       this.#callbacks?.onReconcileStart?.({
@@ -1073,11 +1194,22 @@ export class CollectionWatchService {
       disk.status === "present" ? disk.relPaths : []
     );
 
+    // A directory that is GONE takes its WHOLE removed subtree, not just its
+    // direct children. The reported path can sit at any depth, so a deleted
+    // `dir1/` whose documents live in `dir1/sub/` would otherwise leave every
+    // one of them active - the "direct children only" limitation this change
+    // removes. A directory that is still PRESENT stays deliberately narrow: it
+    // is usually a temp-file event, and its nested documents did not change.
+    const indexedSide =
+      disk.status === "missing" && directory !== ""
+        ? ((await descendantsFor(directory)) ?? indexed)
+        : indexed;
+
     // The indexed side is what makes deletion work: a vanished file leaves
     // nothing on disk to enumerate, so its relPath can only come from the
     // store, and `syncPaths` marks it inactive through its own ENOENT branch.
-    if (indexed.ok) {
-      for (const relPath of indexed.value) {
+    if (indexedSide.ok) {
+      for (const relPath of indexedSide.value) {
         candidates.add(relPath);
       }
     } else {
@@ -1086,7 +1218,7 @@ export class CollectionWatchService {
           collection: collection.name,
           directory,
           stage: "store",
-          cause: indexed.error,
+          cause: indexedSide.error,
         })
       );
     }
@@ -1108,8 +1240,91 @@ export class CollectionWatchService {
       // A store failure is already a reported terminal outcome for this
       // directory: the disk half may still yield candidates, but the
       // reconciliation was partial and must not also be claimed as complete.
-      failureReported: !indexed.ok,
+      failureReported: !indexedSide.ok,
     };
+  }
+
+  /**
+   * Active indexed source paths beneath SEVERAL directories in one round trip.
+   *
+   * This is the flush's hint DISCRIMINATOR: for each vanished reported name it
+   * answers "is anything indexed under here?", which is the only way to tell a
+   * recursively deleted directory from a dead temporary filename. Batched so
+   * that unique-temp-name churn costs one query per window rather than one per
+   * filename.
+   *
+   * Never throws. `null` means the store predates the seam, and each hint falls
+   * back to the direct-child answer.
+   */
+  async #listActiveDescendantsBatch(
+    collectionName: string,
+    directories: string[]
+  ): Promise<StoreResult<Map<string, string[]>> | null> {
+    if (directories.length === 0) {
+      return { ok: true, value: new Map() };
+    }
+    const store = this.#store as Partial<SqliteAdapter> | null;
+    if (typeof store?.listActiveDescendantSourcePathsBatch !== "function") {
+      return null;
+    }
+    try {
+      return await store.listActiveDescendantSourcePathsBatch(
+        collectionName,
+        directories
+      );
+    } catch (cause) {
+      return {
+        ok: false,
+        error: {
+          code: "QUERY_FAILED",
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "active descendant query failed",
+          cause,
+        },
+      };
+    }
+  }
+
+  /**
+   * Active indexed source paths anywhere beneath ONE directory.
+   *
+   * The on-demand companion to the batched form: used for a dirty directory
+   * that turns out to be gone, which is rare enough not to be worth widening
+   * every flush's batch for.
+   *
+   * Never throws. `null` means the store predates the seam, and the caller
+   * degrades to the direct-child answer it already holds - narrower than ideal,
+   * never wrong. A store FAILURE is a `StoreResult` error, so nothing is
+   * deactivated on the strength of an unanswered query.
+   */
+  async #listActiveDescendants(
+    collectionName: string,
+    directory: string
+  ): Promise<StoreResult<string[]> | null> {
+    const store = this.#store as Partial<SqliteAdapter> | null;
+    if (typeof store?.listActiveDescendantSourcePaths !== "function") {
+      return null;
+    }
+    try {
+      return await store.listActiveDescendantSourcePaths(
+        collectionName,
+        directory
+      );
+    } catch (cause) {
+      return {
+        ok: false,
+        error: {
+          code: "QUERY_FAILED",
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "active descendant query failed",
+          cause,
+        },
+      };
+    }
   }
 
   /**

@@ -1710,6 +1710,48 @@ export interface StorePort {
   ): Promise<StoreResult<string[]>>;
 
   /**
+   * List the distinct effective source paths of ACTIVE documents anywhere
+   * beneath `dirRelPath` - direct children AND deeper descendants.
+   *
+   * The watcher uses this for a directory that is GONE from disk: a removed
+   * subtree has to deactivate entirely, and a direct-children answer would
+   * strand every document nested more than one level below it.
+   *
+   * `dirRelPath` is collection-relative, POSIX-style, and must name a directory
+   * BELOW the collection root: `""` is rejected with `INVALID_INPUT`, because
+   * "every descendant of the root" is the whole-collection scan this seam
+   * exists to avoid. A path escaping the root is rejected the same way.
+   *
+   * Prefix containment is exact - `dir1` never matches `dir10/x.md` - and the
+   * lookup is index-served through `idx_documents_source_parent_path` as a
+   * bounded range over the parent-directory key.
+   */
+  listActiveDescendantSourcePaths(
+    collection: string,
+    dirRelPath: string
+  ): Promise<StoreResult<string[]>>;
+
+  /**
+   * Batched form of {@link listActiveDescendantSourcePaths}: the removed-subtree
+   * answer for SEVERAL directories in one round trip.
+   *
+   * The watcher uses it as a DISCRIMINATOR. A filesystem event naming a path
+   * that no longer exists is ambiguous - a dead temp file and a recursively
+   * deleted directory are both just "a name that is gone" - and only the
+   * indexed side tells them apart. Resolving one directory at a time would put
+   * a query behind every unique temp filename.
+   *
+   * The returned map has an entry for EVERY requested directory (after
+   * normalization and de-duplication), empty when nothing active lives beneath
+   * it. `""` and paths escaping the collection root are rejected with
+   * `INVALID_INPUT` for the whole call, as for the single-directory form.
+   */
+  listActiveDescendantSourcePathsBatch(
+    collection: string,
+    dirRelPaths: string[]
+  ): Promise<StoreResult<Map<string, string[]>>>;
+
+  /**
    * Batched form of {@link listActiveDirectChildSourcePaths}: the same answer
    * for SEVERAL directories in one round trip.
    *

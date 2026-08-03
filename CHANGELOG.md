@@ -61,11 +61,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and hands one deduplicated batch to the existing path sync. The collection's
   live `pattern`, `include`, `exclude`, dotfile and reserved-path rules, and
   application-write suppression are re-applied to every candidate, so an
-  ineligible event never causes an ineligible file to be indexed. Reconciliation
-  stays bounded to the one affected directory: documents nested deeper than a
-  deleted directory's direct children, and Linux subdirectories created after
-  the watcher started (oven-sh/bun#15939, which emits no event at all), still
-  need `gno update`. Thanks @DanielKillenberger for the report.
+  ineligible event never causes an ineligible file to be indexed.
+
+  An event that _does_ name an eligible path is no longer trusted as a complete
+  report either, because a deletion event is only one sample of a larger
+  removal. Deleting a directory recursively on Bun 1.3.14 / Linux reports a
+  single arbitrary child of it (`dir1/b.md`), where 1.3.11 reported the
+  directory itself. That child is eligible, so it took the exact-path fast path
+  and every unnamed sibling stayed retrievable indefinitely. A reported path
+  that has vanished from disk now also reconciles its directory: the watcher
+  walks up to the shallowest removed ancestor and deactivates every indexed
+  document beneath it, at any depth, so a deleted directory no longer strands
+  its nested documents. A live edit is untouched — the file still exists, so the
+  narrow per-path flow runs exactly as before.
+
+  Linux subdirectories created after the watcher started (oven-sh/bun#15939,
+  which emits no event at all) still need `gno update`.
+  Thanks @DanielKillenberger for the report.
 
 - Aligned encrypted publish ciphertext field bounds to the 100 MiB final
   envelope budget, recognized CommonMark tilde fences during attachment

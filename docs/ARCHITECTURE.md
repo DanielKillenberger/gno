@@ -182,7 +182,13 @@ save reported under its temporary sibling, or a recursive directory delete
 reported as the bare directory) marks that directory dirty, and the flush
 reconciles the directory's direct eligible children on disk against its active
 indexed direct children before handing the deduplicated union to the same
-path-scoped ingestion. In steady state — while the collection's configuration is
+path-scoped ingestion. An event that DOES name an eligible path is trusted only
+while that path still exists: a reported path that has vanished is one sample of
+a larger removal (Bun 1.3.14 reports a recursive directory delete as a single
+arbitrary child), so the watcher walks up to the shallowest removed ancestor and
+reconciles that whole subtree against the indexed documents beneath it. A live
+edit is unaffected — the file exists, so the narrow per-path flow runs as
+before. In steady state — while the collection's configuration is
 unchanged — the blast radius stays one directory deep rather than the whole
 collection. If the collection configuration changes while a batch is being
 reconciled or synced, the watcher deliberately falls back to a full

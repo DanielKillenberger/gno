@@ -89,6 +89,32 @@ This measurement corrects three assumptions the plan was originally written on:
    passes and why the live failure was never reproducible from it. The real stale-active
    condition is a **recursive directory delete** reporting only the directory.
 
+### Bun 1.3.14 divergence (post-review, maintainer hardware + container)
+
+The shapes above are **not stable across Bun patch releases**. Re-captured on the
+maintainer's production hardware (Bun 1.3.14, kernel 7.0.0-27-generic, ext4, real
+inotify, not a container) and reproduced in a `tmpfs` container on the same version:
+
+| scenario | Bun 1.3.11 / linux | Bun 1.3.14 / linux |
+|---|---|---|
+| recursive directory delete (`dir1` holding `a.md`, `b.md`) | `dir1` only | **one arbitrary child only** — `dir1/b.md` on hardware, `dir1/a.md` in the container |
+| atomic save, dot temp (`.gno-tmp.x` → `hidden.md`) | destination only | **the dot temp source** (`.gno-tmp.abc123`) |
+| write into a subdirectory created after watch start | nothing | `post/d.md` (bun#15939 appears fixed) |
+
+The recursive-delete change is the defect this corrective commit fixes, and the
+important property is that **which child is named is arbitrary** — it is not the
+first, not the last, and it differed between hardware and container on the same
+Bun version. Because the named child is an ELIGIBLE path, it took the exact-path
+fast path, so no reconciliation ran and every unnamed sibling stayed active
+indefinitely (confirmed live: `a.md` disappeared from `POST /api/search` while
+`b.md` was still retrievable 30s later).
+
+The consequence for the design: "ineligible ⇒ hint / eligible ⇒ authoritative"
+is wrong for deletions. A deletion event naming an eligible path is provably not
+a complete report. Correctness is therefore conditioned on the DISK — a reported
+path that no longer exists is one sample of a larger removal — rather than on
+any event shape, which is the only formulation that survives a patch release.
+
 Two further platform defects were measured and are constraints on task `.3`, not
 requirements of it:
 
@@ -317,8 +343,14 @@ proportional to the event.
 
 ## Acceptance Criteria
 
-- **R1:** Exact eligible create, update, and delete events continue through the
-  existing per-path debounce/sync flow without widening to a directory scan.
+- **R1:** Exact eligible create and update events continue through the existing
+  per-path debounce/sync flow without widening to a directory scan: the reported
+  file EXISTS, so the event named the whole change. **Amended after the Bun
+  1.3.14 measurement below** — a DELETE cannot make that promise. An eligible
+  reported path that no longer exists on disk is one sample of a larger removal,
+  so it also reconciles its directory, walking up to the shallowest removed
+  ancestor. The widening is conditioned on the DISK, not on the event type, and
+  costs one `stat` per pending path; the live-edit hot path is unchanged.
 - **R2:** When a filesystem event reports an ineligible or otherwise ambiguous path
   inside a watched collection, GNO discovers an eligible final file created by an
   atomic save in the same directory without a manual `gno update`. Reconciliation is
@@ -373,13 +405,22 @@ proportional to the event.
   eligible record container reconciles every active logical record derived from it.
 - **R11:** The active-children lookup is index-served for both the collection root and
   nested directories — no whole-collection scan and no temporary B-tree for `DISTINCT`
-  — proven by a query plan captured as evidence.
-- **R12:** A recursive directory deletion that reports only the directory name
-  deactivates that directory's indexed **direct** children. Documented limitation:
-  indexed documents nested deeper than one level below the deleted directory are not
-  deactivated by this slice and still require `gno update`; this is a deliberate
-  consequence of staying directory-bounded, and it must be stated in user-facing docs
-  rather than left implicit.
+  — proven by a query plan captured as evidence. The same holds for the active
+  DESCENDANT lookup added for removed subtrees: a bounded range over the parent
+  key (`>= 'dir1' AND < 'dir10'`, with an exact containment residual so `dir1`
+  can never match `dir10/x.md`), single and batched, index-served at every key
+  count.
+- **R12:** A recursive directory deletion deactivates **every** indexed document
+  beneath the removed directory, at any depth, however the runtime reports it —
+  as the bare directory (Bun 1.3.11), as one arbitrary child at any depth (Bun
+  1.3.14), or as children plus the directory (macOS). The earlier "direct
+  children only" limitation is REMOVED: the watcher resolves the shallowest
+  removed ancestor from disk and reconciles its whole subtree against an indexed
+  descendant lookup. A directory that still EXISTS stays direct-children-bounded,
+  so nothing nested below a surviving directory is pulled in by a temp-file
+  event. The remaining documented limitation is unrelated to depth: Linux
+  subdirectories created after the watcher started emit no event at all
+  (bun#15939) and still require `gno update`.
 
 ## Early proof point
 
@@ -404,8 +445,8 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R8  | Deterministic regression coverage + real-FS smoke proof | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.4 | — |
 | R9  | Reconciliation failures degrade safely and visibly | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
-| R11 | Active-children lookup is index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4 | — |
-| R12 | Recursive directory delete deactivates direct indexed children | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4 | Deeper descendants deferred — documented limitation |
+| R11 | Active-children AND active-descendant lookups are index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
+| R12 | Recursive directory delete deactivates the whole removed subtree | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — (depth limitation removed) |
 
 ## Test strategy
 
