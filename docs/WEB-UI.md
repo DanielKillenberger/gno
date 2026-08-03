@@ -527,13 +527,19 @@ delete reported as the bare directory — the batch is the reconciled contents o
 that one directory (its eligible files on disk unioned with its active indexed
 documents) rather than a single path. While the collection's configuration is
 unchanged, that is as wide as a watcher batch gets — not a whole-collection
-walk. The exception is configuration drift: if the collection changes while a
-batch is reconciling or syncing, the watcher recovers with a full
-`syncCollection` for that collection, which does walk it.
+walk. There are two exceptions. Configuration drift: if the collection changes
+while a batch is reconciling or syncing, the watcher recovers with a full
+`syncCollection` for that collection, which does walk it. And a removed
+collection root: if the collection directory itself is gone from disk, every
+document indexed under it deactivates, because that removal really is
+whole-collection. A root that is merely unreadable (a permission error, a hung
+mount) is not treated as removed and deactivates nothing.
 Atomic saves and deletions are therefore picked up live, without a manual
 `gno update`, and deleting a directory deactivates everything indexed beneath it
-at any depth. One case still needs a manual update: on Linux, subdirectories
-created after the watcher started (Bun emits no event for those at all). A full sync still
+at any depth. Two cases still need a manual update: on Linux, subdirectories
+created after the watcher started (Bun emits no event for those at all), and a
+path deleted and recreated within the same ~300 ms debounce window, which the
+watcher can only see as an edit. A full sync still
 performs one exact global graph reconciliation. Status aggregation is set-based, concurrent status
 requests share the same in-flight build, and the dashboard reuses that response
 for its model selector instead of issuing a duplicate request.

@@ -2068,33 +2068,62 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
 function createSubtreeStore(options: {
   direct?: Record<string, string[]>;
   descendants?: Record<string, string[]>;
+  /** Every active source path in the collection (the removed-root answer). */
+  all?: string[];
+  /** Make the descendant seam fail, as a store outage would. */
+  descendantsFail?: boolean;
+  /**
+   * Runs inside the FIRST store round trip of a flush - after the reported
+   * path has been classified against the disk, before the directory is
+   * enumerated. That is exactly the window in which a removed directory can be
+   * recreated, so this is how a test drives that race deterministically.
+   */
+  duringLookup?: () => Promise<void>;
 }) {
   const direct = options.direct ?? {};
   const descendants = options.descendants ?? {};
   const directCalls: string[] = [];
   const descendantCalls: string[] = [];
+  const allCalls: string[] = [];
+  const descendantError = {
+    ok: false as const,
+    error: { code: "QUERY_FAILED", message: "store offline" },
+  };
 
   return {
     directCalls,
     descendantCalls,
+    allCalls,
     store: {
-      listActiveDirectChildSourcePathsBatch(
+      async listActiveDirectChildSourcePathsBatch(
         _collection: string,
         dirRelPaths: string[]
       ) {
+        await options.duringLookup?.();
         const byDirectory = new Map<string, string[]>();
         for (const dirRelPath of dirRelPaths) {
           directCalls.push(dirRelPath);
           byDirectory.set(dirRelPath, direct[dirRelPath] ?? []);
         }
-        return Promise.resolve({ ok: true as const, value: byDirectory });
+        return { ok: true as const, value: byDirectory };
+      },
+      listActiveSourcePaths(collection: string) {
+        allCalls.push(collection);
+        return Promise.resolve({
+          ok: true as const,
+          value: options.all ?? [],
+        });
       },
       listActiveDescendantSourcePaths(_collection: string, dirRelPath: string) {
         descendantCalls.push(dirRelPath);
-        return Promise.resolve({
-          ok: true as const,
-          value: descendants[dirRelPath] ?? [],
-        });
+        return Promise.resolve(
+          options.descendantsFail
+            ? descendantError
+            : {
+                ok: true as const,
+                value: descendants[dirRelPath] ?? [],
+              }
+        );
       },
       listActiveDescendantSourcePathsBatch(
         _collection: string,
@@ -2105,7 +2134,11 @@ function createSubtreeStore(options: {
           descendantCalls.push(dirRelPath);
           byDirectory.set(dirRelPath, descendants[dirRelPath] ?? []);
         }
-        return Promise.resolve({ ok: true as const, value: byDirectory });
+        return Promise.resolve(
+          options.descendantsFail
+            ? descendantError
+            : { ok: true as const, value: byDirectory }
+        );
       },
     },
   };
@@ -2349,6 +2382,255 @@ describe("CollectionWatchService full-subtree deletion reconciliation", () => {
 
         expect(harness.batches[0]).toEqual(["dir1/a.md"]);
         expect(descendantCalls).toEqual(["dir1"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * fn-114 corrective coverage — the three conditions the subtree work left open.
+ *
+ * 1. The collection ROOT is the ceiling of the ancestor walk, and that ceiling
+ *    used to double as a claim that the root still exists. It does not: a
+ *    deleted collection directory left every document beneath it active.
+ * 2. The removal CLASSIFICATION is made by one `stat` and consumed by a later
+ *    enumeration. Between the two, a directory can be recreated. The intent is
+ *    now carried on the queue instead of re-derived, so the recreation cannot
+ *    silently narrow a subtree removal to direct children.
+ * 3. A failed descendant query is not an empty subtree. Conflating them let a
+ *    store outage downgrade a deleted subtree to a parent reconciliation with
+ *    no diagnostic at all.
+ */
+describe("CollectionWatchService removed-root and recreation reconciliation", () => {
+  test(
+    "deactivates every document beneath a REMOVED collection root",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-root-gone-"));
+      // The collection directory itself is gone - unmounted, moved, or `rm
+      // -rf`d. Nothing under it can be enumerated, so the indexed side is the
+      // only side there is.
+      await rm(root, { recursive: true, force: true });
+
+      const { store, allCalls, descendantCalls } = createSubtreeStore({
+        all: ["top.md", "dir1/a.md", "dir1/sub/deep.md"],
+        descendants: { dir1: ["dir1/a.md", "dir1/sub/deep.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // Bun names one arbitrary child; the root above it is gone too.
+        harness.emit([["rename", "dir1/a.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // At ANY depth: the root-level file, the named child, and the document
+        // two levels down all reach `syncPaths`, which marks each missing path
+        // inactive. Before the fix the walk stopped at the root, reconciled
+        // `dir1` alone, and `top.md` stayed retrievable forever.
+        expect(batch).toContain("top.md");
+        expect(batch).toContain("dir1/a.md");
+        expect(batch).toContain("dir1/sub/deep.md");
+        // A removed root has no bounded subtree, so the whole-collection seam
+        // answers it - exactly once, and only for this condition.
+        expect(allCalls).toEqual(["notes"]);
+        expect(descendantCalls).toEqual([]);
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test.skipIf(process.getuid?.() === 0)(
+    "infers no removal when the collection root cannot be STATTED",
+    async () => {
+      const base = await mkdtemp(join(tmpdir(), "gno-watch-root-eacces-"));
+      const root = join(base, "collection");
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await Bun.write(join(root, "dir1", "a.md"), "# a\n");
+      // Unreadable, NOT absent. `stat` fails with EACCES, and a failure is not
+      // evidence that anything went anywhere.
+      await chmod(base, 0o000);
+
+      const { store, allCalls, descendantCalls, directCalls } =
+        createSubtreeStore({
+          all: ["dir1/a.md", "dir1/b.md", "top.md"],
+          descendants: { dir1: ["dir1/a.md", "dir1/b.md"] },
+        });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/a.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The reported path still rides the ordinary per-path flow (`syncPaths`
+        // decides what an unreadable file means), but NOTHING widened: no
+        // subtree, no whole-collection sweep, no reconciliation at all.
+        expect(harness.batches).toEqual([["dir1/a.md"]]);
+        expect(allCalls).toEqual([]);
+        expect(descendantCalls).toEqual([]);
+        expect(directCalls).toEqual([]);
+        expect(harness.started).toEqual([]);
+      } finally {
+        await chmod(base, 0o700).catch(() => undefined);
+        await harness.service.dispose();
+        await rm(base, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "treats a path deleted and RECREATED before the flush as a live edit (documented limit)",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-recreate-path-"));
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await Bun.write(join(root, "dir1", "a.md"), "# a\n");
+      await Bun.write(join(root, "dir1", "b.md"), "# b\n");
+
+      const { store, descendantCalls, directCalls } = createSubtreeStore({
+        direct: { dir1: ["dir1/a.md", "dir1/b.md"] },
+        descendants: { dir1: ["dir1/a.md", "dir1/b.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // `dir1/` is deleted with both files in it...
+        await rm(join(root, "dir1"), { recursive: true, force: true });
+        harness.emit([["rename", "dir1/a.md"]]);
+        // ...and recreated - with only `a.md` - inside the same 300 ms debounce
+        // window, BEFORE the flush stats the reported path.
+        await mkdir(join(root, "dir1"), { recursive: true });
+        await Bun.write(join(root, "dir1", "a.md"), "# a again\n");
+        expect(await harness.settle()).toBe("settled");
+
+        // THE GUARANTEE, asserted rather than implied: the widening decision is
+        // one `stat` at flush time, and Bun coalesces events inside a watcher
+        // read batch, so a delete immediately followed by a recreate is
+        // indistinguishable from an edit by the time the watcher can look. The
+        // reported path is synced as an edit and nothing widens - `dir1/b.md`,
+        // which really did go, stays active until another event names its area
+        // or `gno update` runs. This window cannot be closed from inside the
+        // watcher; it is documented in docs/TROUBLESHOOTING.md and R1.
+        expect(harness.batches).toEqual([["dir1/a.md"]]);
+        expect(directCalls).toEqual([]);
+        expect(descendantCalls).toEqual([]);
+        expect(harness.started).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps the subtree intent when the removed ancestor is RECREATED before enumeration",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-recreate-anc-"));
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+      // `dir1/` and everything in it is gone at classification time.
+
+      const { store, descendantCalls } = createSubtreeStore({
+        direct: { dir1: ["dir1/a.md"] },
+        descendants: { dir1: ["dir1/a.md", "dir1/sub/deep.md"] },
+        // Runs after the ancestor walk observed `dir1` missing and before the
+        // directory is enumerated: the exact race a second filesystem
+        // observation would lose.
+        duringLookup: async () => {
+          await mkdir(join(root, "dir1"), { recursive: true });
+          await Bun.write(join(root, "dir1", "a.md"), "# restored\n");
+        },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/a.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // The enumeration now finds `dir1` present again. Re-deriving the
+        // classification from it would narrow the reconciliation to the
+        // directory's DIRECT children and strand `dir1/sub/deep.md`, which is
+        // still gone. The intent recorded at classification time is what keeps
+        // the subtree answer.
+        expect(batch).toContain("dir1/sub/deep.md");
+        expect(batch).toContain("dir1/a.md");
+        expect(batch).not.toContain("keep.md");
+        expect(descendantCalls).toContain("dir1");
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reports a failed DESCENDANT query instead of reading it as an empty subtree",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-hint-store-fail-"));
+      // The atomic-save sibling that the parent-directory fallback must still
+      // pick up even while the store is refusing to answer.
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+
+      const { store } = createSubtreeStore({
+        descendants: { dir1: ["dir1/a.md"] },
+        descendantsFail: true,
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // The Bun 1.3.11 recursive-delete shape: only the bare directory.
+        harness.emit([["rename", "dir1"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The store failure is VISIBLE and attributed to the hint it blocked.
+        // Previously `ok: false` was folded into "no descendants", so the
+        // deleted subtree silently degraded to a parent reconciliation with no
+        // diagnostic at all (R7/R9).
+        expect(
+          harness.failed.filter((event) => event.stage === "store")
+        ).toEqual([
+          expect.objectContaining({
+            collection: "notes",
+            directory: "dir1",
+            stage: "store",
+          }),
+        ]);
+        // Nothing is inferred from the unanswered query: `dir1/a.md` is not
+        // deactivated, and the hint directory is never reconciled at all.
+        const batch = harness.batches[0] ?? [];
+        expect(batch).not.toContain("dir1/a.md");
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+        // Parent disk reconciliation still runs, so an atomic save landing in
+        // the same window is not lost to the outage.
+        expect(harness.batches).toEqual([["note.md"]]);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });

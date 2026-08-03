@@ -77,8 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its nested documents. A live edit is untouched — the file still exists, so the
   narrow per-path flow runs exactly as before.
 
-  Linux subdirectories created after the watcher started (oven-sh/bun#15939,
-  which emits no event at all) still need `gno update`.
+  Deleting or unmounting a watched collection directory itself is covered by the
+  same rule: every document indexed in that collection deactivates. A collection
+  directory that GNO cannot read — a permission error, a stalled network
+  mount — is deliberately not treated as deleted, so a failed check never
+  deactivates anything.
+
+  Two cases still need `gno update`: Linux subdirectories created after the
+  watcher started (oven-sh/bun#15939, which emits no event at all), and a path
+  deleted and recreated inside the same ~300 ms batch. The watcher checks the
+  disk once when a batch flushes, so a path that is already back by then reads
+  as an ordinary edit; anything else removed in that window and never named by
+  its own event stays retrievable until another event touches its directory.
+  Once a removal _has_ been observed, a later recreation cannot narrow it — the
+  classification is carried through the flush rather than re-derived.
   Thanks @DanielKillenberger for the report.
 
 ## [1.33.0] - 2026-08-03

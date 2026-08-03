@@ -88,15 +88,23 @@ Deleting a directory deactivates every indexed document beneath it, at any
 depth, whichever way the runtime reports the deletion (as the directory, as one
 arbitrary child of it, or as both): a reported path that no longer exists on
 disk is treated as one sample of a larger removal, and the watcher reconciles
-the whole removed subtree.
+the whole removed subtree. That holds for the collection root as well — delete
+or unmount a watched collection directory and everything indexed under it
+deactivates. A root that cannot be read (permission error, hung mount) is not
+the same thing as a root that is gone, and deactivates nothing.
 
-One change still falls outside what the watcher can observe and needs a
+Two changes still fall outside what the watcher can observe and need a
 `gno update` or a restart:
 
 - on Linux, subdirectories created after the watcher started, which Bun's
   recursive watch does not extend to
   ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939)); no event
-  is emitted for writes inside them at all, so there is nothing to reconcile.
+  is emitted for writes inside them at all, so there is nothing to reconcile;
+- a file or directory deleted and recreated inside the same ~300 ms debounce
+  window. The watcher decides whether an event was a removal by checking the
+  disk once, when the batch flushes; if the path is back by then, the event
+  reads as an ordinary edit. Anything else removed in that window and never
+  named by its own event stays active until the next event touching its area.
 
 ## Managing the Daemon
 

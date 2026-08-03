@@ -186,11 +186,18 @@ path-scoped ingestion. An event that DOES name an eligible path is trusted only
 while that path still exists: a reported path that has vanished is one sample of
 a larger removal (Bun 1.3.14 reports a recursive directory delete as a single
 arbitrary child), so the watcher walks up to the shallowest removed ancestor and
-reconciles that whole subtree against the indexed documents beneath it. A live
-edit is unaffected — the file exists, so the narrow per-path flow runs as
-before. In steady state — while the collection's configuration is
-unchanged — the blast radius stays one directory deep rather than the whole
-collection. If the collection configuration changes while a batch is being
+reconciles that whole subtree against the indexed documents beneath it. The walk
+stops at the collection root, but stopping there is not a claim that the root
+exists: a root that is genuinely absent reconciles against every active document
+in the collection, while a root that merely cannot be statted fails closed and
+deactivates nothing. The removal classification is recorded when it is made and
+carried through the flush, so a directory recreated before the enumeration
+cannot narrow a subtree removal back to direct children; the converse window — a
+path deleted and recreated before the flush's `stat` — reads as an edit and is a
+documented limitation. A live edit is unaffected — the file exists, so the
+narrow per-path flow runs as before. In steady state — while the collection's
+configuration is unchanged and its root is present — the blast radius stays one
+directory deep rather than the whole collection. If the collection configuration changes while a batch is being
 reconciled or synced, the watcher deliberately falls back to a full
 `syncCollection` for that collection, which is a whole-collection walk; that
 recovery is the one case where a watcher batch is not directory-bounded.

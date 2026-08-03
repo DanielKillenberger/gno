@@ -142,6 +142,7 @@ import {
 } from "../activation-receipts";
 import { getSchemaVersion, migrations, runMigrations } from "../migrations";
 import {
+  ACTIVE_COLLECTION_SOURCE_PATHS_SQL,
   ACTIVE_DESCENDANT_SOURCE_PATHS_SQL,
   ACTIVE_DIRECT_CHILD_BATCH_CHUNK,
   ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL,
@@ -1703,6 +1704,29 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         cause instanceof Error
           ? cause.message
           : "Failed to list active direct child source paths",
+        cause
+      );
+    }
+  }
+
+  async listActiveSourcePaths(
+    collection: string
+  ): Promise<StoreResult<string[]>> {
+    try {
+      const db = this.ensureOpen();
+      const rows = db
+        .query<{ source_path: string }, [string]>(
+          ACTIVE_COLLECTION_SOURCE_PATHS_SQL
+        )
+        .all(collection);
+
+      return ok([...new Set(rows.map((row) => row.source_path))]);
+    } catch (cause) {
+      return err(
+        "QUERY_FAILED",
+        cause instanceof Error
+          ? cause.message
+          : "Failed to list active source paths",
         cause
       );
     }

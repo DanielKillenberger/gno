@@ -123,6 +123,21 @@ interface DirtyDirectoryEntry {
   root: string;
   /** Reported paths under this directory, as candidate directories. */
   hints: Set<string>;
+  /**
+   * This directory was OBSERVED missing on disk when the event was classified,
+   * so its whole indexed subtree is implicated - not just its direct children.
+   *
+   * Carried on the queue rather than re-derived at enumeration time on purpose.
+   * Between classification and enumeration the directory can be RECREATED (an
+   * editor that deletes and rewrites a tree, a checkout, a restore), and a
+   * second filesystem observation would then quietly narrow a subtree removal
+   * back to direct children, stranding everything nested below it. The
+   * classification is the intent; the later enumeration only supplies the disk
+   * side of the union. Nothing unsafe follows from keeping it: every candidate
+   * still goes through `syncPaths`, which stats each path and reactivates the
+   * ones that came back.
+   */
+  subtree: boolean;
 }
 
 /** Outcome of reconciling one directory. */
@@ -525,7 +540,10 @@ export class CollectionWatchService {
     let entry = dirty.get(directory);
     if (!entry || entry.root !== watchedRoot) {
       // A root change mid-window invalidates whatever was queued for this key.
-      entry = { root: watchedRoot, hints: new Set() };
+      // `subtree` starts false: an ineligible reported path is not evidence
+      // that its PARENT directory went anywhere, and the hint machinery below
+      // is what discovers a removed directory on this route.
+      entry = { root: watchedRoot, hints: new Set(), subtree: false };
       dirty.set(directory, entry);
     }
     // An excluded or dot-prefixed reported path is not retained: a full sync
@@ -927,10 +945,19 @@ export class CollectionWatchService {
         // is never read as "the file is gone".
         continue;
       }
-      if (byDirectory.has(outcome.directory)) {
+      const existing = byDirectory.get(outcome.directory);
+      if (existing) {
+        // The classification is recorded on the queue, never re-derived later:
+        // one removed-directory sample in this window is enough, and a second
+        // path that only says "my parent survived" must not clear it.
+        existing.subtree ||= outcome.directoryRemoved;
         continue;
       }
-      byDirectory.set(outcome.directory, { root, hints: new Set() });
+      byDirectory.set(outcome.directory, {
+        root,
+        hints: new Set(),
+        subtree: outcome.directoryRemoved,
+      });
     }
     return [...byDirectory];
   }
@@ -1077,6 +1104,19 @@ export class CollectionWatchService {
       return fetched;
     };
 
+    /**
+     * Directories whose REMOVAL was already established when the event was
+     * classified (`#widenVanishedExactPaths`). Kept as intent so a directory
+     * recreated between that classification and this enumeration cannot narrow
+     * a subtree removal back to direct children.
+     */
+    const subtreeIntent = new Set<string>();
+    for (const [directory, entry] of live) {
+      if (entry.subtree) {
+        subtreeIntent.add(directory);
+      }
+    }
+
     const reconcile = async (
       directory: string
     ): Promise<DirectoryReconciliation> => {
@@ -1090,7 +1130,8 @@ export class CollectionWatchService {
             walkConfig,
             directory,
             indexedFor(directory),
-            descendantsFor
+            descendantsFor,
+            subtreeIntent.has(directory)
           )
         : {
             directory,
@@ -1119,7 +1160,27 @@ export class CollectionWatchService {
         // does not. Either way an unanswered store query is never read as
         // "nothing is there".
         const hintIndexed = (await descendantsFor(hint)) ?? indexedFor(hint);
-        if (!(hintIndexed.ok && hintIndexed.value.length > 0)) {
+        if (!hintIndexed.ok) {
+          // The discriminator itself failed. This is NOT "nothing is indexed
+          // here": collapsing the two would let a store outage silently turn a
+          // deleted subtree into a parent-directory reconciliation, with the
+          // descendants left active and no diagnostic at all (R7/R9). Report it
+          // against the hint it blocked and infer nothing from it - the hint is
+          // never reconciled, so nothing under it can deactivate. The affected
+          // directory is still reconciled from DISK, which is what catches an
+          // atomic-save sibling in the same window.
+          this.#notifyDiagnostic(() =>
+            this.#callbacks?.onReconcileFailed?.({
+              collection: collection.name,
+              directory: hint,
+              stage: "store",
+              cause: hintIndexed.error,
+            })
+          );
+          needsDirectory = true;
+          continue;
+        }
+        if (hintIndexed.value.length === 0) {
           // Nothing active is indexed under this hint: it is not a deleted
           // indexed directory, so the event means a file changed in the
           // affected directory.
@@ -1160,7 +1221,10 @@ export class CollectionWatchService {
     walkConfig: WalkConfig,
     directory: string,
     indexed: StoreResult<string[]>,
-    descendantsFor: (directory: string) => Promise<StoreResult<string[]> | null>
+    descendantsFor: (
+      directory: string
+    ) => Promise<StoreResult<string[]> | null>,
+    subtreeIntent: boolean
   ): Promise<DirectoryReconciliation> {
     this.#notifyDiagnostic(() =>
       this.#callbacks?.onReconcileStart?.({
@@ -1200,10 +1264,27 @@ export class CollectionWatchService {
     // one of them active - the "direct children only" limitation this change
     // removes. A directory that is still PRESENT stays deliberately narrow: it
     // is usually a temp-file event, and its nested documents did not change.
-    const indexedSide =
-      disk.status === "missing" && directory !== ""
-        ? ((await descendantsFor(directory)) ?? indexed)
-        : indexed;
+    //
+    // `subtreeIntent` is the SECOND way in, and it is not redundant with the
+    // enumeration: the removal may have been established one classification
+    // earlier, and the directory recreated since. Re-deriving the answer from
+    // this enumeration alone would then narrow it back to direct children and
+    // strand the nested documents that really did go. The recreated files are
+    // safe either way - `syncPaths` stats every candidate.
+    const removed = disk.status === "missing" || subtreeIntent;
+    let indexedSide = indexed;
+    if (removed) {
+      // The collection ROOT is the one directory with no bounded subtree. When
+      // it is genuinely absent every active document in the collection is
+      // implicated, and the descendant seam cannot express that (`""` has no
+      // prefix range), so the whole-collection seam answers instead. A root
+      // that merely could not be READ never reaches here: that is an
+      // `enumerate` failure above, and it fails closed.
+      indexedSide =
+        (directory === ""
+          ? await this.#listActiveCollectionPaths(collection.name)
+          : await descendantsFor(directory)) ?? indexed;
+    }
 
     // The indexed side is what makes deletion work: a vanished file leaves
     // nothing on disk to enumerate, so its relPath can only come from the
@@ -1281,6 +1362,44 @@ export class CollectionWatchService {
             cause instanceof Error
               ? cause.message
               : "active descendant query failed",
+          cause,
+        },
+      };
+    }
+  }
+
+  /**
+   * Every active indexed source path in the collection.
+   *
+   * Reached only when the collection ROOT was observed ABSENT from disk, which
+   * is a whole-collection event by definition: the bounded seams cannot answer
+   * it (the descendant lookup rejects `""` because a root prefix range has no
+   * bound, and the direct-children lookup returns only the root's own files,
+   * stranding every nested document). A root that is present, or merely
+   * unreadable, never gets here.
+   *
+   * Never throws. `null` means the store predates the seam, and the caller
+   * degrades to the direct-child answer it already holds - narrower than ideal,
+   * never wrong.
+   */
+  async #listActiveCollectionPaths(
+    collectionName: string
+  ): Promise<StoreResult<string[]> | null> {
+    const store = this.#store as Partial<SqliteAdapter> | null;
+    if (typeof store?.listActiveSourcePaths !== "function") {
+      return null;
+    }
+    try {
+      return await store.listActiveSourcePaths(collectionName);
+    } catch (cause) {
+      return {
+        ok: false,
+        error: {
+          code: "QUERY_FAILED",
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "active collection paths query failed",
           cause,
         },
       };

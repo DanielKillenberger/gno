@@ -5,7 +5,10 @@ import { join } from "node:path";
 
 import type { WalkConfig } from "../../src/ingestion/types";
 
-import { listEligibleDirectChildren } from "../../src/ingestion/directory-children";
+import {
+  listEligibleDirectChildren,
+  resolveVanishedPathDirectory,
+} from "../../src/ingestion/directory-children";
 import { FileWalker } from "../../src/ingestion/walker";
 import { safeRm } from "../helpers/cleanup";
 
@@ -256,4 +259,91 @@ describe("listEligibleDirectChildren", () => {
     expect(walkedRootChildren).toEqual(["real.md"]);
     expect(outcome).toEqual({ status: "present", relPaths: ["real.md"] });
   });
+});
+
+/**
+ * The collection root is the CEILING of the ancestor walk, which is what keeps
+ * a deletion from escalating above the collection. It is not a claim that the
+ * root still exists - and conflating the two left every document under a
+ * deleted collection root active forever.
+ */
+describe("resolveVanishedPathDirectory collection-root handling", () => {
+  let base = "";
+  let root = "";
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), "gno-vanished-root-"));
+    root = join(base, "root");
+    await mkdir(root);
+  });
+
+  afterEach(async () => {
+    await chmod(base, 0o700).catch(() => undefined);
+    await safeRm(base);
+  });
+
+  test("a surviving root reconciles only its own direct children", async () => {
+    const outcome = await resolveVanishedPathDirectory("gone.md", root);
+
+    // Nothing above the file went anywhere, so there is no subtree to widen to.
+    expect(outcome).toEqual({
+      status: "removed",
+      directory: "",
+      directoryRemoved: false,
+    });
+  });
+
+  test("a removed ancestor is reported as removed, not as a surviving parent", async () => {
+    const outcome = await resolveVanishedPathDirectory("dir1/sub/c.md", root);
+
+    expect(outcome).toEqual({
+      status: "removed",
+      directory: "dir1",
+      directoryRemoved: true,
+    });
+  });
+
+  test("an ABSENT collection root marks the root itself removed", async () => {
+    await safeRm(root);
+
+    const outcome = await resolveVanishedPathDirectory("dir1/a.md", root);
+
+    // The whole collection directory went, so the area to reconcile is the
+    // root AND everything indexed beneath it - not `dir1` alone, and not
+    // "the root survived" as before.
+    expect(outcome).toEqual({
+      status: "removed",
+      directory: "",
+      directoryRemoved: true,
+    });
+  });
+
+  test("an absent root is still the root for a root-level file", async () => {
+    await safeRm(root);
+
+    const outcome = await resolveVanishedPathDirectory("top.md", root);
+
+    expect(outcome).toEqual({
+      status: "removed",
+      directory: "",
+      directoryRemoved: true,
+    });
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "an UNSTATTABLE root fails closed instead of claiming a removal",
+    async () => {
+      // The root is unreadable, not gone: `stat` fails with EACCES rather than
+      // ENOENT. A transient/permission failure must never be read as absence,
+      // because absence is what deactivates documents.
+      await chmod(base, 0o000);
+
+      const outcome = await resolveVanishedPathDirectory("dir1/a.md", root);
+
+      expect(outcome.status).toBe("error");
+      expect((outcome as { cause?: { code?: string } }).cause?.code).toBe(
+        "EACCES"
+      );
+    }
+  );
 });

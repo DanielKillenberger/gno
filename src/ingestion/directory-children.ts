@@ -84,8 +84,21 @@ export type VanishedPathOutcome =
    * The reported path is gone. `directory` is the SHALLOWEST ancestor that is
    * also gone, or the path's own (surviving) parent directory when only the
    * file itself vanished.
+   *
+   * `directoryRemoved` says which of those two it is, and it is the CLASSIFICATION
+   * the caller must carry forward rather than re-derive:
+   *
+   * - `true` - `directory` itself was OBSERVED missing on disk (including the
+   *   collection root). Everything indexed beneath it, at any depth, is
+   *   implicated.
+   * - `false` - only the file vanished; `directory` survived and is reconciled
+   *   against its direct children alone.
+   *
+   * A caller that re-stats `directory` later can see a RECREATED directory and
+   * silently narrow a subtree removal to its direct children. The flag exists so
+   * the removal intent survives that recreation.
    */
-  | { status: "removed"; directory: string }
+  | { status: "removed"; directory: string; directoryRemoved: boolean }
   /** The disk could not be consulted; nothing may be inferred. */
   | { status: "error"; cause: unknown };
 
@@ -123,10 +136,21 @@ async function pathExists(
  *   reported child may be at any depth, and its parent may itself have been
  *   removed, which is why this walks rather than taking `dirname` once.
  *
- * The walk never climbs past the collection root, which is treated as always
- * surviving: `""` is returned when a root-level file vanished, and a vanished
- * collection root reconciles as the root rather than escalating to the whole
- * collection.
+ * The walk never climbs PAST the collection root - the root is the ceiling, and
+ * that ceiling is what keeps a deletion from escalating into "reconcile
+ * everything above the collection". But the ceiling is not the same claim as
+ * "the root still exists". When the walk reaches the root it asks the disk one
+ * more question:
+ *
+ * - the root is there (the ordinary case): `""` is the reconciled area and only
+ *   its direct children are implicated;
+ * - the root is genuinely ABSENT (`ENOENT`/`ENOTDIR` - the collection directory
+ *   was deleted or unmounted): `""` is returned with `directoryRemoved: true`,
+ *   so every document indexed under the collection deactivates. Treating the
+ *   root as always surviving left exactly those documents active forever;
+ * - the root could not be STATTED at all (`EACCES`, `EIO`, a hung mount): that
+ *   is not evidence of absence, so it fails closed as `error` and nothing is
+ *   deactivated on the strength of it.
  */
 export async function resolveVanishedPathDirectory(
   relPath: string,
@@ -160,11 +184,32 @@ export async function resolveVanishedPathDirectory(
     }
     directory = parentDirectoryOf(directory);
   }
-  // `directory` now names a surviving ancestor (or the root). The area to
-  // reconcile is the child of it that is gone - or, when nothing above the file
-  // was removed, that surviving directory itself.
+
+  if (directory === "") {
+    // The walk stopped at the ceiling without ever proving the root is there.
+    // Absence and unreadability demand opposite behavior, so ask explicitly.
+    const rootPresent = await pathExists(rootReal);
+    if (rootPresent !== true) {
+      return rootPresent === false
+        ? // The collection directory itself is gone: everything indexed under
+          // it is implicated, not just the root's direct children.
+          { status: "removed", directory: "", directoryRemoved: true }
+        : // Unreadable, not absent - infer nothing.
+          { status: "error", cause: rootPresent.cause };
+    }
+  }
+
+  // `directory` now names a surviving ancestor (or the surviving root). The
+  // area to reconcile is the child of it that is gone - or, when nothing above
+  // the file was removed, that surviving directory itself.
   const removedChild = shallowestRemovedChild(normalized, directory);
-  return { status: "removed", directory: removedChild };
+  return {
+    status: "removed",
+    directory: removedChild,
+    // The survivor itself is only reconciled for its direct children; anything
+    // below it was observed gone.
+    directoryRemoved: removedChild !== directory,
+  };
 }
 
 /** The directory portion of a normalized collection-relative path. */

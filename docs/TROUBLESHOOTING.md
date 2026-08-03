@@ -398,7 +398,11 @@ beneath it, at any depth: deleting `notes/archive/` also deactivates the
 documents inside `archive/2024/`. This holds however the runtime reports the
 deletion — as the directory, as one arbitrary child, or as children plus the
 directory — because a reported path that has vanished from disk is treated as
-one sample of a larger removal rather than as a complete report.
+one sample of a larger removal rather than as a complete report. Deleting or
+unmounting the collection directory itself is the same case: every document
+indexed in that collection deactivates. A collection directory that GNO cannot
+read (a permission error, a stalled network mount) is deliberately not treated
+as deleted — nothing is deactivated on the strength of a failed check.
 
 Common causes:
 
@@ -413,6 +417,14 @@ fix:
   watch does not extend to them ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939))
   and emits no event at all for writes inside them, so there is no hint to
   reconcile. Restart `gno serve` / `gno daemon`, or run `gno update`.
+- **A path deleted and recreated within the same ~300 ms batch.** The watcher
+  decides whether an event was a deletion by checking the disk once, when the
+  batch flushes. A file or directory that is already back by then looks like an
+  ordinary edit, and it is synced as one. If something else was removed in that
+  same window and no event ever named it, it stays retrievable until another
+  event touches its directory — or until you run `gno update`. This is inherent
+  to reading deletions out of an event stream that collapses events, not a
+  configuration problem.
 
 Known limitation — **very large directories are slow to reconcile.** Listing the
 directory and the matching index lookup are cheap: measured at about 9 ms combined

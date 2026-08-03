@@ -58,6 +58,26 @@ export const ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL = `SELECT DISTINCT ${SOURCE_PA
    WHERE collection = ? AND ${SOURCE_PARENT_PATH_EXPR} = ? AND active = 1`;
 
 /**
+ * Effective source paths of every ACTIVE document in a collection.
+ *
+ * This is deliberately the whole-collection answer the bounded seams below
+ * exist to avoid, and it has exactly ONE caller condition: the collection ROOT
+ * was observed absent from disk. A removed root is a whole-collection event, so
+ * the honest indexed side for it is every active document - the descendant seam
+ * cannot express it (a `""` prefix range has no bound) and the direct-children
+ * seam answers only the root's own files, stranding every nested document.
+ *
+ * Deduplicated by the caller rather than with `DISTINCT`, matching the batched
+ * statements below: a record container's many logical rows collapse to one
+ * physical source path in memory.
+ *
+ * Parameters: `collection`.
+ */
+export const ACTIVE_COLLECTION_SOURCE_PATHS_SQL = `SELECT ${SOURCE_PATH_EXPR} AS source_path
+   FROM documents
+   WHERE collection = ? AND active = 1`;
+
+/**
  * Effective source paths of ACTIVE documents anywhere beneath a directory -
  * direct children AND deeper descendants.
  *

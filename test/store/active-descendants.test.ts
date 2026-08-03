@@ -166,6 +166,66 @@ describe("listActiveDescendantSourcePaths", () => {
     expect(escape.ok ? "" : escape.error.code).toBe("INVALID_INPUT");
   });
 
+  /**
+   * The removed-COLLECTION-ROOT answer. The subtree seam above rejects `""`
+   * because a root prefix range has no bound, and the direct-children seam
+   * answers only the root's own files - so a deleted collection directory left
+   * every nested document active. This is the one seam that is deliberately
+   * whole-collection, for the one condition that genuinely is.
+   */
+  describe("listActiveSourcePaths (removed collection root)", () => {
+    test("returns every active document in the collection, at any depth", async () => {
+      await adapter.upsertDocument(doc({ relPath: "top.md" }));
+      await adapter.upsertDocument(doc({ relPath: "dir1/a.md" }));
+      await adapter.upsertDocument(doc({ relPath: "dir1/sub/deeper/d.md" }));
+
+      const result = await adapter.listActiveSourcePaths("notes");
+
+      expect(result.ok).toBe(true);
+      expect(result.ok ? [...result.value].sort() : []).toEqual([
+        "dir1/a.md",
+        "dir1/sub/deeper/d.md",
+        "top.md",
+      ]);
+    });
+
+    test("excludes inactive rows and other collections", async () => {
+      await adapter.upsertDocument(doc({ relPath: "keep.md" }));
+      await adapter.upsertDocument(doc({ relPath: "gone.md" }));
+      await adapter.upsertDocument(
+        doc({ collection: "other", relPath: "elsewhere.md" })
+      );
+      expect((await adapter.markInactive("notes", ["gone.md"])).ok).toBe(true);
+
+      const result = await adapter.listActiveSourcePaths("notes");
+
+      expect(result.ok ? result.value : []).toEqual(["keep.md"]);
+    });
+
+    test("resolves record-backed documents through their physical source path", async () => {
+      // R10 holds here too: a removed root must deactivate the JSONL container
+      // once, not each of its virtual record rows.
+      await adapter.upsertDocument(
+        doc({
+          relPath: ".gno/records/h/one.md",
+          recordSourcePath: "dir1/export.jsonl",
+          recordKey: "one",
+        })
+      );
+      await adapter.upsertDocument(
+        doc({
+          relPath: ".gno/records/h/two.md",
+          recordSourcePath: "dir1/export.jsonl",
+          recordKey: "two",
+        })
+      );
+
+      const result = await adapter.listActiveSourcePaths("notes");
+
+      expect(result.ok ? result.value : []).toEqual(["dir1/export.jsonl"]);
+    });
+  });
+
   describe("batched form", () => {
     test("answers every requested directory, empty when nothing is indexed", async () => {
       await adapter.upsertDocument(doc({ relPath: "dir1/a.md" }));

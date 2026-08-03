@@ -1732,6 +1732,22 @@ export interface StorePort {
   ): Promise<StoreResult<string[]>>;
 
   /**
+   * List the distinct effective source paths of EVERY active document in a
+   * collection.
+   *
+   * The deliberately unbounded companion to the two seams above, for the one
+   * condition that is genuinely whole-collection: the watcher observed the
+   * collection ROOT absent from disk. `listActiveDescendantSourcePaths` rejects
+   * `""` because "every descendant of the root" has no bounded range, and the
+   * direct-children answer for `""` strands every nested document, so a removed
+   * root needs this seam to deactivate what it took with it.
+   *
+   * Never called for an ordinary event: a root that still exists is reconciled
+   * through the bounded direct-children lookup as before.
+   */
+  listActiveSourcePaths(collection: string): Promise<StoreResult<string[]>>;
+
+  /**
    * Batched form of {@link listActiveDescendantSourcePaths}: the removed-subtree
    * answer for SEVERAL directories in one round trip.
    *
