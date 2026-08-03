@@ -179,6 +179,14 @@ interface CollectionWatchServiceOptions {
   callbacks?: CollectionWatchCallbacks;
   syncOptions?: SyncOptions;
   watchFactory?: typeof watch;
+  /**
+   * Seam for the flush-time classification `stat` of a reported exact path,
+   * defaulting to the real filesystem implementation. Injected for the same
+   * reason as `watchFactory`: the classification is an `await` inside the
+   * flush, and drift behavior in that window is only testable if a test can
+   * act at exactly that point.
+   */
+  resolveVanishedPath?: typeof resolveVanishedPathDirectory;
 }
 
 function watcherCollectionFingerprint(
@@ -237,6 +245,7 @@ export class CollectionWatchService {
   readonly #inFlightSyncs = new Set<Promise<void>>();
   readonly #suppressedPaths = new Map<string, number>();
   readonly #watchFactory: typeof watch;
+  readonly #resolveVanishedPath: typeof resolveVanishedPathDirectory;
   readonly #failedCollections = new Map<string, string>();
   #nextCollectionGeneration = 0;
   #disposed = false;
@@ -251,6 +260,8 @@ export class CollectionWatchService {
     this.#callbacks = options.callbacks ?? null;
     this.#syncOptions = options.syncOptions ?? {};
     this.#watchFactory = options.watchFactory ?? watch;
+    this.#resolveVanishedPath =
+      options.resolveVanishedPath ?? resolveVanishedPathDirectory;
   }
 
   start(): void {
@@ -636,6 +647,65 @@ export class CollectionWatchService {
     // Started reconciliations that still owe their single terminal outcome.
     let outstanding: DirectoryReconciliation[] = [];
 
+    /**
+     * R6 - the ONE resume point every pre-sync await funnels through.
+     *
+     * Everything between draining the queues and handing paths to `syncPaths`
+     * was resolved against the configuration captured in `collection` and
+     * `syncGeneration`. Every `await` in that region is a window in which
+     * `updateCollections` can remove the collection, move its root, or change
+     * its rules, so the work in hand can describe a configuration that no
+     * longer exists.
+     *
+     * This deliberately runs UNCONDITIONALLY after each such await instead of
+     * inside whichever branch happens to own the current one. The earlier
+     * revision guarded only the enumeration branch; adding the classification
+     * await (`#widenVanishedExactPaths`) then silently reopened exactly the
+     * same hole for a batch of exact paths with no dirty directories, because
+     * that batch never enters the enumeration branch at all. The rule is
+     * therefore mechanical, not situational: an `await` added below MUST be
+     * followed immediately by `resumeAfterAwait()`, and no branch condition may
+     * stand between them.
+     *
+     * Dropping the resolved work on drift is safe because the recovery loop at
+     * the end of the flush runs a full `syncCollection` against the CURRENT
+     * configuration, which is a superset of anything bounded that was dropped
+     * (R6) - reconciliation adds no second compensating pass.
+     */
+    const resumeAfterAwait = (): "continue" | "abort" => {
+      if (this.#disposed) {
+        return "abort";
+      }
+      const liveCollection = this.#collections.find(
+        (entry) => entry.name === collectionName
+      );
+      const liveGeneration =
+        this.#collectionGenerations.get(collectionName) ?? 0;
+      if (liveCollection) {
+        const rootChanged =
+          normalize(liveCollection.path) !== normalize(collection.path);
+        if (!(rootChanged || liveGeneration !== syncGeneration)) {
+          return "continue";
+        }
+      }
+      // Any drift invalidates the whole in-hand batch - bounded candidates and
+      // the exact paths drained from the same window alike. They are synced
+      // against neither the old nor the new configuration.
+      this.#completeReconciliations(collection.name, outstanding, new Set());
+      outstanding = [];
+      reconciliations = [];
+      dirtyEntries = [];
+      exactPaths = [];
+      if (!liveCollection) {
+        // The collection is gone: there is nothing left to recover against, so
+        // the queues are discarded rather than reflushed.
+        this.#pendingByCollection.delete(collectionName);
+        this.#dirtyByCollection.delete(collectionName);
+        return "abort";
+      }
+      return "continue";
+    };
+
     try {
       if (exactPaths.length > 0) {
         dirtyEntries = await this.#widenVanishedExactPaths(
@@ -643,7 +713,7 @@ export class CollectionWatchService {
           exactPaths,
           dirtyEntries
         );
-        if (this.#disposed) {
+        if (resumeAfterAwait() === "abort") {
           return;
         }
       }
@@ -653,54 +723,11 @@ export class CollectionWatchService {
           collection,
           dirtyEntries
         );
-        if (this.#disposed) {
-          return;
-        }
+        // Assigned BEFORE the resume check so a drift-dropped batch still
+        // settles the terminal outcome every started reconciliation owes (R7).
         outstanding = reconciliations;
-
-        // R6: enumeration is the window in which the configuration can move
-        // out from under work that was already resolved. `#disposed` alone is
-        // not enough - re-read the collection, its normalized root, and its
-        // generation BEFORE any bounded candidate can reach `syncPaths`.
-        const liveCollection = this.#collections.find(
-          (entry) => entry.name === collectionName
-        );
-        const liveGeneration =
-          this.#collectionGenerations.get(collectionName) ?? 0;
-        if (!liveCollection) {
-          // The collection was removed while enumerating: the whole batch,
-          // bounded and exact alike, belongs to a configuration that no longer
-          // exists, and there is nothing left to recover against.
-          this.#completeReconciliations(
-            collection.name,
-            outstanding,
-            new Set()
-          );
-          outstanding = [];
-          this.#pendingByCollection.delete(collectionName);
-          this.#dirtyByCollection.delete(collectionName);
+        if (resumeAfterAwait() === "abort") {
           return;
-        }
-        const rootChanged =
-          normalize(liveCollection.path) !== normalize(collection.path);
-        if (rootChanged || liveGeneration !== syncGeneration) {
-          // The root moved, or the configuration drifted, while enumeration was
-          // in flight. Either way the resolved candidates describe the OLD
-          // configuration, so they are dropped rather than synced against
-          // either root. A root change also invalidates the exact paths drained
-          // from the same window. Both drops are safe because the drift loop
-          // below runs a full `syncCollection`, which is a superset of this
-          // bounded work (R6) - reconciliation adds no second compensating pass.
-          this.#completeReconciliations(
-            collection.name,
-            outstanding,
-            new Set()
-          );
-          outstanding = [];
-          reconciliations = [];
-          if (rootChanged) {
-            exactPaths = [];
-          }
         }
       }
 
@@ -939,7 +966,7 @@ export class CollectionWatchService {
       if (this.#disposed) {
         break;
       }
-      const outcome = await resolveVanishedPathDirectory(relPath, root);
+      const outcome = await this.#resolveVanishedPath(relPath, root);
       if (outcome.status !== "removed") {
         // `present` is the hot path; `error` fails closed - an unreadable disk
         // is never read as "the file is gone".

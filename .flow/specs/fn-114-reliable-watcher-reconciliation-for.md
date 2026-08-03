@@ -395,9 +395,16 @@ proportional to the event.
   disposal cannot flush stale reconciliation work into the wrong configuration.
   Drift detected **before** enumeration re-resolves the dirty directory against the
   current configuration, or drops it when the root changed or the collection is gone.
-  Drift detected **during** enumeration or while `syncPaths` is in flight falls to the
-  existing full-`syncCollection` recovery loop, which is a superset of the bounded
-  work; reconciliation adds no second compensating pass.
+  Drift detected **during** any awaited flush stage - path **classification**
+  (`stat`-ing reported exact paths), enumeration, or while `syncPaths` is in flight -
+  falls to the existing full-`syncCollection` recovery loop, which is a superset of the
+  bounded work; reconciliation adds no second compensating pass. The revalidation is
+  **unconditional at every flush resume point**, not attached to whichever branch owns
+  the current await: an exact-path batch with no dirty directories never enters the
+  enumeration branch, so a branch-local guard leaves that batch syncing against a
+  configuration that has already moved. On drift the whole in-hand batch is dropped -
+  bounded candidates and exact paths alike - and a removed collection drops the batch
+  and its queues with no recovery attempt at all.
 - **R7:** Additive optional callback events on `CollectionWatchCallbacks`, wired into
   the existing consumers that already log watcher activity, make it possible to
   determine that an ambiguous event was received (including a dropped `null`
@@ -469,7 +476,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R4  | Eligibility, normalization, containment, suppression preserved | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
-| R6  | Live collection generations respected | fn-114-reliable-watcher-reconciliation-for.3 | — |
+| R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R7  | Diagnostics distinguish event receipt from reconciliation outcome | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4 | — |
 | R8  | Deterministic regression coverage + real-FS smoke proof | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.4 | — |
 | R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query and an unstattable collection root | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |

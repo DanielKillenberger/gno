@@ -8,7 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Collection } from "../../src/config/types";
-import type { CollectionSyncResult } from "../../src/ingestion";
+import type {
+  CollectionSyncResult,
+  VanishedPathOutcome,
+} from "../../src/ingestion";
 
 import { defaultSyncService } from "../../src/ingestion";
 import { CollectionWatchService } from "../../src/serve/watch-service";
@@ -1029,6 +1032,14 @@ interface ReconcileHarnessOptions {
    * control flow (R7/R9).
    */
   throwFromDiagnostics?: boolean;
+  /**
+   * Replace the flush-time classification `stat` of a reported exact path, so
+   * a test can act at exactly that awaited point (the classification window).
+   */
+  resolveVanishedPath?: (
+    relPath: string,
+    root: string
+  ) => Promise<VanishedPathOutcome>;
 }
 
 function createReconcileHarness(
@@ -1114,6 +1125,7 @@ function createReconcileHarness(
       watcherCallback = callback as typeof watcherCallback;
       return { close: () => undefined };
     }) as never,
+    resolveVanishedPath: options.resolveVanishedPath,
   });
 
   return {
@@ -1919,6 +1931,215 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
         await rm(moved, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
+   * R6 - the CLASSIFICATION window. `#widenVanishedExactPaths` stats every
+   * reported exact path before anything is synced, which is a second async
+   * window in exactly the same sense as enumeration. It is reached even when
+   * NO directory is dirty (a batch of plain exact paths), so a drift guard that
+   * lives inside the enumeration branch never runs for it and the stale exact
+   * paths sync against a configuration that has already moved.
+   *
+   * Each case mutates the configuration from inside the awaited classification
+   * seam, the same controllable-point technique the enumeration-window tests
+   * use for the store seam.
+   */
+  test(
+    "drops exact paths when the collection is REMOVED during classification",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-class-removed-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const syncCollection = mock(async () => createSyncResult());
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      let harness: ReturnType<typeof createReconcileHarness> | null = null;
+      let removed = false;
+      const harnessOptions = {
+        store: createRecordingStore({}).store,
+        resolveVanishedPath: async (): Promise<VanishedPathOutcome> => {
+          if (!removed) {
+            removed = true;
+            harness?.service.updateCollections([]);
+          }
+          // The path is still there: no directory is widened, so this batch
+          // NEVER enters the enumeration branch.
+          return { status: "present" as const };
+        },
+      };
+      harness = createReconcileHarness(
+        createCollection("notes", root),
+        harnessOptions
+      );
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(removed).toBe(true);
+        // Nothing is synced for a collection that no longer exists - not the
+        // stale exact path, and not a recovery against a missing collection.
+        expect(harness.batches).toEqual([]);
+        expect(syncCollection).not.toHaveBeenCalled();
+        expect(harness.started).toEqual([]);
+        expect(harness.completed).toEqual([]);
+        expect(harness.failed).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "drops exact paths when the collection ROOT changes during classification",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-class-root-old-"));
+      const moved = await mkdtemp(join(tmpdir(), "gno-watch-class-root-new-"));
+      // Same relative name under both roots: syncing the stale exact path
+      // would silently resolve against whichever root `syncPaths` is handed.
+      await Bun.write(join(root, "note.md"), "# old root\n");
+      await Bun.write(join(moved, "note.md"), "# new root\n");
+      const syncCollection = mock(async (_collection: Collection) =>
+        createSyncResult()
+      );
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      let harness: ReturnType<typeof createReconcileHarness> | null = null;
+      let swapped = false;
+      const harnessOptions = {
+        store: createRecordingStore({}).store,
+        resolveVanishedPath: async (): Promise<VanishedPathOutcome> => {
+          if (!swapped) {
+            swapped = true;
+            harness?.service.updateCollections([
+              createCollection("notes", moved),
+            ]);
+          }
+          return { status: "present" as const };
+        },
+      };
+      harness = createReconcileHarness(
+        createCollection("notes", root),
+        harnessOptions
+      );
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(swapped).toBe(true);
+        // Synced against neither root.
+        expect(harness.batches).toEqual([]);
+        // A moved root is generation drift, so the full-collection recovery
+        // runs - against the CURRENT collection.
+        expect(syncCollection).toHaveBeenCalledTimes(1);
+        expect(syncCollection.mock.calls[0]?.[0]).toMatchObject({
+          name: "notes",
+          path: moved,
+        });
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+        await rm(moved, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "drops exact paths when the CONFIGURATION drifts during classification",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-class-drift-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const syncCollection = mock(async (_collection: Collection) =>
+        createSyncResult()
+      );
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      let harness: ReturnType<typeof createReconcileHarness> | null = null;
+      let drifted = false;
+      const harnessOptions = {
+        store: createRecordingStore({}).store,
+        resolveVanishedPath: async (): Promise<VanishedPathOutcome> => {
+          if (!drifted) {
+            drifted = true;
+            // Same root, different rules. `note.md` stays eligible under BOTH,
+            // so the live-rules recheck cannot filter it out - only the drift
+            // guard can stop it, which is what makes this discriminating.
+            const retuned = createCollection("notes", root);
+            retuned.exclude = ["archive"];
+            harness?.service.updateCollections([retuned]);
+          }
+          return { status: "present" as const };
+        },
+      };
+      harness = createReconcileHarness(
+        createCollection("notes", root),
+        harnessOptions
+      );
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(drifted).toBe(true);
+        // No stale bounded sync under the OLD sync options...
+        expect(harness.batches).toEqual([]);
+        // ...and the full-collection recovery still runs, so `note.md` is
+        // reindexed under the CURRENT configuration instead.
+        expect(syncCollection).toHaveBeenCalledTimes(1);
+        expect(syncCollection.mock.calls[0]?.[0]).toMatchObject({
+          name: "notes",
+          path: root,
+          exclude: ["archive"],
+        });
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "leaves an UNDRIFTED classification flush exactly as it was",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-class-stable-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const syncCollection = mock(async () => createSyncResult());
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store: createRecordingStore({}).store,
+        resolveVanishedPath: async (): Promise<VanishedPathOutcome> => ({
+          status: "present" as const,
+        }),
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The unconditional revalidation must not over-drop: with no drift the
+        // ordinary bounded flush is untouched, and no recovery is provoked.
+        expect(harness.batches).toEqual([["note.md"]]);
+        expect(syncCollection).not.toHaveBeenCalled();
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
       }
     },
     RED_TEST_TIMEOUT_MS
