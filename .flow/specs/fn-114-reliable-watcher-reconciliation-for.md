@@ -58,6 +58,48 @@ Upstream corroboration found during planning:
   moved out of the tree (fixed upstream; confirm against the pinned Bun in
   `package.json`, `bun >=1.3.0`).
 
+## Measured watcher behavior (task `.1`, Bun 1.3.11)
+
+Captured from a real recursive `fs.watch` on linux 6.10.14 (tmpfs-backed container, genuine
+inotify) and cross-checked on darwin 25.5.0. Every `eventType` was `rename` on both
+platforms; **no `null` filename was ever observed**.
+
+| scenario | linux reports | darwin reports |
+|---|---|---|
+| direct create | `direct.md` | `direct.md` |
+| atomic save, plain temp (`note.md.tmp` → `note.md`) | `note.md.tmp` only | both |
+| atomic save, dot temp (`.gno-tmp.x` → `hidden.md`) | `hidden.md` only | both |
+| atomic replace, nested | `nested/note.md.tmp` only | all three |
+| single-file delete | `direct.md` | `direct.md` |
+| recursive directory delete (`dir1` holding `a.md`, `b.md`) | `dir1` only | children + `dir1` |
+| write into a subdirectory created after watch start | **nothing** | `post/d.md` |
+| case-only rename | `foo.md` | both |
+
+This measurement corrects three assumptions the plan was originally written on:
+
+1. **bun#36328 is real and unfixed** for plain temp names — the destination is never
+   reported. The core premise stands.
+2. **Bun's Linux recursive watcher never reports dot-prefixed names at all.** For a
+   dot-prefixed temp the source is filtered out and only the destination survives, which
+   the existing code already handles. The ambiguity is real only for **non-dot** temp
+   names. This directly contradicts production evidence item 5, which observed only the
+   `.hermes-tmp.<id>` path — see Open questions.
+3. **The deletion defect is not a single-file delete.** A single-file delete names the
+   deleted file on both platforms, which is why the pre-existing green deletion test
+   passes and why the live failure was never reproducible from it. The real stale-active
+   condition is a **recursive directory delete** reporting only the directory.
+
+Two further platform defects were measured and are constraints on task `.3`, not
+requirements of it:
+
+- **Post-watch subdirectories are invisible on Linux** (confirms bun#15939). Writes into a
+  directory created after the watch began produce no events whatsoever, and writes into a
+  *renamed* pre-existing directory are reported under the stale pre-rename path. No
+  event means no hint, so reconciliation cannot help; this stays a documented limitation.
+- **Events collapse per watcher read batch.** A ~5 ms separation is enough to split them;
+  300 rapid writes delivered 20 events. Coalescing assertions in `.3` must therefore
+  measure reconciliation batches, never delivered event counts.
+
 ## Current implementation and root-cause boundary
 
 ### Proven atomic-write failure
@@ -111,10 +153,25 @@ configuration:
 ### Bounded reconciliation path (new)
 
 When an event cannot safely identify the final eligible path, queue the smallest
-trustworthy area — the reported path's parent directory — as dirty, in a structure
-parallel to the existing `#pendingByCollection` relPath set and keyed by
-collection + directory relPath. The collection root is a first-class directory key
-(a reported name with no `/` yields the root, represented as `""`).
+trustworthy area as dirty, in a structure parallel to the existing
+`#pendingByCollection` relPath set and keyed by collection + directory relPath. The
+collection root is a first-class directory key (a reported name with no `/` yields the
+root, represented as `""`).
+
+Two directory keys are queued for an ambiguous event, because measurement (task `.1`)
+showed the parent alone is insufficient:
+
+- the reported path's **parent** directory — covers an atomic save that reports only a
+  temp sibling (`note.md.tmp` → the real `note.md` is a sibling);
+- the reported path **itself** — covers a recursive directory deletion, which Linux
+  reports as the bare directory name (`dir1`) with no child events at all. Its indexed
+  children are direct children of `dir1`, not of `dir1`'s parent, so a parent-only rule
+  never deactivates them.
+
+The reported path is not stat-able in the deletion case, so both keys are queued
+unconditionally for an ambiguous event and resolved at flush time; a key that turns out
+not to be a directory yields `missing` from the enumeration seam and reconciles against
+the indexed side only, which is exactly the desired deletion behavior.
 
 At flush time, for each dirty directory:
 
@@ -270,7 +327,9 @@ proportional to the event.
 - **R3:** A watched eligible file deleted after watcher readiness becomes inactive and
   is no longer retrievable without a full collection update. The implementation rests
   on a deterministic failing reproduction of the real event/path condition, not an
-  assumed ingestion defect.
+  assumed ingestion defect. The measured condition is a recursive directory delete that
+  reports only the directory name (see Measured watcher behavior), not a single-file
+  delete.
 - **R4:** Reconciliation consults the current collection configuration and preserves
   `pattern`/`include`/`exclude` behavior, dotfile/temporary/reserved-path exclusions,
   path normalization and collection-root containment, configured limits and
@@ -315,6 +374,12 @@ proportional to the event.
 - **R11:** The active-children lookup is index-served for both the collection root and
   nested directories — no whole-collection scan and no temporary B-tree for `DISTINCT`
   — proven by a query plan captured as evidence.
+- **R12:** A recursive directory deletion that reports only the directory name
+  deactivates that directory's indexed **direct** children. Documented limitation:
+  indexed documents nested deeper than one level below the deleted directory are not
+  deactivated by this slice and still require `gno update`; this is a deliberate
+  consequence of staying directory-bounded, and it must be stated in user-facing docs
+  rather than left implicit.
 
 ## Early proof point
 
@@ -340,6 +405,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R9  | Reconciliation failures degrade safely and visibly | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R11 | Active-children lookup is index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4 | — |
+| R12 | Recursive directory delete deactivates direct indexed children | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4 | Deeper descendants deferred — documented limitation |
 
 ## Test strategy
 
@@ -454,7 +520,7 @@ fs.watch event
   +-- exact eligible path --------------------+
   |                                           |
   +-- ambiguous/ineligible reported path      |
-        -> mark parent directory dirty        |
+        -> mark parent dir AND reported path dirty |
         -> coalesce by collection+directory   |
         -> enumerate direct eligible disk children
         -> query active indexed direct children
@@ -472,9 +538,17 @@ fs.watch event
 
 ## Open questions
 
-- Does the real Linux delete of an indexed eligible file report the eligible name, or
-  only an ambiguous one? Task `.1` answers this; it decides whether R3 is fixed by the
-  reconciliation path alone or needs a separate adjustment.
+- **ANSWERED by task `.1`:** a single-file delete reports the eligible name on both
+  platforms; the ambiguous case is a recursive directory delete reporting only the
+  directory. R3/R12 are written against the measured behavior.
+- **OPEN, needs the production Bun version.** Production evidence item 5 observed only
+  the `.hermes-tmp.<id>` path and never `final.md`. The Bun 1.3.11 Linux capture shows the
+  opposite for dot-prefixed temps: the dot name is filtered and only the destination is
+  reported. Both cannot be true of the same runtime, so the production host is most
+  likely on a different Bun. This does not change the fix — reconciliation covers the
+  ambiguous case either way — but it does mean we cannot yet claim the exact reported
+  Hermes scenario is reproduced. Confirm the production Bun version before asserting
+  that in the PR or changelog.
 - Symlink handling: the new direct-children enumeration must match whatever
   `FileWalker.walk` does today (`walker.ts:227-318`). Confirm parity during `.2`
   rather than inventing new behavior.

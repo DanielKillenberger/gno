@@ -1,5 +1,5 @@
 ---
-satisfies: [R1, R2, R3, R4, R5, R6, R7, R9, R10]
+satisfies: [R1, R2, R3, R4, R5, R6, R7, R9, R10, R12]
 ---
 # fn-114-reliable-watcher-reconciliation-for.3 Integrate bounded reconciliation into the watcher with lifecycle, dedupe, and diagnostics
 
@@ -27,6 +27,16 @@ collection, and hand ONE batch to `defaultSyncService.syncPaths`.
 - Add a dirty-directory structure parallel to `#pendingByCollection`, keyed by
   collection name → set of directory relPaths, with `""` for the collection root.
   Reuse the same `#timers` debounce; do not add a second timer mechanism.
+- **Queue TWO keys per ambiguous event** (this changed after task `.1`'s measurement —
+  the parent alone is provably insufficient):
+  - the reported path's PARENT — covers an atomic save reporting only a temp sibling;
+  - the reported path ITSELF — covers a recursive directory delete, which Linux reports
+    as the bare directory name (`dir1`) with no child events. Its indexed children are
+    direct children of `dir1`, so a parent-only rule never deactivates them (R12).
+  The reported path cannot be stat-ed in the deletion case, so queue both keys
+  unconditionally and let flush-time resolution sort it out: a key that is not a
+  directory returns `missing` from the enumeration seam and reconciles against the
+  indexed side only — exactly the desired deletion behavior.
 - Resolve dirty directories to concrete relPaths inside `#flushCollection`
   (`:299-435`), BEFORE the existing `matchesWalkPath` re-filter at `:332-334`, so
   reconciliation candidates pass through that live-rules recheck like any other path.
@@ -94,6 +104,12 @@ collection, and hand ONE batch to `defaultSyncService.syncPaths`.
 
 ### Key context
 
+- Task `.1` measured real watcher behavior; read its evidence before designing. Load
+  bearing facts: Linux never reports dot-prefixed names; a plain-temp atomic save reports
+  only the source; a recursive directory delete reports only the directory; post-watch
+  subdirectories are entirely invisible on Linux (no event = no hint, so reconciliation
+  cannot help — leave it as a documented limitation, do not build a rescan for it).
+
 - The batch handed to `syncPaths` must be deduplicated: the same save can produce BOTH
   an exact eligible event and an ambiguous parent event. One save must yield one batch
   and at most one `document-changed` per genuinely changed file.
@@ -120,7 +136,12 @@ collection, and hand ONE batch to `defaultSyncService.syncPaths`.
 - [ ] Ineligible files (dotfile/temp/reserved/excluded) remain unindexed even when their
       event triggered the reconciliation
 - [ ] Repeated events for the same collection + directory produce exactly ONE
-      reconciliation batch per debounce window (batch count asserted)
+      reconciliation batch per debounce window. Assert RECONCILIATION BATCH counts, never
+      delivered event counts — task `.1` measured that Bun collapses everything in one
+      watcher read batch into a single event (300 rapid writes delivered 20)
+- [ ] A recursive directory delete reporting only `dir1` deactivates `dir1`'s indexed
+      direct children (R12). Deeper descendants are NOT expected to deactivate; assert
+      that limitation explicitly so it is a known, tested boundary rather than a silent gap
 - [ ] Unrelated excluded-path noise causes no unbounded collection work
 - [ ] Unchanged neighbours pulled into a batch emit no `document-changed` and schedule
       no embedding work

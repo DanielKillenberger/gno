@@ -93,9 +93,116 @@ when this task completes; the suite is expected to be RED.
 
 
 ## Done summary
-TBD
+Replaced fn-114 task .1's invented watcher fixtures with tuples captured from a real
+recursive `fs.watch` on Bun 1.3.11 under linux 6.10.14 (tmpfs-backed container, genuine
+inotify), cross-checked on darwin 25.5.0; rebuilt the real-FS probe's scenario boundary
+around observed watcher quiescence plus a retried cookie file (no fixed sleep), split it
+into one test per scenario, and narrowed its skip to recognized
+recursive-watch-unsupported errors. `src/serve/watch-service.ts` is untouched and the
+three reconciliation cases remain RED by design.
 
+### Real Linux capture (Bun 1.3.11, linux 6.10.14-linuxkit, tmpfs)
+
+| scenario | linux | darwin 25.5.0 |
+| --- | --- | --- |
+| directCreate | `direct.md` | `direct.md` |
+| atomicCreatePlainTemp (`note.md.tmp` -> `note.md`) | `note.md.tmp` | `note.md.tmp`, `note.md` |
+| atomicCreateHiddenTemp (`.gno-tmp.abc123` -> `hidden-atomic.md`) | `hidden-atomic.md` | `.gno-tmp.abc123`, `hidden-atomic.md` |
+| atomicReplaceNested | `nested/note.md.tmp` | `nested/note.md.tmp`, `nested/note.md`, `nested/note.md` |
+| fileDeletion | `direct.md` | `direct.md` |
+| recursiveDirectoryDeletion (`rm -rf dir1` holding `a.md`,`b.md`) | `dir1` | `dir1/b.md`, `dir1/a.md`, `dir1` |
+| newSubdirectoryWrite | (nothing) | `post/d.md` |
+| caseOnlyRename | `foo.md` | `Foo.md`, `foo.md` |
+
+All eventTypes were `"rename"` on both platforms. No `null` filename was ever observed.
+Verified against a `--tmpfs /tmp:exec` mount (not the macOS bind mount) so these are real
+inotify deliveries; an earlier overlayfs run produced identical shapes.
+
+### What the data says, including where it contradicts the spec
+
+1. **bun#36328 is NOT fixed in Bun 1.3.11.** A plain-temp atomic save reports only the
+   SOURCE `note.md.tmp`; the destination `note.md` is never reported. The spec's expectation
+   holds — but only for non-dot temp names.
+2. **The previous fixture was replaying a sequence Linux never produces.** For a
+   dot-prefixed temp name the behaviour inverts, and not because the bug is fixed: Bun's
+   Linux recursive watcher never reports dot-prefixed names at all (`.hidden1`, `.gno-tmp.*`
+   and a `.`-prefixed cookie were all silent), so the source is filtered and only the
+   destination survives — which the current code already handles. Fixtures now use
+   `note.md.tmp` / `nested/note.md.tmp`.
+3. **The old deletion fixture was doubly wrong.** A single-file delete names the deleted
+   file on BOTH platforms — which is precisely why the existing green deletion test passes,
+   and it was never the production defect. The captured stale-active condition is a
+   RECURSIVE DIRECTORY DELETE: Linux reports only `dir1` and never `dir1/a.md` / `dir1/b.md`,
+   so both indexed documents stay active forever. The RED test now replays `("rename","dir1")`.
+4. **Two further defects captured, recorded not asserted** (out of scope for .1, relevant to .3):
+   - Linux does not extend recursion to subdirectories created after the watch began
+     (`newSubdirectoryWrite` reported nothing; a follow-up raw probe confirmed writes into a
+     post-watch `post/` dir are entirely invisible, and writes into a RENAMED pre-existing dir
+     are reported under the stale pre-rename path).
+   - Operations landing in one watcher read batch collapse to a single delivered event.
+     Measured: a ~5 ms separation is enough to split them; 300 rapid writes delivered 20 events.
+
+### Finding 2 — indexed side is now represented
+
+The deletion RED test uses task .2's seam via a store double exposing
+`listActiveDirectChildSourcePaths`, returning `["dir1/a.md","dir1/b.md"]` for `dir1`. It
+asserts both stale-active paths reach `syncPaths`, that `dir1` itself and the untouched
+sibling `kept.md` do not, and that the indexed side was consulted for `dirRelPath: "dir1"`.
+Nothing is scoped down and no fabricated fixture remains.
+
+### Finding 3 — new synchronization mechanism
+
+The fixed 250 ms drain is gone. Each scenario boundary is two observed steps:
+
+1. **Quiescence** — wait for a window in which the watcher reported nothing; the window
+   RESTARTS on every observed event, so it tracks real watcher activity rather than assuming
+   a settle duration.
+2. **Cookie confirmation** — write a uniquely named file into a watched directory and wait
+   for the watcher to report *that file*; a dropped cookie is retried until one is observed
+   or the bound expires. A positively observed cookie proves the watcher is live and that
+   everything it intends to deliver for the preceding operations has been delivered.
+
+A second quiescence follows the cookie so the next action starts a fresh read batch. Both
+steps are required: a cookie written immediately after the action lands in the same watcher
+read batch and destroys the action's own event (this is why a naive cookie implementation
+captured nothing on Linux), and a dot-prefixed cookie is never reported at all. Each scenario
+is its own test with its own temp root and watcher; directories a scenario writes into are
+seeded BEFORE the watcher starts, because post-watch subdirectories are not watched on Linux.
+
+### Finding 4 — skip discipline
+
+The support probe now skips only on `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`, `ENOSYS`,
+`ENOTSUP`, `EOPNOTSUPP`, or a message matching recursive/not-supported. Every other error
+(EACCES, EMFILE, ENOSPC, a watcher regression) is rethrown at module load. The capture file
+is never written when the run produced no capture.
+
+### RED command and output (intended)
+
+```
+$ bun test test/serve/watch-service.test.ts test/serve/watch-service.fs-smoke.test.ts
+(fail) ... > syncs the final eligible file when an atomic create reports only the temp name
+(fail) ... > syncs an atomically replaced existing eligible file reported only as a nested temp name
+(fail) ... > deactivates indexed children when a recursive directory delete reports only the directory
+ 21 pass
+ 3 fail
+```
+All three fail with `NO_SYNC_WITHIN_TIMEOUT`: the ambiguous event is dropped and nothing
+reaches `syncPaths`. That is the task .3 deliverable.
+
+### Gates
+
+- `bun run lint:check` — 0 warnings, 0 errors; formatting clean.
+- `bunx tsc --noEmit` — clean (rc=0).
+- `bun test test/serve/watch-service.test.ts test/serve/watch-service.fs-smoke.test.ts` — 21 pass, 3 fail (the 3 intended RED).
+- `bun test test/ingestion/ test/store/ test/serve` — 928 pass, 3 fail (same 3 intended RED; task .2 unregressed).
+- `test/serve/watch-service.fs-smoke.test.ts` — 8 pass / 0 fail on darwin 25.5.0 AND on linux 6.10.14 (Bun 1.3.11).
+- `src/serve/watch-service.ts` unmodified (`git diff HEAD -- src/serve/watch-service.ts` empty).
+- `bun test test/cli` not run: 189 pre-existing macOS failures, out of scope.
+
+Commit: 5b57fb17247e839626785f4ed025c135e3ca9a9e (test files only; the uncommitted
+`.flow/tasks/...2.md` done-summary edit and untracked `.flow/specs/fn-116-*` were left
+alone as conductor-owned state).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: fcd8de3ad465d7f4cc37f10f4b55471c74fc906c, 5b57fb17247e839626785f4ed025c135e3ca9a9e
+- Tests: bun test test/serve/watch-service.test.ts test/serve/watch-service.fs-smoke.test.ts -> 21 pass, 3 fail (INTENTIONAL RED; all three NO_SYNC_WITHIN_TIMEOUT because src/serve/watch-service.ts:203-212 drops the ambiguous event before #queueChange), bun test test/ingestion/ test/store/ test/serve -> 928 pass, 3 fail (the same 3 intended RED; task .2 unregressed), test/serve/watch-service.fs-smoke.test.ts -> 8 pass / 0 fail on darwin 25.5.0 AND on linux 6.10.14 (Bun 1.3.11), bun run lint:check -> 0 warnings, 0 errors; formatting clean, bunx tsc --noEmit -> clean (rc=0), git diff HEAD -- src/serve/watch-service.ts -> empty (product code untouched, as required), bun test test/cli NOT run: 189 pre-existing macOS failures unrelated to this task, filed as fn-116-macos-testcli-suite-fails-as-a
 - PRs:
