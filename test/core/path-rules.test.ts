@@ -33,6 +33,23 @@ describe("normalizeCollectionDirRelPath", () => {
     expect(normalizeCollectionDirRelPath("a:notes", "windows")).toBeNull();
   });
 
+  test("refuses a drive prefix hidden behind leading dot segments", () => {
+    // The drive check must run on the CANONICAL form. Testing the raw input
+    // let a leading `.` segment push the drive letter off position 0, and
+    // canonicalization then handed the caller back the accepted `C:/foo` - the
+    // exact escape the windows rule exists to refuse, reachable by prefixing
+    // two characters.
+    expect(normalizeCollectionDirRelPath("./C:/foo", "windows")).toBeNull();
+    expect(normalizeCollectionDirRelPath(".\\C:\\foo", "windows")).toBeNull();
+    expect(normalizeCollectionDirRelPath("././c:stuff", "windows")).toBeNull();
+    expect(normalizeCollectionDirRelPath("./a:", "windows")).toBeNull();
+    // Only the FIRST segment can carry the escape: a drive-shaped name deeper
+    // in the path is an ordinary directory name and stays accepted, as before.
+    expect(normalizeCollectionDirRelPath("./notes/C:/foo", "windows")).toBe(
+      "notes/C:/foo"
+    );
+  });
+
   test("refuses absolute paths, UNC prefixes, and traversal under both grammars", () => {
     for (const semantics of BOTH) {
       expect(normalizeCollectionDirRelPath("/etc", semantics)).toBeNull();

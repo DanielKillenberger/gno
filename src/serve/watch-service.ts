@@ -20,6 +20,7 @@ import {
   collectionToWalkConfig,
   defaultSyncService,
   listEligibleDirectChildren,
+  listEligibleSubtreeFiles,
   matchesWalkPath,
   resolveVanishedPathDirectory,
 } from "../ingestion";
@@ -118,9 +119,53 @@ export interface CollectionWatchCallbacks {
  * change nothing about filters, patterns, or sync options; a changed ROOT is
  * the one drift that makes the queued area meaningless rather than stale.
  */
+/**
+ * One queued EXACT path, carrying what was observed when its event arrived.
+ *
+ * Both fields are decided ONCE, in the watch callback, and are never re-derived
+ * at flush time. That is the whole point of the structure: the flush runs at
+ * least one debounce window later, behind any sync already in flight, and after
+ * an awaited classification, so a later wall clock describes a different moment
+ * than the one the event happened in.
+ */
+interface PendingPathEntry {
+  /** `Date.now()` when the event was received. */
+  observedAtMs: number;
+  /**
+   * The path was inside its application-write suppression window AT EVENT
+   * TIME.
+   *
+   * Recognizing suppression in the callback and then re-deciding it at flush
+   * time against a fresh `Date.now()` is not the same rule: a 300 ms debounce,
+   * a queued flush waiting on an in-flight sync, or a slow classification can
+   * all outlast a short suppression window, and the surviving application write
+   * then reached `syncPaths` after all - the exact feedback loop suppression
+   * exists to prevent, and a REGRESSION against the receipt-time drop it
+   * replaced. The disk is still consulted, but only for the one question it can
+   * answer: did this path survive or vanish (R4).
+   */
+  suppressed: boolean;
+}
+
 interface DirtyDirectoryEntry {
   /** `normalize(collection.path)` when the first event for this key arrived. */
   root: string;
+  /**
+   * `Date.now()` of the most recent event attributed to this directory key.
+   *
+   * Per-key rather than per-collection because `lastEventAt` must distinguish
+   * an ACCEPTED observation from a DROPPED one (R7), and a single
+   * collection-wide timestamp cannot: with two directories in one window, a
+   * later event that reconciles to nothing overwrote the earlier one, and the
+   * first directory's real work then published the DROPPED event's timestamp.
+   * The timestamp travels with the work, so only work that reaches the batch
+   * can promote it.
+   *
+   * It is also the instant this directory's candidates are judged against for
+   * suppression, so an application write resolved out of a reconciliation is
+   * decided at the same event time a named one is.
+   */
+  observedAtMs: number;
   /** Reported paths under this directory, as candidate directories. */
   hints: Set<string>;
   /**
@@ -144,6 +189,12 @@ interface DirtyDirectoryEntry {
 interface DirectoryReconciliation {
   directory: string;
   candidates: string[];
+  /**
+   * The observation time of the queued work that asked for this
+   * reconciliation. Promoted to `lastEventAt` only if this reconciliation
+   * actually contributed a path to the final batch.
+   */
+  observedAtMs: number;
   /**
    * The disk enumeration itself failed (unreadable directory). Distinct from a
    * store failure: an unreadable directory must not be re-interpreted as its
@@ -233,24 +284,49 @@ function changedPaths(
  * (`files` omitted, `filesErrored > 0`), the failure cannot be attributed, so
  * the caller fails closed and treats every contributing directory as failed
  * rather than claiming success it cannot evidence.
+ *
+ * The presence of `files` is NOT on its own evidence that every reported
+ * failure is attributable. `syncPaths` reports collection-level failures under
+ * synthetic relPaths that name no file at all - `"(typed edge backfill)"`,
+ * `"(typed edge projection)"` - and the typed-edge projection can also fail
+ * against a BACKLINK document that was never in this batch. None of those
+ * matches a reconciliation candidate, so treating them as attributable let
+ * every contributing directory report a clean completion while the sync had in
+ * fact failed at the collection level. Any error path the batch does not OWN is
+ * therefore global: attribution collapses and every contributing directory
+ * fails closed, which is the same conservative rule already applied when
+ * `files` is missing.
  */
-function syncErrorAttribution(result: CollectionSyncResult): {
+function syncErrorAttribution(
+  result: CollectionSyncResult,
+  batched: ReadonlySet<string>
+): {
   paths: ReadonlySet<string>;
   attributable: boolean;
 } {
   const paths = new Set<string>();
+  let unownedFailure = false;
+  const record = (relPath: string): void => {
+    paths.add(relPath);
+    if (!batched.has(relPath)) {
+      unownedFailure = true;
+    }
+  };
   for (const error of result.errors) {
-    paths.add(error.relPath);
+    record(error.relPath);
   }
   if (result.files) {
     for (const file of result.files) {
       if (file.status === "error") {
-        paths.add(file.relPath);
+        record(file.relPath);
       }
     }
-    return { paths, attributable: true };
+    return { paths, attributable: !unownedFailure };
   }
-  return { paths, attributable: result.filesErrored === 0 };
+  return {
+    paths,
+    attributable: result.filesErrored === 0 && !unownedFailure,
+  };
 }
 
 export class CollectionWatchService {
@@ -264,7 +340,10 @@ export class CollectionWatchService {
   readonly #watchRoots = new Map<string, string>();
   readonly #collectionGenerations = new Map<string, number>();
   readonly #collectionFingerprints = new Map<string, string>();
-  readonly #pendingByCollection = new Map<string, Set<string>>();
+  readonly #pendingByCollection = new Map<
+    string,
+    Map<string, PendingPathEntry>
+  >();
   readonly #dirtyByCollection = new Map<
     string,
     Map<string, DirtyDirectoryEntry>
@@ -273,18 +352,17 @@ export class CollectionWatchService {
   readonly #syncing = new Set<string>();
   readonly #inFlightSyncs = new Set<Promise<void>>();
   readonly #suppressedPaths = new Map<string, number>();
-  /**
-   * Observation timestamps for events that are not yet known to be real
-   * changes, keyed by collection and promoted to `#lastEventAt` only once a
-   * flush turns them into actual work (see `#promoteProvisionalEvent`).
-   */
-  readonly #provisionalEventAt = new Map<string, string>();
   readonly #watchFactory: typeof watch;
   readonly #resolveVanishedPath: typeof resolveVanishedPathDirectory;
   readonly #failedCollections = new Map<string, string>();
   #nextCollectionGeneration = 0;
   #disposed = false;
-  #lastEventAt: string | null = null;
+  /**
+   * Held as epoch milliseconds, formatted only when state is reported: every
+   * observation this class compares or promotes is an event-time reading, and
+   * comparing them as numbers keeps that arithmetic away from string ordering.
+   */
+  #lastEventAtMs: number | null = null;
   #lastSyncAt: string | null = null;
 
   constructor(options: CollectionWatchServiceOptions) {
@@ -337,7 +415,6 @@ export class CollectionWatchService {
         // A removed collection or a moved root must never flush queued
         // reconciliation work against the new configuration (R6).
         this.#dirtyByCollection.delete(collectionName);
-        this.#provisionalEventAt.delete(collectionName);
         const timer = this.#timers.get(collectionName);
         if (timer) {
           clearTimeout(timer);
@@ -399,6 +476,7 @@ export class CollectionWatchService {
             ) {
               return;
             }
+            const observedAtMs = Date.now();
             if (
               matchesWalkPath(
                 relPath,
@@ -406,31 +484,47 @@ export class CollectionWatchService {
               )
             ) {
               // Exact-path fast path: no directory work.
-              if (this.#isSuppressed(join(watchedRoot, relPath))) {
-                // Suppression exists so GNO's own writes do not feed back into
-                // the watcher as if they were external changes. It must NOT
-                // also swallow DELETION evidence: a suppressed path that has
-                // vanished from disk is not an application write - the app
-                // wrote it, it is gone now, and on Bun 1.3.14 that single
-                // arbitrary child may be the only report a recursive directory
-                // delete ever makes. Dropping it here left every document
-                // beneath the removed directory active and searchable forever.
-                //
-                // So the event is queued for CLASSIFICATION either way, and the
-                // sync-side guarantee is kept where the disk can actually be
-                // consulted: `#widenVanishedExactPaths` drops a suppressed path
-                // that still EXISTS before it can reach `syncPaths`. The
-                // timestamp stays provisional until that same flush proves the
-                // event was a real change.
-                this.#recordProvisionalEvent(collection.name);
-                this.#queueChange(collection.name, relPath);
-                return;
+              //
+              // Suppression exists so GNO's own writes do not feed back into
+              // the watcher as if they were external changes. It must NOT also
+              // swallow DELETION evidence: a suppressed path that has vanished
+              // from disk is not an application write - the app wrote it, it is
+              // gone now, and on Bun 1.3.14 that single arbitrary child may be
+              // the only report a recursive directory delete ever makes.
+              // Dropping it here left every document beneath the removed
+              // directory active and searchable forever.
+              //
+              // So the event is queued for CLASSIFICATION either way, and the
+              // sync-side guarantee is kept where the disk can actually be
+              // consulted: `#widenVanishedExactPaths` drops a suppressed path
+              // that still EXISTS before it can reach `syncPaths`.
+              //
+              // What is decided HERE, once, is whether the event happened
+              // inside the suppression window - the fact the flush would
+              // otherwise have to re-derive from a clock that has since moved
+              // (see `PendingPathEntry.suppressed`).
+              const suppressed = this.#isSuppressedAt(
+                join(watchedRoot, relPath),
+                observedAtMs
+              );
+              if (!suppressed) {
+                this.#promoteObservation(observedAtMs);
               }
-              this.#lastEventAt = new Date().toISOString();
-              this.#queueChange(collection.name, relPath);
+              // A suppressed path's observation stays unpromoted until the same
+              // flush proves it was a real change (a vanished one) rather than
+              // the application's own surviving write.
+              this.#queueChange(collection.name, relPath, {
+                observedAtMs,
+                suppressed,
+              });
               return;
             }
-            this.#queueDirtyDirectory(currentCollection, watchedRoot, relPath);
+            this.#queueDirtyDirectory(
+              currentCollection,
+              watchedRoot,
+              relPath,
+              observedAtMs
+            );
           }
         );
         this.#watchers.set(collection.name, watcher);
@@ -449,10 +543,17 @@ export class CollectionWatchService {
     this.#suppressedPaths.set(normalize(absPath), Date.now() + ms);
   }
 
-  /** Is this absolute path currently inside its application-write window? */
-  #isSuppressed(absPath: string): boolean {
+  /**
+   * Was this absolute path inside its application-write window AT `atMs`?
+   *
+   * Always asked about an OBSERVATION time, never about "now". The window is
+   * short (5 s by default) and the flush is at minimum a debounce window later,
+   * so evaluating it against a fresh clock silently answers a different
+   * question than the one the event asked (see `PendingPathEntry.suppressed`).
+   */
+  #isSuppressedAt(absPath: string, atMs: number): boolean {
     const suppressedUntil = this.#suppressedPaths.get(normalize(absPath));
-    return suppressedUntil !== undefined && suppressedUntil > Date.now();
+    return suppressedUntil !== undefined && suppressedUntil > atMs;
   }
 
   /**
@@ -473,9 +574,18 @@ export class CollectionWatchService {
    * normalize) stays suppressed rather than being resynced on the strength of a
    * failed stat - the same rule `#widenVanishedExactPaths` applies to exact
    * paths.
+   *
+   * The suppression half of the decision is taken against `observedAtMs` - when
+   * the event that produced this candidate was seen - so a window that has
+   * since expired cannot let an application write through. Only the
+   * survived-vs-vanished half is asked of the disk.
    */
-  async #isSuppressedSurvivor(root: string, relPath: string): Promise<boolean> {
-    if (!this.#isSuppressed(join(root, relPath))) {
+  async #isSuppressedSurvivor(
+    root: string,
+    relPath: string,
+    observedAtMs: number
+  ): Promise<boolean> {
+    if (!this.#isSuppressedAt(join(root, relPath), observedAtMs)) {
       return false;
     }
     const outcome = await this.#resolveVanishedPath(relPath, root);
@@ -492,14 +602,19 @@ export class CollectionWatchService {
    */
   async #dropSuppressedSurvivors(
     root: string,
-    relPaths: string[]
+    relPaths: string[],
+    observedAtMs: number
   ): Promise<string[]> {
-    if (!relPaths.some((relPath) => this.#isSuppressed(join(root, relPath)))) {
+    if (
+      !relPaths.some((relPath) =>
+        this.#isSuppressedAt(join(root, relPath), observedAtMs)
+      )
+    ) {
       return relPaths;
     }
     const kept: string[] = [];
     for (const relPath of relPaths) {
-      if (!(await this.#isSuppressedSurvivor(root, relPath))) {
+      if (!(await this.#isSuppressedSurvivor(root, relPath, observedAtMs))) {
         kept.push(relPath);
       }
     }
@@ -507,44 +622,34 @@ export class CollectionWatchService {
   }
 
   /**
-   * Record WHEN an event was observed without yet claiming it was a real
-   * change.
+   * Publish one observation as the watcher's last observed change.
    *
-   * Two kinds of event reach the queues without that being known yet:
+   * The OBSERVATION time is published, not the flush time - `lastEventAt`
+   * answers "when did the filesystem last change", and the debounce window
+   * must not show up as latency in it.
+   *
+   * Two kinds of event reach the queues without being known to be real changes
+   * yet, so their observations are held on the queued work and only reach here
+   * once that work has produced a batch:
    *
    * - an AMBIGUOUS event, whose reported name is ineligible. `note.md.tmp` (a
    *   real atomic save reported under its temp name) and `cover.png` (a file
-   *   the collection would never index) are indistinguishable at this point -
+   *   the collection would never index) are indistinguishable at receipt -
    *   filesystem-free rules cannot tell them apart, which is exactly why the
    *   reconciliation route exists.
    * - a SUPPRESSED exact path, which is an application write unless it turns
    *   out to have vanished.
    *
-   * Both are held here and promoted by `#promoteProvisionalEvent` once the
-   * flush has produced actual work for the collection. That is what
-   * distinguishes a dropped event (excluded, or ineligible with nothing to
-   * reconcile) from an accepted one: the former never yields a batch and never
-   * advances `lastEventAt`, while an atomic save reported only under its temp
-   * name now correctly stops `GET /api/status` from claiming the watcher has
-   * seen nothing.
+   * That is what distinguishes a dropped event (excluded, or ineligible with
+   * nothing to reconcile) from an accepted one - and it only works because
+   * every observation travels with the SPECIFIC path or directory it was made
+   * for. A single per-collection timestamp cannot answer this: two directories
+   * in one window share it, so a later event that reconciled to nothing was
+   * published on the strength of the earlier directory's work.
    */
-  #recordProvisionalEvent(collectionName: string): void {
-    this.#provisionalEventAt.set(collectionName, new Date().toISOString());
-  }
-
-  /**
-   * Promote a drained provisional timestamp now that the flush has real work.
-   *
-   * The OBSERVATION time is published, not the flush time - `lastEventAt`
-   * answers "when did the filesystem last change", and the debounce window
-   * must not show up as latency in it.
-   */
-  #promoteProvisionalEvent(observedAt: string | null): void {
-    if (observedAt === null) {
-      return;
-    }
-    if (this.#lastEventAt === null || observedAt > this.#lastEventAt) {
-      this.#lastEventAt = observedAt;
+  #promoteObservation(observedAtMs: number): void {
+    if (this.#lastEventAtMs === null || observedAtMs > this.#lastEventAtMs) {
+      this.#lastEventAtMs = observedAtMs;
     }
   }
 
@@ -566,7 +671,6 @@ export class CollectionWatchService {
     this.#collectionFingerprints.clear();
     this.#collections = [];
     this.#pendingByCollection.clear();
-    this.#provisionalEventAt.clear();
     this.#dirtyByCollection.clear();
     await Promise.allSettled(this.#inFlightSyncs);
     this.#syncing.clear();
@@ -592,18 +696,41 @@ export class CollectionWatchService {
         ]),
       ],
       syncingCollections: [...this.#syncing],
-      lastEventAt: this.#lastEventAt,
+      lastEventAt:
+        this.#lastEventAtMs === null
+          ? null
+          : new Date(this.#lastEventAtMs).toISOString(),
       lastSyncAt: this.#lastSyncAt,
     };
   }
 
-  #queueChange(collectionName: string, relPath: string): void {
+  #queueChange(
+    collectionName: string,
+    relPath: string,
+    observation: PendingPathEntry
+  ): void {
     if (this.#disposed) {
       return;
     }
     const pending =
-      this.#pendingByCollection.get(collectionName) ?? new Set<string>();
-    pending.add(relPath);
+      this.#pendingByCollection.get(collectionName) ??
+      new Map<string, PendingPathEntry>();
+    const existing = pending.get(relPath);
+    pending.set(
+      relPath,
+      existing
+        ? {
+            observedAtMs: Math.max(
+              existing.observedAtMs,
+              observation.observedAtMs
+            ),
+            // A path observed at least once OUTSIDE its suppression window is
+            // an external change: the application's write cannot account for
+            // every event naming it, so it must still be synced.
+            suppressed: existing.suppressed && observation.suppressed,
+          }
+        : observation
+    );
     this.#pendingByCollection.set(collectionName, pending);
     this.#armFlushTimer(collectionName);
   }
@@ -669,7 +796,8 @@ export class CollectionWatchService {
   #queueDirtyDirectory(
     collection: Collection,
     watchedRoot: string,
-    relPath: string
+    relPath: string,
+    observedAtMs: number
   ): void {
     if (this.#disposed) {
       return;
@@ -705,18 +833,24 @@ export class CollectionWatchService {
       // `subtree` starts false: an ineligible reported path is not evidence
       // that its PARENT directory went anywhere, and the hint machinery below
       // is what discovers a removed directory on this route.
-      entry = { root: watchedRoot, hints: new Set(), subtree: false };
+      entry = {
+        root: watchedRoot,
+        observedAtMs,
+        hints: new Set(),
+        subtree: false,
+      };
       dirty.set(directory, entry);
+    } else {
+      // The event was ACCEPTED for reconciliation, so it is a real observation
+      // of THIS directory - but not yet demonstrably a real change (see
+      // `#promoteObservation`). Every path that returned above was DROPPED and
+      // still contributes no timestamp at all, to this key or any other.
+      entry.observedAtMs = Math.max(entry.observedAtMs, observedAtMs);
     }
     // An excluded or dot-prefixed reported path is not retained: a full sync
     // would never walk it either, so it is covered by the directory alone.
     this.#addDirectoryHint(entry, collection, reported);
     this.#dirtyByCollection.set(collection.name, dirty);
-    // The event was ACCEPTED for reconciliation, so it is a real observation -
-    // but not yet demonstrably a real change (see `#recordProvisionalEvent`).
-    // Every path that returned above was DROPPED and still contributes no
-    // timestamp at all.
-    this.#recordProvisionalEvent(collection.name);
     this.#armFlushTimer(collection.name);
   }
 
@@ -781,20 +915,21 @@ export class CollectionWatchService {
     if (!collection) {
       this.#pendingByCollection.delete(collectionName);
       this.#dirtyByCollection.delete(collectionName);
-      this.#provisionalEventAt.delete(collectionName);
       return;
     }
 
-    let exactPaths = pending ? [...pending] : [];
+    // Every observation this window made travels with the path or directory it
+    // was made for, so a batch that is later dropped takes its unpromoted
+    // observations with it rather than leaking into the next window.
+    let exactPaths = pending
+      ? new Map<string, PendingPathEntry>(pending)
+      : new Map<string, PendingPathEntry>();
     let dirtyEntries = dirty ? [...dirty.entries()] : [];
-    // Drained with the queues it belongs to: a batch that is later dropped
-    // takes its unpromoted observation with it rather than leaking into the
-    // next window.
-    let provisionalEventAt =
-      this.#provisionalEventAt.get(collectionName) ?? null;
-    this.#provisionalEventAt.delete(collectionName);
     let syncGeneration = this.#collectionGenerations.get(collectionName) ?? 0;
-    this.#pendingByCollection.set(collectionName, new Set<string>());
+    this.#pendingByCollection.set(
+      collectionName,
+      new Map<string, PendingPathEntry>()
+    );
     this.#dirtyByCollection.set(
       collectionName,
       new Map<string, DirtyDirectoryEntry>()
@@ -856,8 +991,7 @@ export class CollectionWatchService {
       outstanding = [];
       reconciliations = [];
       dirtyEntries = [];
-      exactPaths = [];
-      provisionalEventAt = null;
+      exactPaths = new Map();
       if (!liveCollection) {
         // The collection is gone: there is nothing left to recover against, so
         // the queues are discarded rather than reflushed.
@@ -869,7 +1003,7 @@ export class CollectionWatchService {
     };
 
     try {
-      if (exactPaths.length > 0) {
+      if (exactPaths.size > 0) {
         const widened = await this.#widenVanishedExactPaths(
           collection,
           exactPaths,
@@ -904,19 +1038,29 @@ export class CollectionWatchService {
       // the live-rules recheck, so they are filtered exactly like exact paths.
       relPaths = [
         ...new Set([
-          ...exactPaths,
+          ...exactPaths.keys(),
           ...reconciliations.flatMap((entry) => entry.candidates),
         ]),
       ].filter((relPath) =>
         matchesWalkPath(relPath, collectionToWalkConfig(collection, 0))
       );
       const batched = new Set(relPaths);
-      if (relPaths.length > 0) {
-        // The batch is the proof: whatever the provisional events named, they
-        // produced real work against the live rules, so the observation is
-        // published. An empty batch leaves `lastEventAt` untouched - that is
-        // the dropped/ineligible case, and the timestamp was already drained.
-        this.#promoteProvisionalEvent(provisionalEventAt);
+      // The batch is the proof, and it is proof only for the work that is
+      // actually IN it. Each surviving exact path publishes its own
+      // observation, and each reconciliation publishes its directory's - so an
+      // event whose reconciliation yielded nothing advances nothing, even when
+      // an unrelated directory in the same window produced plenty. Anything not
+      // batched leaves `lastEventAt` untouched: that is the dropped case, and
+      // its observation is discarded with the drained queue.
+      for (const [relPath, observation] of exactPaths) {
+        if (batched.has(relPath)) {
+          this.#promoteObservation(observation.observedAtMs);
+        }
+      }
+      for (const entry of reconciliations) {
+        if (entry.candidates.some((relPath) => batched.has(relPath))) {
+          this.#promoteObservation(entry.observedAtMs);
+        }
       }
       // A reconciliation that put nothing into the batch cannot be affected by
       // the sync stage, so its outcome is already known: report the successful
@@ -1106,7 +1250,13 @@ export class CollectionWatchService {
    * Attribution is PER DIRECTORY, not per batch: several directories share one
    * `syncPaths` call, and one directory's `EACCES` says nothing about another's
    * paths. A directory fails only when a path IT contributed errored; its
-   * neighbours in the same batch still complete normally. The exactly-one
+   * neighbours in the same batch still complete normally. That split holds only
+   * while every reported failure BELONGS to a batched path - a
+   * collection-level failure (`"(typed edge backfill)"`, a projection error
+   * against an out-of-batch backlink document) belongs to none of them, and
+   * `syncErrorAttribution` then reports the whole result unattributable so
+   * every contributing directory fails closed instead of reporting a
+   * completion the sync does not support. The exactly-one
    * terminal outcome invariant is preserved by marking `failureReported` before
    * emitting, and by routing the survivors through `#completeReconciliations`.
    */
@@ -1116,7 +1266,7 @@ export class CollectionWatchService {
     batched: ReadonlySet<string>,
     result: CollectionSyncResult
   ): void {
-    const attribution = syncErrorAttribution(result);
+    const attribution = syncErrorAttribution(result, batched);
     const completed: DirectoryReconciliation[] = [];
     for (const entry of entries) {
       if (entry.failureReported) {
@@ -1229,16 +1379,16 @@ export class CollectionWatchService {
    */
   async #widenVanishedExactPaths(
     collection: Collection,
-    exactPaths: string[],
+    exactPaths: Map<string, PendingPathEntry>,
     dirtyEntries: Array<[string, DirtyDirectoryEntry]>
   ): Promise<{
     dirtyEntries: Array<[string, DirtyDirectoryEntry]>;
-    exactPaths: string[];
+    exactPaths: Map<string, PendingPathEntry>;
   }> {
     const root = normalize(collection.path);
     const byDirectory = new Map(dirtyEntries);
     const suppressedSurvivors = new Set<string>();
-    for (const relPath of exactPaths) {
+    for (const [relPath, pending] of exactPaths) {
       if (this.#disposed) {
         break;
       }
@@ -1247,10 +1397,15 @@ export class CollectionWatchService {
         // `present` is the hot path; `error` fails closed - an unreadable disk
         // is never read as "the file is gone", and a suppressed path is kept
         // suppressed rather than resynced on the strength of a failed stat.
-        // This is the same rule as `#isSuppressedSurvivor`, applied inline
-        // because the outcome this route already resolved would otherwise be
-        // stat-ed twice; the two must stay in agreement.
-        if (this.#isSuppressed(join(root, relPath))) {
+        //
+        // The suppression half of that decision is the one taken WHEN THE EVENT
+        // ARRIVED. Re-asking `#isSuppressed` here compared the window against
+        // whatever the clock said by the time the flush ran - after the 300 ms
+        // debounce, after any sync this flush queued behind, after the awaited
+        // classification above - so a window that expired in between let the
+        // application's own surviving write through to `syncPaths`, which the
+        // receipt-time drop this route replaced had always prevented.
+        if (pending.suppressed) {
           suppressedSurvivors.add(relPath);
         }
         continue;
@@ -1261,9 +1416,14 @@ export class CollectionWatchService {
         // one removed-directory sample in this window is enough, and a second
         // path that only says "my parent survived" must not clear it.
         entry.subtree ||= outcome.directoryRemoved;
+        entry.observedAtMs = Math.max(entry.observedAtMs, pending.observedAtMs);
       } else {
         entry = {
           root,
+          // The widened area inherits the vanished path's OWN observation, so
+          // whatever it goes on to deactivate publishes the moment that path
+          // was seen rather than the moment some other event in the window was.
+          observedAtMs: pending.observedAtMs,
           hints: new Set<string>(),
           subtree: outcome.directoryRemoved,
         };
@@ -1279,13 +1439,12 @@ export class CollectionWatchService {
         this.#addDirectoryHint(entry, collection, relPath);
       }
     }
-    return {
-      dirtyEntries: [...byDirectory],
-      exactPaths:
-        suppressedSurvivors.size === 0
-          ? exactPaths
-          : exactPaths.filter((relPath) => !suppressedSurvivors.has(relPath)),
-    };
+    if (suppressedSurvivors.size > 0) {
+      for (const relPath of suppressedSurvivors) {
+        exactPaths.delete(relPath);
+      }
+    }
+    return { dirtyEntries: [...byDirectory], exactPaths };
   }
 
   /**
@@ -1468,11 +1627,21 @@ export class CollectionWatchService {
       }
     }
 
+    /**
+     * `observedAtMs` is the observation of the QUEUED ENTRY that asked for this
+     * directory, so the work carries the moment it was seen through to
+     * `lastEventAt` and to the suppression decision for its candidates. A
+     * directory two entries both ask for keeps the later observation; the
+     * suppression decision belongs to the first, which is exact enough because
+     * every entry in one flush was observed inside the same debounce window.
+     */
     const reconcile = async (
-      directory: string
+      directory: string,
+      observedAtMs: number
     ): Promise<DirectoryReconciliation> => {
       const cached = resolved.get(directory);
       if (cached) {
+        cached.observedAtMs = Math.max(cached.observedAtMs, observedAtMs);
         return cached;
       }
       const outcome = this.#isReconcilableDirectory(directory, collection)
@@ -1482,11 +1651,13 @@ export class CollectionWatchService {
             directory,
             indexedFor(directory),
             descendantsFor,
-            subtreeIntent.has(directory)
+            subtreeIntent.has(directory),
+            observedAtMs
           )
         : {
             directory,
             candidates: [],
+            observedAtMs,
             enumerationFailed: false,
             // Never started, so it owes no terminal outcome.
             started: false,
@@ -1538,7 +1709,7 @@ export class CollectionWatchService {
           needsDirectory = true;
           continue;
         }
-        const hintOutcome = await reconcile(hint);
+        const hintOutcome = await reconcile(hint, entry.observedAtMs);
         if (
           hintOutcome.candidates.length === 0 &&
           !hintOutcome.enumerationFailed
@@ -1549,7 +1720,7 @@ export class CollectionWatchService {
         }
       }
       if (needsDirectory && !this.#disposed) {
-        await reconcile(directory);
+        await reconcile(directory, entry.observedAtMs);
       }
     }
 
@@ -1575,7 +1746,8 @@ export class CollectionWatchService {
     descendantsFor: (
       directory: string
     ) => Promise<StoreResult<string[]> | null>,
-    subtreeIntent: boolean
+    subtreeIntent: boolean,
+    observedAtMs: number
   ): Promise<DirectoryReconciliation> {
     this.#notifyDiagnostic(() =>
       this.#callbacks?.onReconcileStart?.({
@@ -1584,7 +1756,28 @@ export class CollectionWatchService {
       })
     );
 
-    const disk = await listEligibleDirectChildren(directory, walkConfig);
+    // A directory carrying REMOVAL INTENT reads the disk recursively, because
+    // the disk may disagree with that intent: the directory can have been
+    // RECREATED between classification and here. When it has, a direct-children
+    // read describes only the top of the recreated tree, so a file written into
+    // a recreated NESTED subdirectory appears in neither half of the union -
+    // not on the enumerated disk side, not in the old indexed-descendant set -
+    // and on Linux no further event ever names it (bun#15390/#15939: writes
+    // inside a directory created after the watch began are not reported), so it
+    // stays unindexed until a manual `gno update`. Genuinely missing
+    // directories cost nothing extra: the enumeration returns `missing` at the
+    // first `readdir` either way.
+    //
+    // The collection ROOT is deliberately excluded. Recursing from `""` is a
+    // whole-collection walk, which is the one thing directory reconciliation
+    // exists not to do; a recreated root is a whole-collection event and
+    // belongs to `gno update`. Its indexed side still deactivates everything
+    // (see `#listActiveCollectionPaths` below).
+    const enumerate =
+      subtreeIntent && directory !== ""
+        ? listEligibleSubtreeFiles
+        : listEligibleDirectChildren;
+    const disk = await enumerate(directory, walkConfig);
     if (disk.status === "error") {
       // Fail closed: an unreadable directory must never be read as an
       // authoritative empty directory, or live documents would deactivate.
@@ -1599,6 +1792,7 @@ export class CollectionWatchService {
       return {
         directory,
         candidates: [],
+        observedAtMs,
         enumerationFailed: true,
         started: true,
         failureReported: true,
@@ -1662,7 +1856,12 @@ export class CollectionWatchService {
       // directory: an application-originated write inside a reconciled
       // directory must stay suppressed - but only while it still EXISTS. See
       // `#isSuppressedSurvivor`.
-      candidates: await this.#dropSuppressedSurvivors(root, [...candidates]),
+      candidates: await this.#dropSuppressedSurvivors(
+        root,
+        [...candidates],
+        observedAtMs
+      ),
+      observedAtMs,
       enumerationFailed: false,
       started: true,
       // A store failure is already a reported terminal outcome for this

@@ -7,6 +7,7 @@ import type { WalkConfig } from "../../src/ingestion/types";
 
 import {
   listEligibleDirectChildren,
+  listEligibleSubtreeFiles,
   resolveVanishedPathDirectory,
 } from "../../src/ingestion/directory-children";
 import { FileWalker } from "../../src/ingestion/walker";
@@ -275,6 +276,76 @@ describe("listEligibleDirectChildren", () => {
     // returned - not even one resolving to a regular file inside the root.
     expect(walkedRootChildren).toEqual(["real.md"]);
     expect(outcome).toEqual({ status: "present", relPaths: ["real.md"] });
+  });
+});
+
+/**
+ * The recursive form used for a directory carrying REMOVAL INTENT that turned
+ * out to exist again. Same eligibility, same discovery parity, same
+ * containment - it only descends.
+ */
+describe("listEligibleSubtreeFiles", () => {
+  let base = "";
+  let root = "";
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), "gno-dir-subtree-"));
+    root = join(base, "root");
+    await mkdir(root);
+  });
+
+  afterEach(async () => {
+    await safeRm(base);
+  });
+
+  test("returns eligible files at every depth beneath the directory", async () => {
+    await mkdir(join(root, "dir1", "sub", "deeper"), { recursive: true });
+    await writeFile(join(root, "dir1", "top.md"), "a");
+    await writeFile(join(root, "dir1", "sub", "mid.md"), "b");
+    await writeFile(join(root, "dir1", "sub", "deeper", "deep.md"), "c");
+    // Outside the enumerated directory: bounded means bounded.
+    await writeFile(join(root, "outside.md"), "d");
+
+    expect(await listEligibleSubtreeFiles("dir1", walkConfig(root))).toEqual({
+      status: "present",
+      relPaths: ["dir1/sub/deeper/deep.md", "dir1/sub/mid.md", "dir1/top.md"],
+    });
+  });
+
+  test("keeps walker discovery parity while descending", async () => {
+    await mkdir(join(root, "dir1", ".hidden"), { recursive: true });
+    await mkdir(join(root, "dir1", "sub"), { recursive: true });
+    await writeFile(join(root, "dir1", ".hidden", "secret.md"), "a");
+    await writeFile(join(root, "dir1", "sub", ".dotfile.md"), "b");
+    await writeFile(join(root, "dir1", "sub", "kept.md"), "c");
+    await writeFile(join(root, "escape.md"), "d");
+    // A symlinked directory is neither descended into nor listed, which is both
+    // walker parity and what makes the recursion loop-free.
+    await symlink(root, join(root, "dir1", "loop"), "dir");
+
+    expect(await listEligibleSubtreeFiles("dir1", walkConfig(root))).toEqual({
+      status: "present",
+      relPaths: ["dir1/sub/kept.md"],
+    });
+  });
+
+  test("reports a genuinely absent directory as missing", async () => {
+    expect(await listEligibleSubtreeFiles("gone", walkConfig(root))).toEqual({
+      status: "missing",
+    });
+  });
+
+  test("applies the collection's eligibility rules to nested candidates", async () => {
+    await mkdir(join(root, "dir1", "sub"), { recursive: true });
+    await writeFile(join(root, "dir1", "sub", "kept.md"), "a");
+    await writeFile(join(root, "dir1", "sub", "image.png"), "b");
+
+    expect(
+      await listEligibleSubtreeFiles(
+        "dir1",
+        walkConfig(root, { pattern: "**/*.md" })
+      )
+    ).toEqual({ status: "present", relPaths: ["dir1/sub/kept.md"] });
   });
 });
 

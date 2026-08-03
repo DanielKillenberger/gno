@@ -1027,6 +1027,13 @@ interface ReconcileHarnessOptions {
   scheduler?: { notifySyncComplete: (relPaths: string[]) => void } | null;
   syncResult?: (relPaths: string[]) => CollectionSyncResult;
   /**
+   * Awaited INSIDE `syncPaths`, before it resolves. That is how a test holds a
+   * flush open and drives the "a later flush waited behind an in-flight sync"
+   * window deterministically - the wait is released by an explicit signal, not
+   * by a clock.
+   */
+  syncGate?: (relPaths: string[]) => Promise<void>;
+  /**
    * Make EVERY fn-114 diagnostic observer throw after recording its event, so
    * a test can assert that a broken consumer cannot change watcher or flush
    * control flow (R7/R9).
@@ -1068,6 +1075,7 @@ function createReconcileHarness(
 
   defaultSyncService.syncPaths = (async (_collection, _store, relPaths) => {
     batches.push([...relPaths]);
+    await options.syncGate?.([...relPaths]);
     return (
       options.syncResult?.(relPaths) ??
       createSyncResult({
@@ -3494,7 +3502,11 @@ describe("CollectionWatchService suppression and observed-event visibility", () 
         // Dropped: a dot-prefixed area is never walked, so nothing is queued
         // and nothing was meaningfully observed.
         harness.emit([["change", ".obsidian/.sync.lock"]]);
-        await Bun.sleep(350);
+        // The drop is SYNCHRONOUS - the watch callback refuses the area before
+        // it queues anything - so the queue state is asserted immediately.
+        // Waiting out a debounce window here would have proved the same thing
+        // by wall clock, which is exactly what R8 forbids.
+        expect(harness.service.getState().queuedCollections).toEqual([]);
         expect(harness.batches).toEqual([]);
         expect(harness.service.getState().lastEventAt).toBeNull();
 
@@ -3512,6 +3524,309 @@ describe("CollectionWatchService suppression and observed-event visibility", () 
         expect(new Date(lastEventAt ?? 0).getTime()).toBeGreaterThanOrEqual(
           new Date(before).getTime()
         );
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * Advance past the current millisecond so two observations taken either side of
+ * this call are strictly ordered.
+ *
+ * This is NOT a sleep standing in for synchronization (R8): it waits on an
+ * observable signal - the clock reading actually changing - and returns the
+ * instant it does. Nothing below is timed against a duration.
+ */
+async function nextObservableMs(): Promise<number> {
+  const start = Date.now();
+  while (Date.now() === start) {
+    await Promise.resolve();
+  }
+  return Date.now();
+}
+
+/**
+ * Suppression answers "was this GNO's own write?", which is a question about
+ * the moment the event happened. Recognizing it when the callback runs and then
+ * re-deciding it at flush time against a fresh clock is a different question,
+ * and the flush is always later: a 300 ms debounce, a queued flush waiting on an
+ * in-flight sync, and an awaited classification all sit in between.
+ */
+describe("CollectionWatchService suppression decided at event time", () => {
+  test(
+    "suppresses a surviving write whose window expires before the flush",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-expiry-"));
+      await Bun.write(join(root, "note.md"), "# written by gno\n");
+      const { store } = createSubtreeStore({ direct: { "": ["note.md"] } });
+
+      let expireWindow: (() => void) | null = null;
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        // Classification is an awaited point INSIDE the flush, so expiring the
+        // window here reaches exactly the state a slow stat, a long debounce,
+        // or a queued flush would have produced - deterministically.
+        resolveVanishedPath: async (): Promise<VanishedPathOutcome> => {
+          expireWindow?.();
+          return { status: "present" };
+        },
+      });
+      expireWindow = () => harness.service.suppress(join(root, "note.md"), 0);
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "note.md"), 5_000);
+        // Suppressed AT EVENT TIME, and still on disk when the flush looks.
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // Re-deciding suppression against the flush-time clock fed GNO's own
+        // write straight back into `syncPaths`, which the receipt-time drop
+        // this route replaced had always prevented.
+        expect(harness.batches).toEqual([]);
+        expect(harness.service.getState().lastEventAt).toBeNull();
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "suppresses a surviving write whose flush waited behind an in-flight sync",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-queued-"));
+      await mkdir(join(root, "other"), { recursive: true });
+      await Bun.write(join(root, "other", "real.md"), "# unrelated\n");
+      await Bun.write(join(root, "note.md"), "# written by gno\n");
+      const { store } = createSubtreeStore({});
+
+      const syncStarted = Promise.withResolvers<void>();
+      const heldSync = Promise.withResolvers<void>();
+      let gated = false;
+
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        syncGate: async () => {
+          if (gated) {
+            return;
+          }
+          gated = true;
+          syncStarted.resolve();
+          await heldSync.promise;
+        },
+      });
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "note.md"), 5_000);
+        // An unrelated directory's flush claims the collection and stalls.
+        harness.emit([["rename", "other/x.tmp"]]);
+        await syncStarted.promise;
+
+        // Queued behind that sync: this flush cannot even start until it
+        // resolves, and the suppression window expires while it waits.
+        harness.emit([["change", "note.md"]]);
+        harness.service.suppress(join(root, "note.md"), 0);
+
+        const settled = harness.settle();
+        heldSync.resolve();
+        expect(await settled).toBe("settled");
+
+        // The application's own write never reaches `syncPaths`, however long
+        // the flush was delayed.
+        expect(harness.batches).toEqual([["other/real.md"]]);
+      } finally {
+        heldSync.resolve();
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * `lastEventAt` exists to separate an ACCEPTED observation from a DROPPED one
+ * (R7). One timestamp per COLLECTION cannot do that: with two directories in
+ * one debounce window, the later event overwrites the earlier, and the first
+ * directory's real work then publishes the dropped event's timestamp.
+ */
+describe("CollectionWatchService attributes observations per contributing work", () => {
+  test(
+    "does not publish a dropped event's timestamp on another directory's work",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-event-attr-"));
+      await mkdir(join(root, "dirA"), { recursive: true });
+      await mkdir(join(root, "dirB"), { recursive: true });
+      await Bun.write(join(root, "dirA", "real.md"), "# atomic save landed\n");
+      const { store } = createSubtreeStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // ACCEPTED: an atomic save reported only under its temp name; the
+        // sibling it implies is on disk and reaches the batch.
+        harness.emit([["rename", "dirA/note.md.tmp"]]);
+        const afterDirA = await nextObservableMs();
+        // DROPPED: a temp file in an empty directory. It reconciles to nothing
+        // on both the disk and indexed sides, so it is not a change at all.
+        harness.emit([["rename", "dirB/scratch.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["dirA/real.md"]]);
+        // Both directories really were reconciled - `dirB` produced nothing,
+        // which is the point, not that it was skipped.
+        expect(
+          harness.completed.map((event) => event.directory).sort()
+        ).toEqual(["dirA", "dirB"]);
+        expect(
+          harness.completed.find((event) => event.directory === "dirB")
+            ?.candidateCount
+        ).toBe(0);
+
+        const { lastEventAt } = harness.service.getState();
+        expect(lastEventAt).not.toBeNull();
+        // The published observation belongs to `dirA`, whose reconciliation
+        // contributed the batch - never to the later `dirB` event that was
+        // dropped and merely happened to share the window.
+        expect(new Date(lastEventAt ?? 0).getTime()).toBeLessThan(afterDirA);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * Per-directory sync attribution is only sound while every reported failure
+ * BELONGS to a batched path. `syncPaths` also reports collection-level
+ * failures - under synthetic relPaths naming no file, or against a backlink
+ * document outside the batch - and those match no candidate at all, so treating
+ * them as attributable let every directory claim a clean completion the sync
+ * did not support (R7/R9).
+ */
+describe("CollectionWatchService fails closed on unattributable sync errors", () => {
+  async function runWithSyncErrors(
+    label: string,
+    errors: Array<{ relPath: string; code: string; message: string }>
+  ) {
+    const root = await mkdtemp(join(tmpdir(), `gno-watch-${label}-`));
+    await Bun.write(join(root, "note.md"), "# atomic\n");
+    const { store } = createSubtreeStore({});
+    const harness = createReconcileHarness(createCollection("notes", root), {
+      store,
+      syncResult: (relPaths) =>
+        createSyncResult({
+          filesProcessed: relPaths.length,
+          filesUpdated: relPaths.length,
+          files: relPaths.map((relPath) => ({ relPath, status: "updated" })),
+          errors,
+        }),
+    });
+
+    try {
+      harness.service.start();
+      harness.emit([["rename", "note.md.tmp"]]);
+      expect(await harness.settle()).toBe("settled");
+      expect(harness.batches).toEqual([["note.md"]]);
+      return {
+        completed: [...harness.completed],
+        failed: harness.failed.map((event) => ({
+          directory: event.directory,
+          stage: event.stage,
+        })),
+      };
+    } finally {
+      await harness.service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  test(
+    "reports a typed-edge backfill failure instead of a clean completion",
+    async () => {
+      const outcome = await runWithSyncErrors("backfill-fail", [
+        {
+          relPath: "(typed edge backfill)",
+          code: "QUERY_FAILED",
+          message: "backfillDocEdges failed",
+        },
+      ]);
+
+      expect(outcome.completed).toEqual([]);
+      expect(outcome.failed).toEqual([{ directory: "", stage: "sync" }]);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reports a projection failure against an out-of-batch backlink document",
+    async () => {
+      const outcome = await runWithSyncErrors("projection-fail", [
+        {
+          relPath: "elsewhere/backlink.md",
+          code: "QUERY_FAILED",
+          message: "listDocuments failed",
+        },
+      ]);
+
+      expect(outcome.completed).toEqual([]);
+      expect(outcome.failed).toEqual([{ directory: "", stage: "sync" }]);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+describe("CollectionWatchService recreated-subtree enumeration", () => {
+  test(
+    "enumerates a RECREATED removed subtree recursively so nested new files index",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-recreate-deep-"));
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+      // `dir1/` and everything in it is gone at classification time.
+
+      const { store } = createSubtreeStore({
+        direct: { dir1: ["dir1/a.md"] },
+        descendants: { dir1: ["dir1/a.md"] },
+        // Runs after the ancestor walk observed `dir1` missing and before the
+        // directory is enumerated: the directory is restored, and the restore
+        // writes a file into a NESTED subdirectory.
+        duringLookup: async () => {
+          await mkdir(join(root, "dir1", "sub"), { recursive: true });
+          await Bun.write(join(root, "dir1", "a.md"), "# restored\n");
+          await Bun.write(join(root, "dir1", "sub", "new.md"), "# brand new\n");
+        },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/a.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // The removal intent is carried forward, so the indexed side still
+        // answers for the whole subtree - but the DISK side has to match it. A
+        // direct-children read of the recreated `dir1` sees only `a.md`, so
+        // `dir1/sub/new.md` was in neither half of the union and, on Linux,
+        // no later event ever names it (bun#15939).
+        expect(batch).toContain("dir1/sub/new.md");
+        expect(batch).toContain("dir1/a.md");
+        // Still bounded: rooted at the recreated directory, never widened to
+        // the collection.
+        expect(batch).not.toContain("keep.md");
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });

@@ -17,7 +17,7 @@ import type { Dirent } from "node:fs";
 // answers only for regular files, so it cannot test a DIRECTORY's existence)
 import { readdir, realpath, stat } from "node:fs/promises";
 // node:path - Bun has no path manipulation module
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { WalkConfig } from "./types";
 
@@ -256,6 +256,74 @@ function shallowestRemovedChild(
 }
 
 /**
+ * Read one directory and collect its eligible files, descending only when
+ * `recursive` is set.
+ *
+ * Returns `null` on success and a terminal outcome otherwise. A NESTED
+ * directory that vanished mid-walk contributes nothing and is not an outcome:
+ * only the enumerated top directory going missing means `missing`. Any other
+ * failure, at any depth, fails the whole enumeration closed - the caller must
+ * never read a partially readable subtree as an authoritative file list.
+ *
+ * Symlinks are never followed: `Dirent.isDirectory()` has `lstat` semantics, so
+ * a symlinked directory is neither descended into nor listed. That is both
+ * parity with `FileWalker.walk` and what makes the recursion loop-free.
+ */
+async function collectEligibleFiles(
+  dirReal: string,
+  prefix: string,
+  config: WalkConfig,
+  recursive: boolean,
+  out: string[],
+  isTop: boolean
+): Promise<DirectoryChildrenOutcome | null> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dirReal, { withFileTypes: true });
+  } catch (cause) {
+    if (isMissingError(cause)) {
+      return isTop ? { status: "missing" } : null;
+    }
+    return { status: "error", cause };
+  }
+
+  const subdirectories: Array<{ real: string; prefix: string }> = [];
+  for (const entry of entries) {
+    if (isHiddenSegment(entry.name)) {
+      continue;
+    }
+    const childRelPath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isFile()) {
+      if (matchesWalkPath(childRelPath, config)) {
+        out.push(childRelPath);
+      }
+      continue;
+    }
+    if (recursive && entry.isDirectory()) {
+      subdirectories.push({
+        real: join(dirReal, entry.name),
+        prefix: childRelPath,
+      });
+    }
+  }
+
+  for (const subdirectory of subdirectories) {
+    const failure = await collectEligibleFiles(
+      subdirectory.real,
+      subdirectory.prefix,
+      config,
+      recursive,
+      out,
+      false
+    );
+    if (failure) {
+      return failure;
+    }
+  }
+  return null;
+}
+
+/**
  * List the eligible direct children of `dirRelPath` inside `config.root`.
  *
  * - The collection root is `""` (also accepted as `"."` or `"/"`-padded forms).
@@ -272,9 +340,46 @@ function shallowestRemovedChild(
  *   before handing paths to it would only duplicate that work.
  * - Never throws: every failure is reported as `missing` or `error`.
  */
-export async function listEligibleDirectChildren(
+export function listEligibleDirectChildren(
   dirRelPath: string,
   config: WalkConfig
+): Promise<DirectoryChildrenOutcome> {
+  return enumerateEligible(dirRelPath, config, false);
+}
+
+/**
+ * List every eligible file anywhere beneath `dirRelPath` inside `config.root`.
+ *
+ * Same seam, same eligibility, same containment and discovery parity as
+ * `listEligibleDirectChildren` - it only descends.
+ *
+ * This exists for exactly one case: a directory whose REMOVAL was already
+ * established when the event was classified, and which EXISTS again by the time
+ * the flush enumerates it (an editor that rewrites a tree, a checkout, a
+ * restore). The removal intent is carried on the queue so the indexed side
+ * still answers for the whole subtree, but a direct-children disk read then
+ * describes only the top level of the recreated tree, so a file written into a
+ * recreated NESTED directory appears in neither half of the union and stays
+ * unindexed - indefinitely on Linux, where writes inside a directory created
+ * after the watch began emit no events at all (bun#15939).
+ *
+ * It stays bounded: rooted at that one directory, never at the collection,
+ * eligibility-filtered per candidate, contained by the same realpath check, and
+ * symlink-free so it cannot walk out of the subtree or loop. It costs disk
+ * reads only - one `readdir` per recreated subdirectory - and adds no store
+ * round trips at all.
+ */
+export function listEligibleSubtreeFiles(
+  dirRelPath: string,
+  config: WalkConfig
+): Promise<DirectoryChildrenOutcome> {
+  return enumerateEligible(dirRelPath, config, true);
+}
+
+async function enumerateEligible(
+  dirRelPath: string,
+  config: WalkConfig,
+  recursive: boolean
 ): Promise<DirectoryChildrenOutcome> {
   const normalizedDir = normalizeCollectionDirRelPath(dirRelPath);
   if (normalizedDir === null) {
@@ -317,15 +422,6 @@ export async function listEligibleDirectChildren(
     };
   }
 
-  let entries: Dirent[];
-  try {
-    entries = await readdir(dirReal, { withFileTypes: true });
-  } catch (cause) {
-    return isMissingError(cause)
-      ? { status: "missing" }
-      : { status: "error", cause };
-  }
-
   // Use the realpath-derived prefix so the returned paths are the same ones
   // FileWalker.walk would produce for these files.
   const prefix = toPosix(relative(rootReal, dirReal));
@@ -335,14 +431,16 @@ export async function listEligibleDirectChildren(
   }
 
   const relPaths: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || isHiddenSegment(entry.name)) {
-      continue;
-    }
-    const childRelPath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (matchesWalkPath(childRelPath, config)) {
-      relPaths.push(childRelPath);
-    }
+  const failure = await collectEligibleFiles(
+    dirReal,
+    prefix,
+    config,
+    recursive,
+    relPaths,
+    true
+  );
+  if (failure) {
+    return failure;
   }
 
   relPaths.sort((a, b) => a.localeCompare(b));

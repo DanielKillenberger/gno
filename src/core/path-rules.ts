@@ -75,13 +75,6 @@ export function normalizeCollectionDirRelPath(
   if (normalized.startsWith("/")) {
     return null;
   }
-  if (
-    semantics === "windows" &&
-    WINDOWS_DRIVE_PREFIX_PATTERN.test(normalized)
-  ) {
-    return null;
-  }
-
   const segments: string[] = [];
   for (const segment of normalized.split("/")) {
     if (segment === "" || segment === ".") {
@@ -92,7 +85,18 @@ export function normalizeCollectionDirRelPath(
     }
     segments.push(segment);
   }
-  return segments.join("/");
+  const canonical = segments.join("/");
+
+  // The drive check runs on the CANONICAL form, after harmless `.` segments
+  // are gone. Testing the raw input instead let `./C:/foo` walk straight past
+  // it and come back as the accepted `C:/foo`: the leading segment was `.`, so
+  // the drive prefix was not at position 0 yet, and canonicalization then put
+  // it there. Only the FIRST segment can carry a drive escape, which is exactly
+  // what this form exposes.
+  if (semantics === "windows" && WINDOWS_DRIVE_PREFIX_PATTERN.test(canonical)) {
+    return null;
+  }
+  return canonical;
 }
 
 /**

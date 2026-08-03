@@ -13,6 +13,7 @@ export type {
 } from "./directory-children";
 export {
   listEligibleDirectChildren,
+  listEligibleSubtreeFiles,
   resolveVanishedPathDirectory,
 } from "./directory-children";
 // Language detection

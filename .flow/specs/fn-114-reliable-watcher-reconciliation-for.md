@@ -412,6 +412,18 @@ proportional to the event.
   Filtering it out unconditionally there left it active and searchable until a
   full `gno update`, because the surviving-parent fallback cannot see nested
   descendants.
+
+  Suppression is decided ONCE, at EVENT time, and that decision is carried on
+  the queue. Only the survived-vs-vanished half of the rule may consult the
+  disk later. Re-evaluating the suppression WINDOW at flush time is a different
+  question than the event asked: the flush runs at minimum a debounce window
+  later, possibly behind an in-flight sync and always after an awaited
+  classification, so a window that expired in between let an application's own
+  surviving write through to `syncPaths` — the exact feedback loop suppression
+  exists to prevent, and a regression against the receipt-time drop the
+  disk-classified route replaced. This binds resolved reconciliation candidates
+  too: they are judged against the observation time of the queued work that
+  produced them.
 - **R5:** Repeated or coalesced filesystem events for the same collection and
   directory result in one bounded reconciliation batch per debounce window. Unchanged
   files produce no duplicate document-change notifications and no redundant embedding
@@ -451,6 +463,24 @@ proportional to the event.
   debounce window is not reported as latency. No status-schema change is implied:
   `lastEventAt` already exists in `CollectionWatchState` and
   `spec/output-schemas/status.schema.json`.
+
+  Each observation is ATTRIBUTED to the specific path or directory it was made
+  for, and only work that reaches the final batch may publish its own. One
+  timestamp per collection cannot express the accepted-vs-dropped distinction
+  at all: with two directories in one debounce window the later event overwrote
+  the earlier, and the first directory's real work then published the DROPPED
+  event's timestamp — so `lastEventAt` reported an observation the watcher had
+  in fact refused.
+
+  The same receipt-vs-outcome discipline governs per-directory sync attribution.
+  A directory may report a clean reconciliation only when every failure the sync
+  reported BELONGS to a batched path. `syncPaths` also reports collection-level
+  failures — synthetic relPaths naming no file (`"(typed edge backfill)"`,
+  `"(typed edge projection)"`) and projection errors against backlink documents
+  outside the batch — which match no reconciliation candidate. Treating those as
+  attributable let every contributing directory report success while the sync had
+  failed at the collection level; an unowned failure therefore collapses
+  attribution and every contributing directory fails closed (see R9).
 - **R8:** Tests cover exact-path and ambiguous-event paths deterministically without
   fixed sleeps standing in for synchronization. A real temporary-directory smoke test
   captures Bun's event shape and proves the watch-to-index lifecycle where the
@@ -461,7 +491,11 @@ proportional to the event.
   no deactivation is inferred from them — and are reported with their cause. A `null`
   filename is dropped without recovery, but is reported. None of these can throw out of
   the watch callback or silently disarm the watcher; all are visible through the R7
-  diagnostics.
+  diagnostics. A sync failure that cannot be attributed to any batched path — a
+  collection-level backfill or projection failure — is likewise never read as
+  per-directory success: every contributing reconciliation reports a sync-stage
+  failure, the same conservative rule already applied to a result carrying no
+  per-path detail at all.
 - **R10:** Reconciliation resolves record-backed documents through their physical
   source path, not their virtual record path. Deleting or atomically replacing an
   eligible record container reconciles every active logical record derived from it.
@@ -506,7 +540,16 @@ proportional to the event.
     (R1), so a removal coalesced with a recreation inside one debounce window is
     not observed. An ancestor recreated AFTER classification but before
     enumeration does not narrow the reconciliation — that intent is carried on
-    the queue.
+    the queue, and the DISK side of the union is then read recursively for that
+    one subtree, so a file written into a recreated NESTED directory is indexed
+    rather than falling between the enumerated top level and the stale indexed
+    descendant set. That recursion stays rooted at the recreated directory,
+    eligibility-filtered, symlink-free, and contained by the collection root; it
+    costs disk reads only and no additional store round trips. The collection
+    ROOT is deliberately excluded from it, because recursing from `""` is the
+    whole-collection walk this design exists not to do — a recreated root
+    remains a `gno update` case, while its indexed side still deactivates
+    everything.
 
 ## Early proof point
 
@@ -524,15 +567,15 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), never to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time and never re-decided against a later clock, never applied to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
-| R7  | Diagnostics distinguish event receipt from reconciliation outcome, including reported `lastEventAt` for accepted-vs-dropped events | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
+| R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection, and per-directory sync outcomes only where the failure is owned by a batched path | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
 | R8  | Deterministic regression coverage + real-FS smoke proof | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.4 | — |
-| R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query and an unstattable collection root | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
+| R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query, an unstattable collection root, and an unattributable collection-level sync failure | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R11 | Active-children AND active-descendant lookups are index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
-| R12 | Recursive directory delete deactivates the whole removed subtree, collection root included, and directories whose names match the collection pattern | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |
+| R12 | Recursive directory delete deactivates the whole removed subtree, collection root included, directories whose names match the collection pattern, and a removed subtree RECREATED before enumeration (bounded recursive disk read) | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |
 
 ## Test strategy
 
