@@ -33,8 +33,17 @@ export interface CollectionWatchState {
   lastSyncAt: string | null;
 }
 
-/** Why a filesystem event could not name an eligible path directly. */
-export type AmbiguousWatchEventReason = "ineligible-path" | "missing-filename";
+/**
+ * Why a filesystem event could not name an eligible path directly.
+ *
+ * `hint-budget-exhausted` is not an event of its own: it is emitted once per
+ * affected directory per debounce window when the bounded directory-hint budget
+ * fills, so the resulting degradation is visible instead of silent.
+ */
+export type AmbiguousWatchEventReason =
+  | "ineligible-path"
+  | "missing-filename"
+  | "hint-budget-exhausted";
 
 /** Which half of a bounded reconciliation failed. */
 export type ReconciliationStage = "enumerate" | "store" | "sync";
@@ -90,7 +99,32 @@ export interface CollectionWatchCallbacks {
 }
 
 /**
- * One ambiguous event's dirty-directory work, keyed by the reported path.
+ * How many reported-path directory hints one affected directory may accumulate
+ * inside a single debounce window.
+ *
+ * A hint costs one directory enumeration plus one store query, so an unbounded
+ * hint set turns ordinary temp-file churn with unique names (`note.md.tmp.0`,
+ * `note.md.tmp.1`, ...) into unbounded sequential filesystem and database work
+ * - the "reconciliation amplification" risk. The affected DIRECTORY is always
+ * reconciled when the budget fills, which is a superset of every dropped hint
+ * that was really a file. The residual, deliberately bounded, degradation is
+ * the same class as the documented R12 direct-children boundary: beyond the
+ * budget, a deleted SUBDIRECTORY's indexed children wait for `gno update`.
+ */
+const MAX_DIRECTORY_HINTS = 8;
+
+/**
+ * The queued dirty-directory work for ONE affected directory.
+ *
+ * Work is keyed by affected directory - the directory portion of the reported
+ * path - so repeated events inside one directory collapse into one unit of work
+ * no matter how many distinct filenames they name.
+ *
+ * `hints` keeps the reported paths themselves as candidate directories, which
+ * is what makes R12 work: a recursive delete reports only the bare directory
+ * (`dir1`), and its indexed documents are direct children of THAT path, not of
+ * its parent. Resolution order is unchanged - a hint resolves first, and the
+ * affected directory is the fallback when the hint yields nothing.
  *
  * Only the root is stamped at queue time. Resolution is ALWAYS performed
  * against the current collection configuration, so a generation stamp would
@@ -98,10 +132,12 @@ export interface CollectionWatchCallbacks {
  * the one drift that makes the queued area meaningless rather than stale.
  */
 interface DirtyDirectoryEntry {
-  /** The directory to fall back to when the reported path is not a directory. */
-  parent: string;
-  /** `normalize(collection.path)` when the event arrived. */
+  /** `normalize(collection.path)` when the first event for this key arrived. */
   root: string;
+  /** Reported paths under this directory, capped at `MAX_DIRECTORY_HINTS`. */
+  hints: Set<string>;
+  /** The budget filled and further hints were dropped for this window. */
+  hintsTruncated: boolean;
 }
 
 /** Outcome of reconciling one directory. */
@@ -291,11 +327,7 @@ export class CollectionWatchService {
             // carries no directory hint at all. It is dropped without recovery,
             // but it must be visible and it must never throw (R9).
             if (!filename) {
-              this.#callbacks?.onAmbiguousEvent?.({
-                collection: collection.name,
-                directory: null,
-                reason: "missing-filename",
-              });
+              this.#notifyAmbiguous(collection.name, null, "missing-filename");
               return;
             }
             const relPath = filename.toString().replaceAll("\\", "/");
@@ -403,22 +435,58 @@ export class CollectionWatchService {
   }
 
   /**
+   * Run a diagnostic observer so it can never influence control flow (R9).
+   *
+   * `onAmbiguousEvent` fires synchronously inside the `fs.watch` callback,
+   * before any work is queued. A throwing consumer would otherwise propagate
+   * out of the watcher callback AND - on the ineligible-path branch - stop the
+   * reconciliation from ever being queued. Diagnostics are observations; a
+   * broken observer is not the watcher's problem.
+   */
+  #notifyDiagnostic(run: () => void): void {
+    try {
+      run();
+    } catch {
+      // Intentionally swallowed: see the doc comment above.
+      return;
+    }
+  }
+
+  #notifyAmbiguous(
+    collectionName: string,
+    directory: string | null,
+    reason: AmbiguousWatchEventReason
+  ): void {
+    this.#notifyDiagnostic(() =>
+      this.#callbacks?.onAmbiguousEvent?.({
+        collection: collectionName,
+        directory,
+        reason,
+      })
+    );
+  }
+
+  /**
    * Queue the dirty-directory work implied by an ambiguous event.
    *
-   * The reported path is recorded as the primary key and its parent as the
-   * fallback, because measurement (fn-114 task .1, Bun 1.3.11 on Linux) showed
-   * neither alone is sufficient:
+   * Work is keyed by the AFFECTED DIRECTORY, and the reported path is retained
+   * as a bounded directory hint under that key, because measurement (fn-114
+   * task .1, Bun 1.3.11 on Linux) showed neither alone is sufficient:
    *
    * - an atomic save through a plain temp name reports ONLY the temp source
-   *   (`note.md.tmp`), so the real file is a SIBLING - the parent is needed;
+   *   (`note.md.tmp`), so the real file is a SIBLING - the directory is needed;
    * - a recursive directory delete reports ONLY the bare directory (`dir1`)
    *   with no child events, and its indexed documents are direct children of
    *   that directory - the reported path ITSELF is needed (R12).
    *
    * The reported path cannot be stat-ed in the deletion case (it is already
-   * gone), so both keys are recorded unconditionally and resolved at flush
-   * time: a key that is not a directory enumerates as `missing` and reconciles
-   * against the indexed side only, which is exactly the deletion behavior.
+   * gone), so it is recorded as a hint and resolved at flush time: a hint that
+   * is not a directory enumerates as `missing` and reconciles against the
+   * indexed side only, which is exactly the deletion behavior.
+   *
+   * Keying by directory is what bounds the work. 25 events naming 25 distinct
+   * temp files in one directory previously queued 25 independent units; they
+   * now collapse to one directory plus at most `MAX_DIRECTORY_HINTS` hints.
    */
   #queueDirtyDirectory(
     collection: Collection,
@@ -429,19 +497,23 @@ export class CollectionWatchService {
       return;
     }
     const reported = normalizeCollectionDirRelPath(relPath);
-    this.#callbacks?.onAmbiguousEvent?.({
-      collection: collection.name,
-      directory: reported === null ? null : parentDirectoryOf(reported),
-      reason: "ineligible-path",
-    });
+    this.#notifyAmbiguous(
+      collection.name,
+      reported === null ? null : parentDirectoryOf(reported),
+      "ineligible-path"
+    );
     if (reported === null) {
       // Escapes the collection root - refuse it rather than reconcile blind.
       return;
     }
-    const parent = parentDirectoryOf(reported);
+    const directory = parentDirectoryOf(reported);
+    const reportedIsReconcilable = this.#isReconcilableDirectory(
+      reported,
+      collection
+    );
     if (
-      !this.#isReconcilableDirectory(reported, collection) &&
-      !this.#isReconcilableDirectory(parent, collection)
+      !reportedIsReconcilable &&
+      !this.#isReconcilableDirectory(directory, collection)
     ) {
       return;
     }
@@ -449,9 +521,26 @@ export class CollectionWatchService {
     const dirty =
       this.#dirtyByCollection.get(collection.name) ??
       new Map<string, DirtyDirectoryEntry>();
-    // Coalescing: repeated events for the same reported path collapse into one
-    // entry, so one debounce window yields one reconciliation per directory.
-    dirty.set(reported, { parent, root: watchedRoot });
+    let entry = dirty.get(directory);
+    if (!entry || entry.root !== watchedRoot) {
+      // A root change mid-window invalidates whatever was queued for this key.
+      entry = { root: watchedRoot, hints: new Set(), hintsTruncated: false };
+      dirty.set(directory, entry);
+    }
+    // A hint only earns budget if it could be reconciled at all; an excluded or
+    // dot-prefixed reported path is covered by the directory fallback alone.
+    if (reportedIsReconcilable && !entry.hints.has(reported)) {
+      if (entry.hints.size < MAX_DIRECTORY_HINTS) {
+        entry.hints.add(reported);
+      } else if (!entry.hintsTruncated) {
+        entry.hintsTruncated = true;
+        this.#notifyAmbiguous(
+          collection.name,
+          directory,
+          "hint-budget-exhausted"
+        );
+      }
+    }
     this.#dirtyByCollection.set(collection.name, dirty);
     this.#armFlushTimer(collection.name);
   }
@@ -558,44 +647,59 @@ export class CollectionWatchService {
       );
       const batched = new Set(relPaths);
       for (const entry of reconciliations) {
-        this.#callbacks?.onReconcileComplete?.({
-          collection: collection.name,
-          directory: entry.directory,
-          candidateCount: entry.candidates.length,
-          syncedCount: entry.candidates.filter((relPath) =>
-            batched.has(relPath)
-          ).length,
-        });
+        this.#notifyDiagnostic(() =>
+          this.#callbacks?.onReconcileComplete?.({
+            collection: collection.name,
+            directory: entry.directory,
+            candidateCount: entry.candidates.length,
+            syncedCount: entry.candidates.filter((relPath) =>
+              batched.has(relPath)
+            ).length,
+          })
+        );
       }
-      if (relPaths.length === 0) {
-        // `finally` announces settling; nothing to sync.
-        return;
-      }
-
-      this.#callbacks?.onSyncStart?.({
-        collection: collection.name,
-        relPaths,
-      });
-      let result = await defaultSyncService.syncPaths(
-        collection,
-        this.#store,
-        relPaths,
-        {
-          ...this.#syncOptions,
-          runUpdateCmd: false,
-        }
-      );
-      if (this.#disposed) {
-        return;
-      }
-      this.#callbacks?.onSyncComplete?.({
-        collection: collection.name,
-        relPaths,
-        result,
-      });
 
       let completionCollection = collection;
-      let completionPaths = changedPaths(result, relPaths);
+      let completionPaths: string[] = [];
+      if (relPaths.length === 0) {
+        // An empty batch is NOT automatically "nothing to do": the enumeration
+        // above is async, so the configuration may have changed while it ran,
+        // and the old rules can legitimately yield nothing under the new ones
+        // (`*.md` -> `*.txt`). Falling straight through to `return` here would
+        // skip the generation-drift recovery below and leave newly eligible
+        // files undiscovered. Only an UNDRIFTED empty batch is a no-op.
+        if (
+          (this.#collectionGenerations.get(collectionName) ?? 0) ===
+          syncGeneration
+        ) {
+          // `finally` announces settling; nothing to sync.
+          return;
+        }
+      } else {
+        this.#callbacks?.onSyncStart?.({
+          collection: collection.name,
+          relPaths,
+        });
+        const result = await defaultSyncService.syncPaths(
+          collection,
+          this.#store,
+          relPaths,
+          {
+            ...this.#syncOptions,
+            runUpdateCmd: false,
+          }
+        );
+        if (this.#disposed) {
+          return;
+        }
+        this.#callbacks?.onSyncComplete?.({
+          collection: collection.name,
+          relPaths,
+          result,
+        });
+        completionPaths = changedPaths(result, relPaths);
+      }
+
       while (true) {
         const currentCollection = this.#collections.find(
           (entry) => entry.name === collectionName
@@ -622,7 +726,7 @@ export class CollectionWatchService {
           break;
         }
 
-        result = await defaultSyncService.syncCollection(
+        const recoveryResult = await defaultSyncService.syncCollection(
           currentCollection,
           this.#store,
           {
@@ -634,12 +738,12 @@ export class CollectionWatchService {
           return;
         }
         completionCollection = currentCollection;
-        completionPaths = changedPaths(result);
+        completionPaths = changedPaths(recoveryResult);
         syncGeneration = currentGeneration;
         this.#callbacks?.onSyncComplete?.({
           collection: currentCollection.name,
           relPaths: completionPaths,
-          result,
+          result: recoveryResult,
         });
       }
     } catch (error) {
@@ -653,12 +757,14 @@ export class CollectionWatchService {
       });
       for (const entry of reconciliations) {
         if (entry.candidates.length > 0) {
-          this.#callbacks?.onReconcileFailed?.({
-            collection: collection.name,
-            directory: entry.directory,
-            stage: "sync",
-            cause: error,
-          });
+          this.#notifyDiagnostic(() =>
+            this.#callbacks?.onReconcileFailed?.({
+              collection: collection.name,
+              directory: entry.directory,
+              stage: "sync",
+              cause: error,
+            })
+          );
         }
       }
       throw error;
@@ -679,13 +785,16 @@ export class CollectionWatchService {
   /**
    * Resolve queued dirty directories into concrete candidate relative paths.
    *
-   * Resolution order per ambiguous event is reported path first, parent as a
-   * fallback. A reported path that resolves to real work (a directory that
-   * exists on disk, or one with active indexed children) IS the affected area,
-   * so its parent is not enumerated - that keeps a recursive directory delete
-   * from dragging every unchanged sibling of the deleted directory into the
-   * batch. Only when the reported path yields nothing does the event get read
-   * as "a file changed here", and its parent directory is reconciled instead.
+   * Resolution order is unchanged by the directory keying: each retained hint
+   * (a reported path) resolves first, and the affected directory is the
+   * fallback. A hint that resolves to real work (a directory that exists on
+   * disk, or one with active indexed children) IS the affected area, so the
+   * directory is not enumerated for it - that keeps a recursive directory
+   * delete from dragging every unchanged sibling of the deleted directory into
+   * the batch. Only when a hint yields nothing is the event read as "a file
+   * changed here", and the affected directory is reconciled instead. A key
+   * whose hint budget filled always reconciles the directory, because the
+   * dropped hints were overwhelmingly ordinary file churn.
    *
    * Generation drift is handled BEFORE enumeration (R6): an entry queued
    * against a different root is dropped, and everything else is re-resolved
@@ -716,7 +825,7 @@ export class CollectionWatchService {
       return outcome;
     };
 
-    for (const [reported, entry] of entries) {
+    for (const [directory, entry] of entries) {
       if (this.#disposed) {
         break;
       }
@@ -725,15 +834,26 @@ export class CollectionWatchService {
         // longer exists in the current configuration.
         continue;
       }
-      const reportedOutcome = await reconcile(reported);
-      if (
-        reportedOutcome.candidates.length === 0 &&
-        !reportedOutcome.enumerationFailed
-      ) {
-        // An unreadable reported directory is NOT retried through its parent:
-        // it failed closed on purpose. A failed STORE query still falls back,
-        // because no deactivation is ever inferred from the disk side alone.
-        await reconcile(entry.parent);
+      // No hint, or a filled hint budget, means the affected directory itself
+      // is the only area we can honestly claim changed.
+      let needsDirectory = entry.hints.size === 0 || entry.hintsTruncated;
+      for (const hint of entry.hints) {
+        if (this.#disposed) {
+          break;
+        }
+        const hintOutcome = await reconcile(hint);
+        if (
+          hintOutcome.candidates.length === 0 &&
+          !hintOutcome.enumerationFailed
+        ) {
+          // An unreadable hint directory is NOT retried through its parent: it
+          // failed closed on purpose. A failed STORE query still falls back,
+          // because no deactivation is ever inferred from the disk side alone.
+          needsDirectory = true;
+        }
+      }
+      if (needsDirectory && !this.#disposed) {
+        await reconcile(directory);
       }
     }
 
@@ -748,21 +868,25 @@ export class CollectionWatchService {
     walkConfig: WalkConfig,
     directory: string
   ): Promise<DirectoryReconciliation> {
-    this.#callbacks?.onReconcileStart?.({
-      collection: collection.name,
-      directory,
-    });
+    this.#notifyDiagnostic(() =>
+      this.#callbacks?.onReconcileStart?.({
+        collection: collection.name,
+        directory,
+      })
+    );
 
     const disk = await listEligibleDirectChildren(directory, walkConfig);
     if (disk.status === "error") {
       // Fail closed: an unreadable directory must never be read as an
       // authoritative empty directory, or live documents would deactivate.
-      this.#callbacks?.onReconcileFailed?.({
-        collection: collection.name,
-        directory,
-        stage: "enumerate",
-        cause: disk.cause,
-      });
+      this.#notifyDiagnostic(() =>
+        this.#callbacks?.onReconcileFailed?.({
+          collection: collection.name,
+          directory,
+          stage: "enumerate",
+          cause: disk.cause,
+        })
+      );
       return { directory, candidates: [], enumerationFailed: true };
     }
 
@@ -782,12 +906,14 @@ export class CollectionWatchService {
         candidates.add(relPath);
       }
     } else {
-      this.#callbacks?.onReconcileFailed?.({
-        collection: collection.name,
-        directory,
-        stage: "store",
-        cause: indexed.error,
-      });
+      this.#notifyDiagnostic(() =>
+        this.#callbacks?.onReconcileFailed?.({
+          collection: collection.name,
+          directory,
+          stage: "store",
+          cause: indexed.error,
+        })
+      );
     }
 
     const root = normalize(collection.path);

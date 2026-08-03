@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   authorizeDaemonStatus,
   daemon,
+  formatWatchCause,
   handleDaemonAppStatus,
 } from "../../src/cli/commands/daemon";
 import { classifyDestination } from "../../src/core/destination-classifier";
@@ -287,6 +288,26 @@ describe("daemon command", () => {
       stage: "enumerate",
       cause: new Error("EACCES"),
     });
+    // A store failure hands over a structured StoreError, not an Error: a bare
+    // `String(cause)` renders it `[object Object]` and the diagnostic is
+    // useless exactly when it matters.
+    watchCallbacks?.onReconcileFailed?.({
+      collection: "notes",
+      directory: "dir1",
+      stage: "store",
+      cause: { code: "QUERY_FAILED", message: "store offline" },
+    });
+    // A filesystem cause embeds the untrusted path in its message, so leaving
+    // it raw would undo the sanitization already applied to `directory`.
+    watchCallbacks?.onReconcileFailed?.({
+      collection: "notes",
+      directory: "dir2",
+      stage: "enumerate",
+      cause: Object.assign(
+        new Error("EACCES: permission denied, scandir 'dir2/we\u0007ird'"),
+        { code: "EACCES" }
+      ),
+    });
 
     expect(
       logs.some((line) =>
@@ -321,6 +342,48 @@ describe("daemon command", () => {
         )
       )
     ).toBe(true);
+    // Structured store cause: code + message, never `[object Object]`.
+    expect(
+      logs.some((line) =>
+        line.includes(
+          "ERR:watch reconcile failed (store): notes -> dir1: QUERY_FAILED: store offline"
+        )
+      )
+    ).toBe(true);
+    expect(logs.some((line) => line.includes("[object Object]"))).toBe(false);
+    // Filesystem cause: sanitized, and the code is not duplicated onto a
+    // message that already leads with it.
+    expect(
+      logs.some((line) =>
+        line.includes(
+          "ERR:watch reconcile failed (enumerate): notes -> dir2: EACCES: permission denied, scandir 'dir2/we?ird'"
+        )
+      )
+    ).toBe(true);
+  });
+
+  test("bounds and sanitizes every reconciliation cause shape", () => {
+    // Structured StoreError - the shape `String(cause)` destroys.
+    expect(
+      formatWatchCause({ code: "QUERY_FAILED", message: "store offline" })
+    ).toBe("QUERY_FAILED: store offline");
+    // Filesystem Error carrying an untrusted path in its message.
+    expect(
+      formatWatchCause(
+        Object.assign(new Error("ENOENT: no such file '/a\u0007b'"), {
+          code: "ENOENT",
+        })
+      )
+    ).toBe("ENOENT: no such file '/a?b'");
+    // A code-less Error keeps its message verbatim.
+    expect(formatWatchCause(new Error("plain failure"))).toBe("plain failure");
+    // Nothing extractable degrades to a label, never `[object Object]`.
+    expect(formatWatchCause({})).toBe("unknown cause");
+    expect(formatWatchCause(undefined)).toBe("unknown cause");
+    // Length is bounded: a 1000-character message cannot flood a log line.
+    const flood = formatWatchCause(new Error("x".repeat(1000)));
+    expect(flood.length).toBe(203);
+    expect(flood.endsWith("...")).toBe(true);
   });
 
   test("skips initial sync when requested", async () => {

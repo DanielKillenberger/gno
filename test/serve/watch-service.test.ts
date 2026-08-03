@@ -1016,6 +1016,12 @@ interface ReconcileHarnessOptions {
   eventBus?: { emit: (event: unknown) => void } | null;
   scheduler?: { notifySyncComplete: (relPaths: string[]) => void } | null;
   syncResult?: (relPaths: string[]) => CollectionSyncResult;
+  /**
+   * Make EVERY fn-114 diagnostic observer throw after recording its event, so
+   * a test can assert that a broken consumer cannot change watcher or flush
+   * control flow (R7/R9).
+   */
+  throwFromDiagnostics?: boolean;
 }
 
 function createReconcileHarness(
@@ -1054,6 +1060,12 @@ function createReconcileHarness(
     );
   }) as typeof defaultSyncService.syncPaths;
 
+  function explodeIfRequested(): void {
+    if (options.throwFromDiagnostics) {
+      throw new Error("diagnostic observer exploded");
+    }
+  }
+
   let notifySettled: (() => void) | null = null;
   let watcherCallback:
     | ((eventType: string, filename: string | null) => void)
@@ -1072,15 +1084,19 @@ function createReconcileHarness(
       },
       onAmbiguousEvent: (event) => {
         ambiguous.push(event);
+        explodeIfRequested();
       },
       onReconcileStart: (event) => {
         started.push(event);
+        explodeIfRequested();
       },
       onReconcileComplete: (event) => {
         completed.push(event);
+        explodeIfRequested();
       },
       onReconcileFailed: (event) => {
         failed.push(event);
+        explodeIfRequested();
       },
     },
     watchFactory: ((
@@ -1186,14 +1202,14 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
     async () => {
       const root = await mkdtemp(join(tmpdir(), "gno-watch-coalesce-"));
       await Bun.write(join(root, "note.md"), "# atomic\n");
-      const { store } = createRecordingStore({});
+      const { store, calls } = createRecordingStore({});
       const harness = createReconcileHarness(createCollection("notes", root), {
         store,
       });
 
       try {
         harness.service.start();
-        // Deliberately asserting RECONCILIATION BATCHES, not delivered events:
+        // Deliberately asserting RECONCILIATION WORK, not delivered events:
         // Bun collapses whatever lands in one watcher read batch (fn-114 .1
         // measured 300 rapid writes delivered as 20 events), so an event-count
         // assertion would measure the platform, not the debounce.
@@ -1203,7 +1219,30 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         expect(await harness.settle()).toBe("settled");
 
         expect(harness.batches).toEqual([["note.md"]]);
-        expect(harness.ambiguous).toHaveLength(25);
+        expect(
+          harness.ambiguous.filter(
+            (event) => event.reason === "ineligible-path"
+          )
+        ).toHaveLength(25);
+
+        // The load-bearing assertion: the final batch alone cannot show that
+        // the WORK coalesced. 25 distinct temp names are one affected directory
+        // plus a bounded hint budget, so the enumerations (one per
+        // `onReconcileStart`) and store queries stay bounded instead of
+        // scaling with the number of unique filenames.
+        // MAX_DIRECTORY_HINTS (8) + the affected directory itself. Measured
+        // before this fix: 26 enumerations and 25 store queries, one of each
+        // per unique temp filename.
+        const workBudget = 9;
+        expect(harness.started.length).toBe(workBudget);
+        expect(calls.length).toBe(workBudget);
+        // The degradation at the budget is visible rather than silent.
+        expect(harness.ambiguous).toContainEqual({
+          collection: "notes",
+          directory: "",
+          reason: "hint-budget-exhausted",
+        });
+
         // One reconciliation of the collection root, not 25.
         expect(
           harness.completed.filter((event) => event.directory === "")
@@ -1405,6 +1444,91 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         harness.emit([["change", "note.md"]]);
         expect(await harness.settle()).toBe("settled");
         expect(harness.batches).toEqual([["note.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "recovers with a full sync when the configuration changes DURING enumeration",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-mid-enum-"));
+      // Only `.txt` exists on disk. Under the ORIGINAL `**/*.md` rules the
+      // reconciliation legitimately produces nothing, so an empty batch must
+      // not be mistaken for "no work": the rules changed while the async
+      // enumeration was in flight, and `note.txt` is newly eligible.
+      await Bun.write(join(root, "note.txt"), "# txt\n");
+      const syncCollection = mock(async () => createSyncResult());
+      defaultSyncService.syncCollection =
+        syncCollection as typeof defaultSyncService.syncCollection;
+
+      let harness: ReturnType<typeof createReconcileHarness> | null = null;
+      let swapped = false;
+      // The store seam is the controllable point INSIDE the enumeration: it is
+      // awaited half-way through reconciling a directory.
+      const store = {
+        listActiveDirectChildSourcePaths() {
+          if (!swapped) {
+            swapped = true;
+            const retargeted = createCollection("notes", root);
+            retargeted.pattern = "**/*.txt";
+            harness?.service.updateCollections([retargeted]);
+          }
+          return Promise.resolve({ ok: true as const, value: [] });
+        },
+      };
+      harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.txt.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The old rules matched nothing, so no bounded batch was ever synced.
+        expect(harness.batches).toEqual([]);
+        expect(swapped).toBe(true);
+        // Generation drift during enumeration must still reach the
+        // full-collection recovery; otherwise `note.txt` is never discovered.
+        expect(syncCollection).toHaveBeenCalledTimes(1);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "isolates throwing diagnostic observers from the watcher callback (R7/R9)",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-throwing-obs-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        throwFromDiagnostics: true,
+      });
+
+      try {
+        harness.service.start();
+
+        // Null-filename branch: the observer throws before the early return.
+        expect(() => harness.emit([["change", null]])).not.toThrow();
+        // Ineligible-filename branch: the observer throws BEFORE the dirty
+        // directory is queued, so an unguarded call would also silently cancel
+        // the reconciliation, not just escape the watcher callback.
+        expect(() => harness.emit([["rename", "note.md.tmp"]])).not.toThrow();
+
+        expect(await harness.settle()).toBe("settled");
+        // Reconciliation still happened despite every observer throwing.
+        expect(harness.batches).toEqual([["note.md"]]);
+        expect(harness.ambiguous).toHaveLength(2);
+        expect(harness.started).toHaveLength(2);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });

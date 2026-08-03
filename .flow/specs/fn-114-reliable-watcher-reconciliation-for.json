@@ -9,7 +9,8 @@
   "depends_on_epics": [],
   "id": "fn-114-reliable-watcher-reconciliation-for",
   "impl_review_rounds": {
-    "fn-114-reliable-watcher-reconciliation-for.1": 1
+    "fn-114-reliable-watcher-reconciliation-for.1": 1,
+    "fn-114-reliable-watcher-reconciliation-for.3": 1
   },
   "next_task": 1,
   "plan_review_rounds": 0,
@@ -71,11 +72,26 @@
       "task": "fn-114-reliable-watcher-reconciliation-for.1",
       "timestamp": "2026-08-03T13:47:04.025213Z",
       "verdict": "NEEDS_WORK"
+    },
+    {
+      "backend": "codex",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "head_sha": "f32b0e28d001f534ae79633f8e1dc7eaf8dfedd8",
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_sha256": "0960bf52c9481c38d7386bb3f440f37b7da7942db40efb96f379347a4e104096",
+      "round_consumed": true,
+      "scope": "impl:fn-114-reliable-watcher-reconciliation-for.3",
+      "task": "fn-114-reliable-watcher-reconciliation-for.3",
+      "timestamp": "2026-08-03T14:14:35.700904Z",
+      "verdict": "NEEDS_WORK"
     }
   ],
   "review_pending_rounds": {},
   "review_transport_failures": {
     "impl:fn-114-reliable-watcher-reconciliation-for.1": 0,
+    "impl:fn-114-reliable-watcher-reconciliation-for.3": 0,
     "plan": 0
   },
   "spec_path": ".flow/specs/fn-114-reliable-watcher-reconciliation-for.md",
@@ -92,5 +108,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-03T13:49:59.666772Z"
+  "updated_at": "2026-08-03T14:14:35.701147Z"
 }
