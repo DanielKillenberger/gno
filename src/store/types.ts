@@ -1702,7 +1702,7 @@ export interface StorePort {
    * `INVALID_INPUT` rather than being enumerated.
    *
    * Index-served for both the root and nested directories via
-   * `idx_documents_source_parent_path` (migration 026).
+   * `idx_documents_source_parent_path` (migration 027).
    */
   listActiveDirectChildSourcePaths(
     collection: string,

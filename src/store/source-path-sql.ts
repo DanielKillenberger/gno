@@ -8,7 +8,7 @@
  * Any filesystem-facing lookup must use the physical path.
  *
  * The parent expression and the partial index below are deliberately defined in
- * ONE place: migration 026 creates the index from `CREATE_SOURCE_PARENT_INDEX_SQL`
+ * ONE place: migration 027 creates the index from `CREATE_SOURCE_PARENT_INDEX_SQL`
  * and the adapter queries with `ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL`, which is
  * built from the same expression strings. SQLite matches expression indexes
  * structurally, so a textual drift between the two would silently degrade the

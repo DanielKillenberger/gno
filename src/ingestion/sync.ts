@@ -73,6 +73,25 @@ import { getExcludedRanges } from "./strip";
 import { collectionToWalkConfig, DEFAULT_CHUNK_PARAMS } from "./types";
 import { defaultWalker } from "./walker";
 
+/**
+ * `stat` errnos that mean "this path does not exist", so the indexed documents
+ * for it are deactivated rather than reported as a failed stat.
+ *
+ * `ENOENT` is the ordinary deletion. `ENOTDIR` is the same structural fact
+ * reached differently: a component of the path is not a directory, which is
+ * exactly what an indexed directory replaced by a regular file produces for
+ * every path formerly beneath it (`dir1` becomes a file, so `dir1/a.md` stats
+ * `ENOTDIR`). `src/ingestion/directory-children.ts` already classifies both as
+ * "missing" and hands the indexed descendants to `syncPaths`; treating
+ * `ENOTDIR` as a stat failure here made those documents undeactivatable - they
+ * stayed active and searchable forever.
+ *
+ * Every OTHER errno stays on the fail-closed `STAT_FAILED` path: a permission
+ * or I/O error is a transient inability to observe the file, never evidence
+ * that it is gone.
+ */
+const MISSING_FILE_ERROR_CODES = new Set(["ENOENT", "ENOTDIR"]);
+
 /** Default concurrency for file processing */
 const DEFAULT_CONCURRENCY = 1;
 
@@ -1220,7 +1239,7 @@ export class SyncService {
           error && typeof error === "object" && "code" in error
             ? String(error.code)
             : undefined;
-        if (errorCode !== "ENOENT") {
+        if (!(errorCode && MISSING_FILE_ERROR_CODES.has(errorCode))) {
           results.push({
             relPath,
             status: "error",

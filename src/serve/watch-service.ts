@@ -224,6 +224,35 @@ function changedPaths(
     : [];
 }
 
+/**
+ * Which contributed paths a resolved sync actually failed on.
+ *
+ * `files` is the authoritative per-path record and is what `syncPaths` always
+ * returns; `errors` carries the typed-edge projection failures, which name a
+ * `relPath` too. When a result reports failures with NO per-path detail
+ * (`files` omitted, `filesErrored > 0`), the failure cannot be attributed, so
+ * the caller fails closed and treats every contributing directory as failed
+ * rather than claiming success it cannot evidence.
+ */
+function syncErrorAttribution(result: CollectionSyncResult): {
+  paths: ReadonlySet<string>;
+  attributable: boolean;
+} {
+  const paths = new Set<string>();
+  for (const error of result.errors) {
+    paths.add(error.relPath);
+  }
+  if (result.files) {
+    for (const file of result.files) {
+      if (file.status === "error") {
+        paths.add(file.relPath);
+      }
+    }
+    return { paths, attributable: true };
+  }
+  return { paths, attributable: result.filesErrored === 0 };
+}
+
 export class CollectionWatchService {
   #collections: Collection[];
   readonly #store: SqliteAdapter;
@@ -797,11 +826,20 @@ export class CollectionWatchService {
           relPaths,
           result,
         });
-        // The shared sync succeeded, so every directory that contributed to it
-        // now has its one terminal outcome (R7). Reported here rather than
-        // before the sync so a later failure cannot produce both "completed"
-        // and "failed" for the same reconciliation.
-        this.#completeReconciliations(collection.name, outstanding, batched);
+        // The shared sync RESOLVED, which is not the same as "every contributed
+        // path succeeded": `syncPaths` reports ordinary per-file failures
+        // (EACCES, a converter error, a failed `markInactive`) in its result
+        // rather than by throwing. Each contributing directory is settled
+        // against that result, so a directory whose own paths errored reports
+        // a sync-stage FAILURE instead of a completion (R7). Reported here
+        // rather than before the sync so a later throw cannot produce both
+        // "completed" and "failed" for the same reconciliation.
+        this.#settleReconciliationsAfterSync(
+          collection.name,
+          outstanding,
+          batched,
+          result
+        );
         outstanding = [];
         completionPaths = changedPaths(result, relPaths);
       }
@@ -908,6 +946,61 @@ export class CollectionWatchService {
    * Disposal remains the one documented exception: no callback fires after
    * `dispose()`, for reconciliation as for every other watcher event.
    */
+  /**
+   * Settle every contributing reconciliation against the RESULT of a sync that
+   * resolved without throwing.
+   *
+   * `syncPaths` reports ordinary per-file failures in its result instead of
+   * rejecting, so "the promise resolved" is not evidence that the contributed
+   * paths were indexed. Reporting completion unconditionally made a directory
+   * whose documents are now stale indistinguishable in the daemon log from one
+   * that reconciled cleanly - exactly the ambiguity R7 exists to remove.
+   *
+   * Attribution is PER DIRECTORY, not per batch: several directories share one
+   * `syncPaths` call, and one directory's `EACCES` says nothing about another's
+   * paths. A directory fails only when a path IT contributed errored; its
+   * neighbours in the same batch still complete normally. The exactly-one
+   * terminal outcome invariant is preserved by marking `failureReported` before
+   * emitting, and by routing the survivors through `#completeReconciliations`.
+   */
+  #settleReconciliationsAfterSync(
+    collectionName: string,
+    entries: DirectoryReconciliation[],
+    batched: ReadonlySet<string>,
+    result: CollectionSyncResult
+  ): void {
+    const attribution = syncErrorAttribution(result);
+    const completed: DirectoryReconciliation[] = [];
+    for (const entry of entries) {
+      if (entry.failureReported) {
+        continue;
+      }
+      const contributed = entry.candidates.filter((relPath) =>
+        batched.has(relPath)
+      );
+      const failedPaths = attribution.attributable
+        ? contributed.filter((relPath) => attribution.paths.has(relPath))
+        : contributed;
+      if (failedPaths.length === 0) {
+        completed.push(entry);
+        continue;
+      }
+      entry.failureReported = true;
+      const cause = new Error(
+        `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${failedPaths.join(", ")}`
+      );
+      this.#notifyDiagnostic(() =>
+        this.#callbacks?.onReconcileFailed?.({
+          collection: collectionName,
+          directory: entry.directory,
+          stage: "sync",
+          cause,
+        })
+      );
+    }
+    this.#completeReconciliations(collectionName, completed, batched);
+  }
+
   #completeReconciliations(
     collectionName: string,
     entries: DirectoryReconciliation[],

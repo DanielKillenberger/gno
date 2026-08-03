@@ -152,7 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_documents_record_source_path
 -- with the collection root as ''. Makes the watcher's active direct-children lookup an
 -- equality probe for both root and nested directories; the trailing source-path column
 -- lets DISTINCT be satisfied from index order (no temporary B-tree).
--- Kept in sync with src/store/source-path-sql.ts (migration 026).
+-- Kept in sync with src/store/source-path-sql.ts (migration 027).
 CREATE INDEX IF NOT EXISTS idx_documents_source_parent_path
   ON documents(
     collection,

@@ -149,7 +149,7 @@ Added the two bounded query seams the watcher's directory reconciliation needs:
 present/missing/error outcome, eligibility delegated to the existing
 `matchesWalkPath`) and `StorePort.listActiveDirectChildSourcePaths` (DISTINCT
 effective source paths of active direct children, so record containers resolve to
-their physical path), backed by migration 026's partial expression index that
+their physical path), backed by migration 027's partial expression index that
 makes both the collection-root and nested lookups index-served equality probes
 with no full collection scan and no temporary B-tree for DISTINCT.
 ## Evidence

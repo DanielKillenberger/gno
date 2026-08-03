@@ -2860,3 +2860,192 @@ describe("CollectionWatchService removed-root and recreation reconciliation", ()
     RED_TEST_TIMEOUT_MS
   );
 });
+
+/**
+ * A `syncPaths` call that RESOLVES is not the same as one whose paths all
+ * succeeded: ordinary per-file failures (EACCES, a converter error, a failed
+ * `markInactive`) come back inside the result, not as a rejection. Reporting
+ * completion off "the promise resolved" made a directory whose documents are
+ * now stale read identically in the daemon log to one that reconciled cleanly.
+ */
+describe("CollectionWatchService sync-stage failure attribution (R7)", () => {
+  test(
+    "reports a sync-stage failure for a directory whose contributed path errored",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-syncerr-"));
+      const { store } = createRecordingStore({ dir1: ["dir1/a.md"] });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        syncResult: (relPaths) =>
+          createSyncResult({
+            filesProcessed: relPaths.length,
+            filesErrored: relPaths.length,
+            files: relPaths.map((relPath) => ({
+              relPath,
+              status: "error",
+              errorCode: "EACCES",
+              errorMessage: "permission denied",
+            })),
+          }),
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches[0]).toContain("dir1/a.md");
+        // The directory owes exactly one terminal outcome, and with its only
+        // contributed path errored that outcome is a FAILURE, not a completion.
+        expect(
+          harness.failed.filter((event) => event.directory === "dir1")
+        ).toHaveLength(1);
+        expect(harness.failed[0]).toMatchObject({
+          collection: "notes",
+          directory: "dir1",
+          stage: "sync",
+        });
+        expect(
+          String((harness.failed[0]?.cause as Error | undefined)?.message)
+        ).toContain("dir1/a.md");
+        // Never both.
+        expect(
+          harness.completed.filter((event) => event.directory === "dir1")
+        ).toHaveLength(0);
+        // ...and every started directory still reached exactly one outcome.
+        for (const start of harness.started) {
+          const outcomes =
+            harness.completed.filter(
+              (event) => event.directory === start.directory
+            ).length +
+            harness.failed.filter(
+              (event) => event.directory === start.directory
+            ).length;
+          expect(outcomes).toBe(1);
+        }
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "attributes sync errors per directory in a mixed batch",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-syncmixed-"));
+      const { store } = createRecordingStore({
+        dir1: ["dir1/a.md"],
+        dir2: ["dir2/b.md"],
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+        // Only `dir1`'s path fails. `dir2` shares the same `syncPaths` call,
+        // but one directory's EACCES says nothing about another's paths, so
+        // `dir2` must still complete normally.
+        syncResult: (relPaths) =>
+          createSyncResult({
+            filesProcessed: relPaths.length,
+            filesErrored: relPaths.filter((relPath) =>
+              relPath.startsWith("dir1/")
+            ).length,
+            filesUpdated: relPaths.filter(
+              (relPath) => !relPath.startsWith("dir1/")
+            ).length,
+            files: relPaths.map((relPath) =>
+              relPath.startsWith("dir1/")
+                ? {
+                    relPath,
+                    status: "error" as const,
+                    errorCode: "CONVERT_FAILED",
+                    errorMessage: "converter blew up",
+                  }
+                : { relPath, status: "updated" as const }
+            ),
+          }),
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([
+          ["rename", "dir1"],
+          ["rename", "dir2"],
+        ]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches[0]).toContain("dir1/a.md");
+        expect(harness.batches[0]).toContain("dir2/b.md");
+        expect(harness.failed.map((event) => event.directory)).toEqual([
+          "dir1",
+        ]);
+        expect(
+          harness.completed.filter((event) => event.directory === "dir2")
+        ).toEqual([
+          {
+            collection: "notes",
+            directory: "dir2",
+            candidateCount: 1,
+            syncedCount: 1,
+          },
+        ]);
+        expect(
+          harness.completed.filter((event) => event.directory === "dir1")
+        ).toHaveLength(0);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "still completes every directory when the sync reports no errors",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-syncok-"));
+      const { store } = createRecordingStore({
+        dir1: ["dir1/a.md"],
+        dir2: ["dir2/b.md"],
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([
+          ["rename", "dir1"],
+          ["rename", "dir2"],
+        ]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.failed).toEqual([]);
+        expect(
+          harness.completed.filter((event) => event.directory === "dir1")
+        ).toEqual([
+          {
+            collection: "notes",
+            directory: "dir1",
+            candidateCount: 1,
+            syncedCount: 1,
+          },
+        ]);
+        expect(
+          harness.completed.filter((event) => event.directory === "dir2")
+        ).toEqual([
+          {
+            collection: "notes",
+            directory: "dir2",
+            candidateCount: 1,
+            syncedCount: 1,
+          },
+        ]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
