@@ -24,20 +24,61 @@ export function hasGlobMeta(pattern: string): boolean {
   return GLOB_META_PATTERN.test(pattern);
 }
 
+const WINDOWS_DRIVE_PREFIX_PATTERN = /^[a-z]:/i;
+
+/**
+ * Which platform's path grammar to judge a relative directory path against.
+ * Injected rather than read from `process.platform` at the use site so the
+ * Windows-only rules are exercised deterministically on POSIX CI.
+ */
+export type CollectionPathSemantics = "windows" | "posix";
+
+function currentPathSemantics(): CollectionPathSemantics {
+  return process.platform === "win32" ? "windows" : "posix";
+}
+
 /**
  * Normalize a collection-relative DIRECTORY path to the canonical POSIX form
  * used as a directory key: no leading or trailing separator, no `.` segments,
  * and the collection root as the empty string.
  *
  * Returns `null` when the path cannot be a directory inside the collection
- * root - an absolute path, a Windows drive/UNC prefix, or any `..` segment.
- * Callers must treat `null` as a refusal, never as the root.
+ * root - an absolute path, a UNC prefix, a Windows drive prefix (under Windows
+ * semantics), or any `..` segment. Callers must treat `null` as a refusal,
+ * never as the root.
+ *
+ * The drive-letter rule is platform-conditional because it is not a universal
+ * escape: `a:notes` and `c:stuff` are ordinary legal directory names on Linux
+ * and macOS. Refusing them there is silent data loss, not safety - the watcher
+ * drops the reconciliation outright and the store refuses the vanished-path
+ * widening, so unreported siblings stay active and searchable forever. Absolute
+ * paths, UNC prefixes (`\\server\share` normalizes to a leading `/`), and `..`
+ * segments escape under BOTH grammars and stay refused unconditionally.
+ *
+ * The backslash-to-slash rewrite above the platform check is deliberately NOT
+ * conditional, even though `weird\name` is a legal POSIX filename and gets
+ * split into two segments here. It is a load-bearing part of this boundary's
+ * contract: callers may hand it a Windows-form relative path on any platform
+ * (the watcher rewrites separators before it ever reaches here, and
+ * `test/store/active-direct-children.test.ts` pins `a\b` resolving to `a/b` on
+ * every platform). Backslash-bearing POSIX directory names are therefore
+ * already flattened upstream of this function and cannot be recovered by
+ * changing it alone; the asymmetry with the drive rule is intentional, and the
+ * harm profiles differ - over-segmenting an exotic name still reconciles
+ * SOMETHING, whereas a `null` refusal reconciles nothing at all.
  */
 export function normalizeCollectionDirRelPath(
-  dirRelPath: string
+  dirRelPath: string,
+  semantics: CollectionPathSemantics = currentPathSemantics()
 ): string | null {
   const normalized = dirRelPath.replaceAll("\\", "/");
-  if (normalized.startsWith("/") || /^[a-z]:/i.test(normalized)) {
+  if (normalized.startsWith("/")) {
+    return null;
+  }
+  if (
+    semantics === "windows" &&
+    WINDOWS_DRIVE_PREFIX_PATTERN.test(normalized)
+  ) {
     return null;
   }
 

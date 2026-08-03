@@ -209,6 +209,23 @@ describe("listEligibleDirectChildren", () => {
     }
   });
 
+  test("reconciles a POSIX-legal drive-shaped directory name", async () => {
+    // `a:notes` is a legal directory name on Linux/macOS. Classifying it as an
+    // escape would drop its reconciliation entirely.
+    if (process.platform === "win32") {
+      return;
+    }
+    await mkdir(join(root, "a:notes"));
+    await writeFile(join(root, "a:notes", "note.md"), "a");
+
+    expect(
+      await listEligibleDirectChildren("a:notes", walkConfig(root))
+    ).toEqual({
+      status: "present",
+      relPaths: ["a:notes/note.md"],
+    });
+  });
+
   test("refuses a symlinked directory that resolves outside the collection root", async () => {
     const outside = join(base, "outside");
     await mkdir(outside);
@@ -300,6 +317,23 @@ describe("resolveVanishedPathDirectory collection-root handling", () => {
       status: "removed",
       directory: "dir1",
       directoryRemoved: true,
+    });
+  });
+
+  test("widens a vanished child of a drive-shaped POSIX directory name", async () => {
+    // Pre-fix this path was refused as an escape, so a delete under `a:notes`
+    // never widened and its siblings stayed active.
+    if (process.platform === "win32") {
+      return;
+    }
+    await mkdir(join(root, "a:notes"));
+
+    const outcome = await resolveVanishedPathDirectory("a:notes/gone.md", root);
+
+    expect(outcome).toEqual({
+      status: "removed",
+      directory: "a:notes",
+      directoryRemoved: false,
     });
   });
 

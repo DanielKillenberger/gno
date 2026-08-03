@@ -138,6 +138,18 @@ describe("listActiveDirectChildSourcePaths", () => {
     expect(await expectPaths("notes", ".")).toEqual(["root.md"]);
   });
 
+  test("accepts a POSIX-legal drive-shaped directory name", async () => {
+    // Pre-fix the unconditional drive-letter test refused this outright, so a
+    // reconciliation under `a:notes` never saw its own children.
+    if (process.platform === "win32") {
+      return;
+    }
+    await adapter.upsertDocument(doc({ relPath: "a:notes/one.md" }));
+    await adapter.upsertDocument(doc({ relPath: "a:notes/deep/two.md" }));
+
+    expect(await expectPaths("notes", "a:notes")).toEqual(["a:notes/one.md"]);
+  });
+
   test("rejects a directory argument that escapes the collection root", async () => {
     for (const dir of ["..", "../outside", "a/../..", "/etc"]) {
       const result = await adapter.listActiveDirectChildSourcePaths(
