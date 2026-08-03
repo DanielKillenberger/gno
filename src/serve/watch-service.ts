@@ -129,11 +129,10 @@ export interface CollectionWatchCallbacks {
  * than the one the event happened in.
  */
 interface PendingPathEntry {
-  /** `Date.now()` when the event was received. */
-  observedAtMs: number;
   /**
-   * The path was inside its application-write suppression window AT EVENT
-   * TIME.
+   * `Date.now()` of the most recent event for this path taken OUTSIDE its
+   * application-write suppression window, or `null` if every event naming it
+   * was suppressed.
    *
    * Recognizing suppression in the callback and then re-deciding it at flush
    * time against a fresh `Date.now()` is not the same rule: a 300 ms debounce,
@@ -144,8 +143,94 @@ interface PendingPathEntry {
    * replaced. The disk is still consulted, but only for the one question it can
    * answer: did this path survive or vanish (R4).
    */
-  suppressed: boolean;
+  unsuppressedAtMs: number | null;
+  /**
+   * `Date.now()` of the most recent SUPPRESSED event for this path, or `null`
+   * if none was suppressed.
+   *
+   * Held apart from `unsuppressedAtMs` rather than folded into one "latest
+   * observation" because the two answer different questions and only one of
+   * them can be published. A single `max()` timestamp beside an independent
+   * `suppressed` flag described neither observation: an unsuppressed event at
+   * `t1` followed by a suppressed one at `t2` kept the entry (correctly, on the
+   * strength of `t1`) and then published `t2` - the timestamp of the
+   * observation the callback deliberately dropped (R7). A suppressed
+   * observation is promoted only when the work is retained BECAUSE the path
+   * vanished, which is exactly the case where no unsuppressed observation
+   * exists (see `eligibleObservationOf`).
+   */
+  suppressedAtMs: number | null;
 }
+
+/**
+ * The observation that makes a queued exact path ELIGIBLE for the batch.
+ *
+ * An unsuppressed observation always wins: it is the event that earned the
+ * path its place, whatever a later suppressed event said. A wholly suppressed
+ * path is retained only when the disk proves it VANISHED, and then its
+ * suppressed observation is the only one there is.
+ */
+function eligibleObservationOf(pending: PendingPathEntry): number {
+  return pending.unsuppressedAtMs ?? pending.suppressedAtMs ?? 0;
+}
+
+/** Was every event naming this path taken inside its suppression window? */
+function isFullySuppressed(pending: PendingPathEntry): boolean {
+  return pending.unsuppressedAtMs === null;
+}
+
+/** The later of two optional observation timestamps. */
+function latestOf(a: number | null, b: number | null): number | null {
+  if (a === null) {
+    return b;
+  }
+  if (b === null) {
+    return a;
+  }
+  return Math.max(a, b);
+}
+
+/**
+ * One closed-open window `[startMs, endMs)` during which a path was a known
+ * application-originated write.
+ *
+ * The START is what makes suppression answerable AT EVENT TIME. An expiry
+ * alone - the shape this replaced - records no beginning and no history, so
+ * `suppress()` called AFTER an event still compared as "greater than" that
+ * earlier event's timestamp and retroactively suppressed it, permanently.
+ * Reconciliation candidates are the population that cannot avoid this: they
+ * are unknown until the directory is enumerated, so their suppression question
+ * is necessarily asked later than the event that produced them (R4).
+ */
+interface SuppressionInterval {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Per-path suppression history is bounded twice over - by reclamation (see
+ * `#reclaimSuppressionHistory`) and, for the pathological case where nothing
+ * can be reclaimed, by this hard cap.
+ *
+ * Overflow merges the two OLDEST intervals into their SPAN, which can only
+ * widen suppression over a gap in which the path was not in fact suppressed.
+ * That is the fail-closed direction this module already takes everywhere else:
+ * an unproven path stays suppressed rather than being re-synced.
+ */
+const MAX_SUPPRESSION_INTERVALS = 16;
+
+/**
+ * Per-directory observation witnesses retained for the suppression rule.
+ *
+ * Observations are deduplicated to whole milliseconds, so a burst inside one
+ * debounce window collapses hard. The cap only bites when a continuous event
+ * stream keeps re-arming the debounce timer for longer than this many distinct
+ * milliseconds; overflow keeps the EARLIEST witnesses, which can only make
+ * "suppressed at every contributing observation" easier to satisfy - the same
+ * fail-closed direction as the interval cap. `latestAtMs` is tracked
+ * separately and is never dropped, so `lastEventAt` stays exact regardless.
+ */
+const MAX_DIRECTORY_OBSERVATIONS = 256;
 
 interface DirtyDirectoryEntry {
   /** `normalize(collection.path)` when the first event for this key arrived. */
@@ -160,12 +245,20 @@ interface DirtyDirectoryEntry {
    * first directory's real work then published the DROPPED event's timestamp.
    * The timestamp travels with the work, so only work that reaches the batch
    * can promote it.
-   *
-   * It is also the instant this directory's candidates are judged against for
-   * suppression, so an application write resolved out of a reconciliation is
-   * decided at the same event time a named one is.
    */
-  observedAtMs: number;
+  latestAtMs: number;
+  /**
+   * EVERY contributing observation for this directory key, deduplicated to
+   * whole milliseconds and capped at `MAX_DIRECTORY_OBSERVATIONS`.
+   *
+   * The set, not the maximum, is what the suppression rule needs. A resolved
+   * candidate is dropped only when it was suppressed at EVERY observation that
+   * asked for this directory - the same `a && b` rule an exact path gets from
+   * `PendingPathEntry` - because a single coalesced `max()` silently discarded
+   * the earlier observation at which the path was demonstrably NOT an
+   * application write (R4).
+   */
+  observations: Set<number>;
   /** Reported paths under this directory, as candidate directories. */
   hints: Set<string>;
   /**
@@ -183,6 +276,27 @@ interface DirtyDirectoryEntry {
    * ones that came back.
    */
   subtree: boolean;
+}
+
+/**
+ * Everything reconciling ONE directory needs, resolved by the flush.
+ *
+ * Grouped rather than passed positionally because these fields are invariants
+ * of a single piece of work: `observations` and `observedAtMs` are two views of
+ * the same witness set, and `subtreeIntent` belongs to `directory`. Threaded as
+ * seven positional arguments they were easy to split accidentally.
+ */
+interface ReconciliationWork {
+  directory: string;
+  /** Pre-resolved active indexed direct children for `directory`. */
+  indexed: StoreResult<string[]>;
+  descendantsFor: (directory: string) => Promise<StoreResult<string[]> | null>;
+  /** The removal was established at classification time, before enumeration. */
+  subtreeIntent: boolean;
+  /** Every observation that asked for this directory (the suppression rule). */
+  observations: ReadonlySet<number>;
+  /** The latest of `observations` (what `lastEventAt` may publish). */
+  observedAtMs: number;
 }
 
 /** Outcome of reconciling one directory. */
@@ -214,6 +328,50 @@ interface DirectoryReconciliation {
    * a later sync-stage failure must not report it twice.
    */
   failureReported: boolean;
+}
+
+/**
+ * Record one observation against a queued directory entry.
+ *
+ * `latestAtMs` always advances; the witness set advances only while it has
+ * room (see `MAX_DIRECTORY_OBSERVATIONS`).
+ */
+function recordObservation(entry: DirtyDirectoryEntry, observedAtMs: number) {
+  entry.latestAtMs = Math.max(entry.latestAtMs, observedAtMs);
+  if (
+    entry.observations.size < MAX_DIRECTORY_OBSERVATIONS ||
+    entry.observations.has(observedAtMs)
+  ) {
+    entry.observations.add(observedAtMs);
+  }
+}
+
+/**
+ * The earliest observation in a batch a flush has just drained.
+ *
+ * `Date.now()` when the batch carries none, which is the correct neutral value:
+ * an empty batch can consult nothing older than the present.
+ */
+function oldestDrainedObservationMs(
+  exactPaths: ReadonlyMap<string, PendingPathEntry>,
+  dirtyEntries: ReadonlyArray<[string, DirtyDirectoryEntry]>
+): number {
+  let oldest = Number.POSITIVE_INFINITY;
+  for (const pending of exactPaths.values()) {
+    for (const atMs of [pending.unsuppressedAtMs, pending.suppressedAtMs]) {
+      if (atMs !== null && atMs < oldest) {
+        oldest = atMs;
+      }
+    }
+  }
+  for (const [, entry] of dirtyEntries) {
+    for (const atMs of entry.observations) {
+      if (atMs < oldest) {
+        oldest = atMs;
+      }
+    }
+  }
+  return Number.isFinite(oldest) ? oldest : Date.now();
 }
 
 /** The directory portion of a normalized collection-relative path. */
@@ -296,24 +454,38 @@ function changedPaths(
  * therefore global: attribution collapses and every contributing directory
  * fails closed, which is the same conservative rule already applied when
  * `files` is missing.
+ *
+ * The UNOWNED failures are returned alongside that verdict, because the
+ * fail-closed OUTCOME and the reported CAUSE are different obligations. Naming
+ * the contributed paths in the cause of an unattributable failure asserts
+ * something the result does not support - those paths may well have synced
+ * fine, and the real failure was `"(typed edge backfill)"` or a backlink
+ * document that was never in this batch. A diagnostic that points at the wrong
+ * paths is a production-diagnostics defect in its own right (R7).
  */
+interface SyncErrorAttribution {
+  paths: ReadonlySet<string>;
+  attributable: boolean;
+  /** Reported failures that no batched path owns - what collapsed attribution. */
+  unowned: Array<{ relPath: string; message?: string }>;
+  /** Failures reported with NO per-path detail at all (`files` omitted). */
+  undetailedCount: number;
+}
+
 function syncErrorAttribution(
   result: CollectionSyncResult,
   batched: ReadonlySet<string>
-): {
-  paths: ReadonlySet<string>;
-  attributable: boolean;
-} {
+): SyncErrorAttribution {
   const paths = new Set<string>();
-  let unownedFailure = false;
-  const record = (relPath: string): void => {
+  const unowned: Array<{ relPath: string; message?: string }> = [];
+  const record = (relPath: string, message?: string): void => {
     paths.add(relPath);
     if (!batched.has(relPath)) {
-      unownedFailure = true;
+      unowned.push(message === undefined ? { relPath } : { relPath, message });
     }
   };
   for (const error of result.errors) {
-    record(error.relPath);
+    record(error.relPath, error.message);
   }
   if (result.files) {
     for (const file of result.files) {
@@ -321,12 +493,39 @@ function syncErrorAttribution(
         record(file.relPath);
       }
     }
-    return { paths, attributable: !unownedFailure };
+    return {
+      paths,
+      attributable: unowned.length === 0,
+      unowned,
+      undetailedCount: 0,
+    };
   }
+  const undetailedCount = result.filesErrored;
   return {
     paths,
-    attributable: result.filesErrored === 0 && !unownedFailure,
+    attributable: undetailedCount === 0 && unowned.length === 0,
+    unowned,
+    undetailedCount,
   };
+}
+
+/**
+ * How to describe a collection-level failure that no batched path owns.
+ *
+ * Deliberately names the ERRORS rather than the contributed paths: the whole
+ * point of the unattributable branch is that the sync gave no evidence about
+ * which contributed path, if any, failed.
+ */
+function unattributableCauseDetail(attribution: SyncErrorAttribution): string {
+  if (attribution.unowned.length > 0) {
+    const described = attribution.unowned.map((failure) =>
+      failure.message === undefined
+        ? failure.relPath
+        : `${failure.relPath}: ${failure.message}`
+    );
+    return `collection-level failure(s) owned by no batched path: ${described.join("; ")}`;
+  }
+  return `${attribution.undetailedCount} failure(s) reported with no per-path detail`;
 }
 
 export class CollectionWatchService {
@@ -351,7 +550,29 @@ export class CollectionWatchService {
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #syncing = new Set<string>();
   readonly #inFlightSyncs = new Set<Promise<void>>();
-  readonly #suppressedPaths = new Map<string, number>();
+  /**
+   * Suppression HISTORY per path - starts and ends, not a bare expiry.
+   *
+   * Reclaimed against the oldest observation that could still consult it (see
+   * `#reclaimSuppressionHistory`), so it never grows without bound.
+   */
+  readonly #suppressedPaths = new Map<string, SuppressionInterval[]>();
+  /**
+   * A conservative LOWER BOUND on the earliest `endMs` still stored, used as an
+   * O(1) guard on the reclamation scan. Only ever too small (extending an open
+   * interval leaves it behind), which costs an occasional wasted scan and can
+   * never skip a reclamation that was due.
+   */
+  #suppressionFloorEndMs = Number.POSITIVE_INFINITY;
+  /**
+   * Observation floors of flushes that have already DRAINED their queues.
+   *
+   * A drained flush still holds observations that will consult suppression
+   * history - the classification and enumeration awaits sit between the drain
+   * and the candidate filter - so reclamation must see them. Boxed so the
+   * `finally` that removes one can find it by identity.
+   */
+  readonly #inFlightObservationFloors = new Set<{ floorMs: number }>();
   readonly #watchFactory: typeof watch;
   readonly #resolveVanishedPath: typeof resolveVanishedPathDirectory;
   readonly #failedCollections = new Map<string, string>();
@@ -502,7 +723,7 @@ export class CollectionWatchService {
               // What is decided HERE, once, is whether the event happened
               // inside the suppression window - the fact the flush would
               // otherwise have to re-derive from a clock that has since moved
-              // (see `PendingPathEntry.suppressed`).
+              // (see `PendingPathEntry`).
               const suppressed = this.#isSuppressedAt(
                 join(watchedRoot, relPath),
                 observedAtMs
@@ -514,8 +735,8 @@ export class CollectionWatchService {
               // flush proves it was a real change (a vanished one) rather than
               // the application's own surviving write.
               this.#queueChange(collection.name, relPath, {
-                observedAtMs,
-                suppressed,
+                unsuppressedAtMs: suppressed ? null : observedAtMs,
+                suppressedAtMs: suppressed ? observedAtMs : null,
               });
               return;
             }
@@ -539,21 +760,175 @@ export class CollectionWatchService {
     }
   }
 
+  /**
+   * Mark a path as an application-originated write until `ms` from now.
+   *
+   * The point-in-time semantics are exactly what a single stored expiry gave:
+   * calling this while a window is still OPEN moves that window's end (so
+   * `suppress(path, 0)` ends it now), and calling it after the previous window
+   * closed opens a NEW one. What is added is the window's START, so the
+   * question "was this path suppressed when that event arrived" can be answered
+   * for an event that arrived BEFORE this call - previously it was answered
+   * "yes", retroactively and permanently (R4).
+   */
   suppress(absPath: string, ms = 5_000): void {
-    this.#suppressedPaths.set(normalize(absPath), Date.now() + ms);
+    const key = normalize(absPath);
+    const startMs = Date.now();
+    const endMs = startMs + ms;
+    const intervals = this.#suppressedPaths.get(key);
+    if (!intervals) {
+      this.#suppressedPaths.set(key, [{ startMs, endMs }]);
+      this.#suppressionFloorEndMs = Math.min(
+        this.#suppressionFloorEndMs,
+        endMs
+      );
+      this.#reclaimSuppressionHistory();
+      return;
+    }
+    const open = intervals.at(-1);
+    if (open && open.endMs > startMs) {
+      // Still inside the previous window: one continuous suppression.
+      open.endMs = endMs;
+    } else {
+      intervals.push({ startMs, endMs });
+      this.#suppressionFloorEndMs = Math.min(
+        this.#suppressionFloorEndMs,
+        endMs
+      );
+      while (intervals.length > MAX_SUPPRESSION_INTERVALS) {
+        // Merge the two oldest into their span - conservative by construction.
+        const [oldest, next] = intervals as [
+          SuppressionInterval,
+          SuppressionInterval,
+        ];
+        oldest.endMs = next.endMs;
+        intervals.splice(1, 1);
+      }
+    }
+    this.#reclaimSuppressionHistory();
   }
 
   /**
-   * Was this absolute path inside its application-write window AT `atMs`?
+   * Was this absolute path inside an application-write window AT `atMs`?
    *
    * Always asked about an OBSERVATION time, never about "now". The window is
    * short (5 s by default) and the flush is at minimum a debounce window later,
    * so evaluating it against a fresh clock silently answers a different
-   * question than the one the event asked (see `PendingPathEntry.suppressed`).
+   * question than the one the event asked.
+   *
+   * Answered against interval MEMBERSHIP rather than "the current expiry is
+   * later than `atMs`". The two differ in both directions and both were wrong:
+   * a window opened AFTER the event swallowed it retroactively, and a window
+   * that opened before the event and has since been superseded kept swallowing
+   * it forever.
    */
   #isSuppressedAt(absPath: string, atMs: number): boolean {
-    const suppressedUntil = this.#suppressedPaths.get(normalize(absPath));
-    return suppressedUntil !== undefined && suppressedUntil > atMs;
+    const intervals = this.#suppressedPaths.get(normalize(absPath));
+    if (!intervals) {
+      return false;
+    }
+    return intervals.some(
+      (interval) => interval.startMs <= atMs && atMs < interval.endMs
+    );
+  }
+
+  /**
+   * Was this path suppressed at EVERY observation that asked for the work?
+   *
+   * The resolved-candidate counterpart of the `a && b` merge rule exact paths
+   * get in `#queueChange`: one observation outside the window is proof that the
+   * application's own write cannot account for every event, so the candidate
+   * must still be synced. An empty witness set claims nothing.
+   */
+  #isSuppressedAtEvery(
+    absPath: string,
+    observations: ReadonlySet<number>
+  ): boolean {
+    if (observations.size === 0) {
+      return false;
+    }
+    for (const atMs of observations) {
+      if (!this.#isSuppressedAt(absPath, atMs)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Drop suppression intervals no queued observation can still consult.
+   *
+   * The reclamation floor is the OLDEST live observation - across the pending
+   * queues, the dirty queues, and every flush that has drained its queues but
+   * not yet finished (`#inFlightObservationFloors`). An interval that ended at
+   * or before that floor cannot contain any question still to be asked: every
+   * remaining question is about an instant at or after the floor, and future
+   * events are later still. With no live observation at all the floor is now,
+   * because the earliest observation any future event can carry is now.
+   *
+   * That is what makes the history bounded: intervals are retained for the
+   * lifetime of the observations that can reference them - at most one debounce
+   * window plus the flush it feeds - and are then dropped, leaving at most one
+   * open interval per suppressed path, which is exactly what the single-expiry
+   * map held.
+   */
+  #reclaimSuppressionHistory(): void {
+    if (this.#suppressedPaths.size === 0) {
+      return;
+    }
+    // O(1) guard: nothing has ended yet, so nothing is reclaimable whatever
+    // the floor turns out to be (the floor is never later than now).
+    const nowMs = Date.now();
+    if (this.#suppressionFloorEndMs > nowMs) {
+      return;
+    }
+    const cutoffMs = this.#oldestLiveObservationMs() ?? nowMs;
+    let floorEndMs = Number.POSITIVE_INFINITY;
+    for (const [key, intervals] of this.#suppressedPaths) {
+      const kept = intervals.filter((interval) => interval.endMs > cutoffMs);
+      if (kept.length === 0) {
+        this.#suppressedPaths.delete(key);
+        continue;
+      }
+      if (kept.length !== intervals.length) {
+        this.#suppressedPaths.set(key, kept);
+      }
+      for (const interval of kept) {
+        floorEndMs = Math.min(floorEndMs, interval.endMs);
+      }
+    }
+    this.#suppressionFloorEndMs = floorEndMs;
+  }
+
+  /** The earliest observation any queued or in-flight work still carries. */
+  #oldestLiveObservationMs(): number | null {
+    let oldest: number | null = null;
+    const consider = (atMs: number): void => {
+      if (oldest === null || atMs < oldest) {
+        oldest = atMs;
+      }
+    };
+    for (const pending of this.#pendingByCollection.values()) {
+      for (const entry of pending.values()) {
+        if (entry.unsuppressedAtMs !== null) {
+          consider(entry.unsuppressedAtMs);
+        }
+        if (entry.suppressedAtMs !== null) {
+          consider(entry.suppressedAtMs);
+        }
+      }
+    }
+    for (const dirty of this.#dirtyByCollection.values()) {
+      for (const entry of dirty.values()) {
+        for (const atMs of entry.observations) {
+          consider(atMs);
+        }
+      }
+    }
+    for (const held of this.#inFlightObservationFloors) {
+      consider(held.floorMs);
+    }
+    return oldest;
   }
 
   /**
@@ -575,17 +950,18 @@ export class CollectionWatchService {
    * failed stat - the same rule `#widenVanishedExactPaths` applies to exact
    * paths.
    *
-   * The suppression half of the decision is taken against `observedAtMs` - when
-   * the event that produced this candidate was seen - so a window that has
-   * since expired cannot let an application write through. Only the
-   * survived-vs-vanished half is asked of the disk.
+   * The suppression half of the decision is taken against the OBSERVATIONS
+   * that asked for this work - the instants the events that produced this
+   * candidate were seen - so neither a window that has since expired nor one
+   * opened after the fact can change the answer. Only the survived-vs-vanished
+   * half is asked of the disk.
    */
   async #isSuppressedSurvivor(
     root: string,
     relPath: string,
-    observedAtMs: number
+    observations: ReadonlySet<number>
   ): Promise<boolean> {
-    if (!this.#isSuppressedAt(join(root, relPath), observedAtMs)) {
+    if (!this.#isSuppressedAtEvery(join(root, relPath), observations)) {
       return false;
     }
     const outcome = await this.#resolveVanishedPath(relPath, root);
@@ -603,18 +979,18 @@ export class CollectionWatchService {
   async #dropSuppressedSurvivors(
     root: string,
     relPaths: string[],
-    observedAtMs: number
+    observations: ReadonlySet<number>
   ): Promise<string[]> {
     if (
       !relPaths.some((relPath) =>
-        this.#isSuppressedAt(join(root, relPath), observedAtMs)
+        this.#isSuppressedAtEvery(join(root, relPath), observations)
       )
     ) {
       return relPaths;
     }
     const kept: string[] = [];
     for (const relPath of relPaths) {
-      if (!(await this.#isSuppressedSurvivor(root, relPath, observedAtMs))) {
+      if (!(await this.#isSuppressedSurvivor(root, relPath, observations))) {
         kept.push(relPath);
       }
     }
@@ -716,18 +1092,24 @@ export class CollectionWatchService {
       this.#pendingByCollection.get(collectionName) ??
       new Map<string, PendingPathEntry>();
     const existing = pending.get(relPath);
+    // Each KIND of observation keeps its own latest timestamp, so the entry
+    // never describes one observation with another's clock reading. A path
+    // observed at least once OUTSIDE its suppression window is an external
+    // change - the application's write cannot account for every event naming
+    // it, so it must still be synced, and it is THAT observation the batch
+    // publishes (R7).
     pending.set(
       relPath,
       existing
         ? {
-            observedAtMs: Math.max(
-              existing.observedAtMs,
-              observation.observedAtMs
+            unsuppressedAtMs: latestOf(
+              existing.unsuppressedAtMs,
+              observation.unsuppressedAtMs
             ),
-            // A path observed at least once OUTSIDE its suppression window is
-            // an external change: the application's write cannot account for
-            // every event naming it, so it must still be synced.
-            suppressed: existing.suppressed && observation.suppressed,
+            suppressedAtMs: latestOf(
+              existing.suppressedAtMs,
+              observation.suppressedAtMs
+            ),
           }
         : observation
     );
@@ -835,7 +1217,8 @@ export class CollectionWatchService {
       // is what discovers a removed directory on this route.
       entry = {
         root: watchedRoot,
-        observedAtMs,
+        latestAtMs: observedAtMs,
+        observations: new Set([observedAtMs]),
         hints: new Set(),
         subtree: false,
       };
@@ -845,7 +1228,7 @@ export class CollectionWatchService {
       // of THIS directory - but not yet demonstrably a real change (see
       // `#promoteObservation`). Every path that returned above was DROPPED and
       // still contributes no timestamp at all, to this key or any other.
-      entry.observedAtMs = Math.max(entry.observedAtMs, observedAtMs);
+      recordObservation(entry, observedAtMs);
     }
     // An excluded or dot-prefixed reported path is not retained: a full sync
     // would never walk it either, so it is covered by the directory alone.
@@ -938,6 +1321,14 @@ export class CollectionWatchService {
     // Claim the collection before the (async) reconciliation so a concurrent
     // debounce flush cannot start work against the same queues mid-await.
     this.#syncing.add(collectionName);
+    // The queues have been drained, so the observations now in hand are
+    // invisible to `#oldestLiveObservationMs` unless this flush holds their
+    // floor. Suppression history must outlive them: the candidate filter runs
+    // after the classification and enumeration awaits below.
+    const observationFloor = {
+      floorMs: oldestDrainedObservationMs(exactPaths, dirtyEntries),
+    };
+    this.#inFlightObservationFloors.add(observationFloor);
     let relPaths: string[] = [];
     let reconciliations: DirectoryReconciliation[] = [];
     // Started reconciliations that still owe their single terminal outcome.
@@ -1054,7 +1445,10 @@ export class CollectionWatchService {
       // its observation is discarded with the drained queue.
       for (const [relPath, observation] of exactPaths) {
         if (batched.has(relPath)) {
-          this.#promoteObservation(observation.observedAtMs);
+          // The ELIGIBLE observation, never simply the latest one: a path kept
+          // on the strength of an unsuppressed event at `t1` must not publish a
+          // later suppressed event at `t2` that the callback dropped (R7).
+          this.#promoteObservation(eligibleObservationOf(observation));
         }
       }
       for (const entry of reconciliations) {
@@ -1208,6 +1602,10 @@ export class CollectionWatchService {
       throw error;
     } finally {
       this.#syncing.delete(collectionName);
+      // This flush's observations can no longer consult suppression history,
+      // so the intervals they were holding open become reclaimable here.
+      this.#inFlightObservationFloors.delete(observationFloor);
+      this.#reclaimSuppressionHistory();
       if (!this.#disposed) {
         const remainingPaths = this.#pendingByCollection.get(collectionName);
         const remainingDirs = this.#dirtyByCollection.get(collectionName);
@@ -1275,16 +1673,32 @@ export class CollectionWatchService {
       const contributed = entry.candidates.filter((relPath) =>
         batched.has(relPath)
       );
-      const failedPaths = attribution.attributable
-        ? contributed.filter((relPath) => attribution.paths.has(relPath))
-        : contributed;
-      if (failedPaths.length === 0) {
+      // A directory that contributed nothing cannot be implicated by anything
+      // the sync reported, attributable or not.
+      if (contributed.length === 0) {
+        completed.push(entry);
+        continue;
+      }
+      const failedPaths = contributed.filter((relPath) =>
+        attribution.paths.has(relPath)
+      );
+      if (attribution.attributable && failedPaths.length === 0) {
         completed.push(entry);
         continue;
       }
       entry.failureReported = true;
+      // Fail closed EITHER WAY, but never claim more than the result supports.
+      // Naming the contributed paths as the failure of an UNATTRIBUTABLE result
+      // asserts that they failed, when the sync in fact failed at the
+      // COLLECTION level and reported nothing about them (R7/R9).
+      const alsoFailed =
+        failedPaths.length > 0
+          ? `${failedPaths.length} contributed path(s) also reported failed (${failedPaths.join(", ")}); `
+          : "";
       const cause = new Error(
-        `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${failedPaths.join(", ")}`
+        attribution.attributable
+          ? `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${failedPaths.join(", ")}`
+          : `sync failed at the collection level, so per-directory attribution was impossible; directory "${entry.directory}" fails closed over ${contributed.length} contributed path(s): ${alsoFailed}${unattributableCauseDetail(attribution)}`
       );
       this.#notifyDiagnostic(() =>
         this.#callbacks?.onReconcileFailed?.({
@@ -1405,25 +1819,29 @@ export class CollectionWatchService {
         // classification above - so a window that expired in between let the
         // application's own surviving write through to `syncPaths`, which the
         // receipt-time drop this route replaced had always prevented.
-        if (pending.suppressed) {
+        if (isFullySuppressed(pending)) {
           suppressedSurvivors.add(relPath);
         }
         continue;
       }
+      // The widened area inherits the vanished path's ELIGIBLE observation -
+      // the one that earned it its place in the batch - so whatever it goes on
+      // to deactivate publishes that moment rather than the moment of a later
+      // event the callback dropped, or the moment some other event in the
+      // window was seen.
+      const observedAtMs = eligibleObservationOf(pending);
       let entry = byDirectory.get(outcome.directory);
       if (entry) {
         // The classification is recorded on the queue, never re-derived later:
         // one removed-directory sample in this window is enough, and a second
         // path that only says "my parent survived" must not clear it.
         entry.subtree ||= outcome.directoryRemoved;
-        entry.observedAtMs = Math.max(entry.observedAtMs, pending.observedAtMs);
+        recordObservation(entry, observedAtMs);
       } else {
         entry = {
           root,
-          // The widened area inherits the vanished path's OWN observation, so
-          // whatever it goes on to deactivate publishes the moment that path
-          // was seen rather than the moment some other event in the window was.
-          observedAtMs: pending.observedAtMs,
+          latestAtMs: observedAtMs,
+          observations: new Set([observedAtMs]),
           hints: new Set<string>(),
           subtree: outcome.directoryRemoved,
         };
@@ -1628,32 +2046,57 @@ export class CollectionWatchService {
     }
 
     /**
-     * `observedAtMs` is the observation of the QUEUED ENTRY that asked for this
-     * directory, so the work carries the moment it was seen through to
-     * `lastEventAt` and to the suppression decision for its candidates. A
-     * directory two entries both ask for keeps the later observation; the
-     * suppression decision belongs to the first, which is exact enough because
-     * every entry in one flush was observed inside the same debounce window.
+     * Every observation that asks for a given directory, unioned BEFORE any
+     * reconciliation runs.
+     *
+     * Computed up front rather than accumulated as directories are visited
+     * because the suppression rule is "suppressed at EVERY contributing
+     * observation": a witness discovered after the candidate filter already ran
+     * could not be consulted, and the first caller's observations would silently
+     * decide the question for everyone. An entry asks for its own directory key
+     * and for each of its hints, so both carry that entry's witnesses.
+     */
+    const observationsFor = new Map<string, Set<number>>();
+    const askFor = (key: string, entry: DirtyDirectoryEntry): void => {
+      const existing = observationsFor.get(key);
+      if (existing) {
+        for (const atMs of entry.observations) {
+          existing.add(atMs);
+        }
+        return;
+      }
+      observationsFor.set(key, new Set(entry.observations));
+    };
+    for (const [directory, entry] of live) {
+      askFor(directory, entry);
+      for (const hint of entry.hints) {
+        askFor(hint, entry);
+      }
+    }
+
+    /**
+     * The observations of the QUEUED ENTRIES that asked for this directory
+     * carry the moment it was seen through to `lastEventAt` (the latest of
+     * them) and to the suppression decision for its candidates (all of them).
      */
     const reconcile = async (
-      directory: string,
-      observedAtMs: number
+      directory: string
     ): Promise<DirectoryReconciliation> => {
       const cached = resolved.get(directory);
       if (cached) {
-        cached.observedAtMs = Math.max(cached.observedAtMs, observedAtMs);
         return cached;
       }
+      const observations = observationsFor.get(directory) ?? new Set<number>();
+      const observedAtMs = Math.max(0, ...observations);
       const outcome = this.#isReconcilableDirectory(directory, collection)
-        ? await this.#reconcileDirectory(
-            collection,
-            walkConfig,
+        ? await this.#reconcileDirectory(collection, walkConfig, {
             directory,
-            indexedFor(directory),
+            indexed: indexedFor(directory),
             descendantsFor,
-            subtreeIntent.has(directory),
-            observedAtMs
-          )
+            subtreeIntent: subtreeIntent.has(directory),
+            observations,
+            observedAtMs,
+          })
         : {
             directory,
             candidates: [],
@@ -1709,7 +2152,7 @@ export class CollectionWatchService {
           needsDirectory = true;
           continue;
         }
-        const hintOutcome = await reconcile(hint, entry.observedAtMs);
+        const hintOutcome = await reconcile(hint);
         if (
           hintOutcome.candidates.length === 0 &&
           !hintOutcome.enumerationFailed
@@ -1720,7 +2163,7 @@ export class CollectionWatchService {
         }
       }
       if (needsDirectory && !this.#disposed) {
-        await reconcile(directory, entry.observedAtMs);
+        await reconcile(directory);
       }
     }
 
@@ -1741,14 +2184,16 @@ export class CollectionWatchService {
   async #reconcileDirectory(
     collection: Collection,
     walkConfig: WalkConfig,
-    directory: string,
-    indexed: StoreResult<string[]>,
-    descendantsFor: (
-      directory: string
-    ) => Promise<StoreResult<string[]> | null>,
-    subtreeIntent: boolean,
-    observedAtMs: number
+    work: ReconciliationWork
   ): Promise<DirectoryReconciliation> {
+    const {
+      directory,
+      indexed,
+      descendantsFor,
+      subtreeIntent,
+      observations,
+      observedAtMs,
+    } = work;
     this.#notifyDiagnostic(() =>
       this.#callbacks?.onReconcileStart?.({
         collection: collection.name,
@@ -1859,7 +2304,7 @@ export class CollectionWatchService {
       candidates: await this.#dropSuppressedSurvivors(
         root,
         [...candidates],
-        observedAtMs
+        observations
       ),
       observedAtMs,
       enumerationFailed: false,

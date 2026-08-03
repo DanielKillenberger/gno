@@ -3652,6 +3652,165 @@ describe("CollectionWatchService suppression decided at event time", () => {
 });
 
 /**
+ * "Decided at event time" is only a real rule if the suppression state can
+ * still be ANSWERED for that moment later on. A bare expiry cannot: it records
+ * no start and no history, so a window opened AFTER an event still compared as
+ * later than that event and swallowed it retroactively - permanently, since
+ * the comparison never stops being true once the window has been superseded.
+ *
+ * Reconciliation candidates are exactly the population that cannot dodge this.
+ * They are unknown until the directory is enumerated, so their suppression
+ * question is necessarily asked after the event that produced them (R4).
+ */
+describe("CollectionWatchService suppression membership per observation", () => {
+  test(
+    "reconciles a candidate whose event predates a later suppression window",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-later-"));
+      // A genuine external edit, reported only under its atomic temp name.
+      await Bun.write(join(root, "note.md"), "# edited in an editor\n");
+
+      let suppressAfterTheEvent: (() => void) | null = null;
+      const { store } = createSubtreeStore({
+        direct: { "": ["note.md"] },
+        // Inside the flush, AFTER the event was observed and before the
+        // candidates are filtered - the window in which GNO writes some other
+        // file and opens a suppression window that this event predates.
+        duringLookup: async () => {
+          suppressAfterTheEvent?.();
+        },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+      suppressAfterTheEvent = () =>
+        harness.service.suppress(join(root, "note.md"), 5_000);
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "note.md.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // Comparing the event against the CURRENT expiry classified this
+        // external change as GNO's own write and dropped it silently.
+        expect(harness.batches).toEqual([["note.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "drops a candidate suppressed across every contributing observation",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-all-"));
+      await Bun.write(join(root, "alive.md"), "# written by gno\n");
+      const { store } = createSubtreeStore({ direct: { "": ["alive.md"] } });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.service.suppress(join(root, "alive.md"), 5_000);
+        // Two ambiguous events coalesce onto one dirty directory; BOTH were
+        // observed inside the window, so nothing contradicts suppression.
+        harness.emit([
+          ["rename", "a.tmp"],
+          ["rename", "b.tmp"],
+        ]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps a candidate suppressed for only one of two coalesced observations",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-suppress-one-"));
+      await Bun.write(join(root, "alive.md"), "# edited in an editor\n");
+      const { store } = createSubtreeStore({ direct: { "": ["alive.md"] } });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // Observed BEFORE any window exists: the application's write cannot
+        // account for this one, which is the same `a && b` rule an exact path
+        // gets from the pending-entry merge.
+        harness.emit([["rename", "a.tmp"]]);
+        await nextObservableMs();
+        harness.service.suppress(join(root, "alive.md"), 5_000);
+        harness.emit([["rename", "b.tmp"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // Coalescing to `max(observedAtMs)` discarded the earlier observation
+        // and dropped a real external change.
+        expect(harness.batches).toEqual([["alive.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * A merged pending entry must not describe one observation with another's
+ * clock reading. `max(observedAtMs)` beside an independent `suppressed` flag
+ * did exactly that: the path reached the batch on the strength of an
+ * unsuppressed event at `t1`, and then published `t2` - the timestamp of a
+ * suppressed event the callback had deliberately dropped (R7).
+ */
+describe("CollectionWatchService publishes the eligible observation", () => {
+  test(
+    "publishes the unsuppressed observation, not a later suppressed one",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-eligible-obs-"));
+      await Bun.write(join(root, "note.md"), "# edited in an editor\n");
+      const { store } = createSubtreeStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // ELIGIBLE: an external edit, outside any suppression window.
+        harness.emit([["change", "note.md"]]);
+        const afterExternalEdit = await nextObservableMs();
+        // DROPPED: GNO's own follow-up write to the same path. It cannot make
+        // the path ineligible - `t1` already did that - but its timestamp
+        // belongs to an observation suppression refused.
+        harness.service.suppress(join(root, "note.md"), 5_000);
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["note.md"]]);
+        const { lastEventAt } = harness.service.getState();
+        expect(lastEventAt).not.toBeNull();
+        expect(new Date(lastEventAt ?? 0).getTime()).toBeLessThan(
+          afterExternalEdit
+        );
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
  * `lastEventAt` exists to separate an ACCEPTED observation from a DROPPED one
  * (R7). One timestamp per COLLECTION cannot do that: with two directories in
  * one debounce window, the later event overwrites the earlier, and the first
@@ -3745,6 +3904,9 @@ describe("CollectionWatchService fails closed on unattributable sync errors", ()
           directory: event.directory,
           stage: event.stage,
         })),
+        causes: harness.failed.map((event) =>
+          String((event.cause as Error | undefined)?.message)
+        ),
       };
     } finally {
       await harness.service.dispose();
@@ -3782,6 +3944,52 @@ describe("CollectionWatchService fails closed on unattributable sync errors", ()
 
       expect(outcome.completed).toEqual([]);
       expect(outcome.failed).toEqual([{ directory: "", stage: "sync" }]);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
+   * The fail-closed OUTCOME above and the reported CAUSE are separate
+   * obligations. Substituting the contributed paths for the failure asserts
+   * that THOSE paths failed - which the result does not say, and which sends
+   * whoever reads the daemon log to the wrong file (R7/R9).
+   */
+  test(
+    "names the collection-level backfill error, not the contributed paths",
+    async () => {
+      const outcome = await runWithSyncErrors("backfill-cause", [
+        {
+          relPath: "(typed edge backfill)",
+          code: "QUERY_FAILED",
+          message: "backfillDocEdges failed",
+        },
+      ]);
+
+      const cause = outcome.causes[0] ?? "";
+      expect(cause).toContain("(typed edge backfill)");
+      expect(cause).toContain("backfillDocEdges failed");
+      expect(cause).toContain("attribution was impossible");
+      // The contributed path is the one thing the result says nothing about.
+      expect(cause).not.toContain("note.md");
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "names the out-of-batch backlink document as the unowned failure",
+    async () => {
+      const outcome = await runWithSyncErrors("projection-cause", [
+        {
+          relPath: "elsewhere/backlink.md",
+          code: "QUERY_FAILED",
+          message: "listDocuments failed",
+        },
+      ]);
+
+      const cause = outcome.causes[0] ?? "";
+      expect(cause).toContain("elsewhere/backlink.md");
+      expect(cause).toContain("listDocuments failed");
+      expect(cause).not.toContain("note.md");
     },
     RED_TEST_TIMEOUT_MS
   );
