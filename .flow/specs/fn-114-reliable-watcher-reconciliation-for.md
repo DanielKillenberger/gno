@@ -434,18 +434,49 @@ proportional to the event.
   candidate was then dropped in silence. Resolved candidates are the population
   that cannot avoid this, because they are unknown until the directory is
   enumerated and their question is necessarily asked after the event.
-  Membership is retained only while some queued or in-flight observation can
-  still consult it — at most one debounce window plus the flush it feeds — and
-  is reclaimed against the oldest such observation, leaving at most one open
-  window per suppressed path, which is what the expiry map held. Two hard caps
-  bound the pathological case where nothing is reclaimable, and both degrade in
-  the fail-closed direction the rest of this requirement takes.
+  The two ends of a window are measured in DIFFERENT units, because they answer
+  different questions. The END is a wall-clock duration (`suppress(path, 5_000)`)
+  and stays in milliseconds. The START is CAUSAL: an event and a `suppress()`
+  call made in the same millisecond cannot be ordered by a wall clock, so
+  `startMs <= atMs` still answered "suppressed" for an event that arrived
+  immediately BEFORE the window opened — the retroactive suppression membership
+  exists to remove, surviving at millisecond resolution. Every observation and
+  every `suppress()` call therefore draws from one monotonic sequence, and the
+  window's start is recorded in it. The epoch timestamp an observation also
+  carries is diagnostic only (what `lastEventAt` may publish, and how long
+  history must be retained); the two readings are held apart rather than
+  overloading one number with both jobs.
+
+  Membership is retained until the LATER of the window's own end and the oldest
+  queued or in-flight observation that can still consult it — at most one
+  debounce window plus the flush it feeds beyond the window's lifetime — after
+  which it is dropped, leaving at most one OPEN window per suppressed path,
+  which is what the expiry map held. Reaching that bound needs a trigger the
+  daemon does not otherwise have: an ordinary window is still open when the
+  300 ms flush that queued it finishes, so the flush's final reclamation
+  legitimately retains it and an idle daemon never comes back for it. A
+  scheduled wake-up at the earliest stored window end supplies that trigger, so
+  an idle service converges to an empty history instead of accumulating one
+  entry per path it has ever written. Two hard caps bound the pathological case
+  where nothing is reclaimable, and both degrade in the fail-closed direction
+  the rest of this requirement takes.
 
   Coalescing follows the same `a && b` rule on both routes. A named exact path
   observed at least once OUTSIDE its window is an external change; a resolved
   candidate is dropped only when it was suppressed at EVERY observation that
-  asked for its directory. One observation outside the window is proof that the
-  application's own write cannot account for every event.
+  asked for its reconciliation KEY. One observation outside the window is proof
+  that the application's own write cannot account for every event.
+
+  Witnesses are scoped PER KEY, and a directory HINT is a key of its own. A
+  queued entry's whole witness set must not stand in for each hint it carries:
+  an event naming sibling hint `b` is not evidence about candidates under hint
+  `a`, and one such foreign witness is all it takes to defeat the rule — two
+  suppressed `a` observations with an unsuppressed `b` observation between them
+  left `a`'s set containing an instant at which its candidate was demonstrably
+  not suppressed, so GNO's own surviving write was fed back into `syncPaths`.
+  Only observations that asked for the same key are unioned, and they are still
+  unioned BEFORE any candidate filter runs, so a witness discovered later is
+  never missed by a filter that already ran.
 - **R5:** Repeated or coalesced filesystem events for the same collection and
   directory result in one bounded reconciliation batch per debounce window. Unchanged
   files produce no duplicate document-change notifications and no redundant embedding
@@ -503,6 +534,13 @@ proportional to the event.
   observation is promoted only when the work is retained BECAUSE the path
   vanished, which is exactly the case where no unsuppressed observation exists.
 
+  The suppression WITNESS set is capped; the published observation is not. The
+  two are carried side by side per reconciliation key, and `lastEventAt` is
+  published from the retained maximum rather than re-derived from the capped
+  witnesses — past the cap the witness set no longer holds the latest
+  observation, so deriving the timestamp from it reported the moment of the last
+  RETAINED witness instead of the latest observation actually accepted.
+
   The same receipt-vs-outcome discipline governs per-directory sync attribution.
   A directory may report a clean reconciliation only when every failure the sync
   reported BELONGS to a batched path. `syncPaths` also reports collection-level
@@ -520,6 +558,16 @@ proportional to the event.
   cause naming the wrong file sends whoever reads the daemon log to the wrong
   place. Where a contributed path IS among the reported failures it is still
   named, alongside the unowned failure that collapsed attribution.
+
+  That cause describes the RESULT, which every contributing directory shares, so
+  it is summarized ONCE per sync and reused — never rebuilt per directory — and
+  the summary is BOUNDED: a total count, a few sampled failures, and a
+  truncated-count suffix. Typed-edge projection can report several failures per
+  document, so an unbounded per-directory format scaled as `directories x
+  errors` for one constant string, amplifying an already-bad downstream failure
+  in the process meant to be diagnosing it. It is also skipped entirely when no
+  diagnostic observer is installed; the fail-closed OUTCOME is unconditional and
+  never depends on anyone listening.
 - **R8:** Tests cover exact-path and ambiguous-event paths deterministically without
   fixed sleeps standing in for synchronization. A real temporary-directory smoke test
   captures Bun's event shape and proves the watch-to-index lifecycle where the
@@ -537,7 +585,10 @@ proportional to the event.
   per-path detail at all. The reported cause names the collection-level error
   (or, with no per-path detail at all, the count of undetailed failures) and
   says that attribution was impossible — never the contributed paths, which the
-  result did not report as failed.
+  result did not report as failed. It is built once per sync result and bounded
+  to a sampled few of the reported failures plus a truncated count, and it is
+  not built at all when no observer is installed, so a broad failure cannot be
+  amplified by the diagnostic describing it.
 - **R10:** Reconciliation resolves record-backed documents through their physical
   source path, not their virtual record path. Deleting or atomically replacing an
   eligible record container reconciles every active logical record derived from it.
@@ -609,12 +660,12 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP (start AND end, reclaimed against the oldest live observation) rather than a bare expiry, so a window opened after an event cannot suppress it retroactively; coalesced work drops a candidate only when suppressed at EVERY contributing observation; never applied to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed against the oldest live observation AND woken by a scheduled reclamation at the earliest window end, so an idle daemon converges to an empty history; never applied to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
-| R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection and published from the ELIGIBLE observation rather than the latest one seen, and per-directory sync outcomes only where the failure is owned by a batched path | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
+| R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection, published from the ELIGIBLE observation rather than the latest one seen, and carried beside the capped witness set so a stream past the observation cap still publishes the latest ACCEPTED observation; per-directory sync outcomes only where the failure is owned by a batched path, with the unattributable cause summarized once per sync result, bounded, and skipped when no observer is installed | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — |
 | R8  | Deterministic regression coverage + real-FS smoke proof | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.4 | — |
-| R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query, an unstattable collection root, and an unattributable collection-level sync failure whose reported cause names the collection-level error rather than the contributed paths | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
+| R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query, an unstattable collection root, and an unattributable collection-level sync failure whose reported cause names the collection-level error rather than the contributed paths, built once per result and bounded to a sampled few plus a truncated count so a broad failure is not amplified by the diagnostic describing it; the fail-closed outcome holds with no observer installed | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R11 | Active-children AND active-descendant lookups are index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
 | R12 | Recursive directory delete deactivates the whole removed subtree, collection root included, directories whose names match the collection pattern, and a removed subtree RECREATED before enumeration (bounded recursive disk read) | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |

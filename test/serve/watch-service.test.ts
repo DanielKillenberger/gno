@@ -1047,6 +1047,12 @@ interface ReconcileHarnessOptions {
     relPath: string,
     root: string
   ) => Promise<VanishedPathOutcome>;
+  /**
+   * Install NO `onReconcileFailed` observer, so a test can assert what the
+   * watcher does when nothing is listening for failure causes - the cause
+   * summary is skipped, but the fail-closed OUTCOME is not.
+   */
+  omitReconcileFailedObserver?: boolean;
 }
 
 function createReconcileHarness(
@@ -1120,10 +1126,12 @@ function createReconcileHarness(
         completed.push(event);
         explodeIfRequested();
       },
-      onReconcileFailed: (event) => {
-        failed.push(event);
-        explodeIfRequested();
-      },
+      onReconcileFailed: options.omitReconcileFailedObserver
+        ? undefined
+        : (event) => {
+            failed.push(event);
+            explodeIfRequested();
+          },
     },
     watchFactory: ((
       _path: string,
@@ -4035,6 +4043,323 @@ describe("CollectionWatchService recreated-subtree enumeration", () => {
         // Still bounded: rooted at the recreated directory, never widened to
         // the collection.
         expect(batch).not.toContain("keep.md");
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * A HINT is a reconciliation key in its own right, so the "suppressed at every
+ * contributing observation" rule must be answered from the events that named
+ * THAT hint.
+ *
+ * Unioning a queued entry's whole witness set onto every hint it carried made
+ * an event naming sibling hint `b` count as evidence about candidates under
+ * hint `a` - and one unsuppressed witness is all it takes to defeat the rule,
+ * so GNO's own surviving write was fed straight back into `syncPaths` (R4).
+ */
+describe("CollectionWatchService scopes suppression witnesses per hint", () => {
+  test(
+    "drops a hint's suppressed candidate despite an unsuppressed sibling hint event",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-hint-witness-"));
+      await mkdir(join(root, "a"), { recursive: true });
+      await mkdir(join(root, "b"), { recursive: true });
+      // GNO's own write. It still EXISTS, so the only thing that may keep it
+      // out of the batch is the suppression rule.
+      await Bun.write(join(root, "a", "doc.md"), "# written by gno\n");
+
+      const { store } = createSubtreeStore({
+        direct: { "": [], a: ["a/doc.md"], b: [] },
+        // Non-empty descendants are what make `a` a real indexed directory
+        // rather than a dead temp name, so `a` is reconciled as its own key.
+        descendants: { a: ["a/doc.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+
+        // Observation 1 for hint `a`: inside a window.
+        harness.service.suppress(join(root, "a", "doc.md"), 5_000);
+        harness.emit([["rename", "a"]]);
+        // Closed only once the clock has moved past that observation, so the
+        // window it was taken inside still contains it (`atMs < endMs`).
+        await nextObservableMs();
+        harness.service.suppress(join(root, "a", "doc.md"), 0);
+        await nextObservableMs();
+
+        // Observation for hint `b` ONLY, outside any window for `a/doc.md`.
+        // Nothing about it is evidence about anything under `a`.
+        harness.emit([["rename", "b"]]);
+        await nextObservableMs();
+
+        // Observation 2 for hint `a`: inside a second window.
+        harness.service.suppress(join(root, "a", "doc.md"), 5_000);
+        harness.emit([["rename", "a"]]);
+
+        expect(await harness.settle()).toBe("settled");
+
+        // EVERY observation that asked for `a` was suppressed, so the
+        // application's own surviving write must not be resynced. Sharing the
+        // parent entry's witnesses put the unsuppressed `b` observation into
+        // `a`'s set and let it through.
+        expect(harness.batches).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * The witness set is CAPPED; the published observation is not. Deriving
+ * `lastEventAt` from the capped set reported the moment of the last RETAINED
+ * witness rather than the latest observation actually accepted (R7).
+ */
+describe("CollectionWatchService publishes past the observation cap", () => {
+  test(
+    "publishes the latest accepted observation, not the last capped witness",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-obs-cap-"));
+      await Bun.write(join(root, "note.md"), "# atomic save landed\n");
+      const { store } = createSubtreeStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // More observations against one directory key than the witness cap
+        // retains, each in its own millisecond - so the retained witnesses are
+        // distinguishable from the ones the cap drops. Every gap stays far
+        // below the debounce, so this is ONE window.
+        const overCap = 300;
+        for (let index = 0; index < overCap; index++) {
+          harness.emit([["rename", `burst-${index}.tmp`]]);
+          await nextObservableMs();
+        }
+        // The last observation, later than every witness the cap could hold.
+        const beforeFinalEmit = Date.now();
+        harness.emit([["rename", "final.tmp"]]);
+
+        expect(await harness.settle()).toBe("settled");
+        expect(harness.batches).toEqual([["note.md"]]);
+
+        const { lastEventAt } = harness.service.getState();
+        expect(lastEventAt).not.toBeNull();
+        expect(new Date(lastEventAt ?? 0).getTime()).toBeGreaterThanOrEqual(
+          beforeFinalEmit
+        );
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * The cause of an unattributable sync failure describes the RESULT, which every
+ * contributing directory shares. Formatting it per directory scaled the work
+ * with `directories x errors` for one constant string - and did so even with no
+ * observer installed to read it, amplifying an already-bad downstream failure
+ * (R7/R9).
+ */
+describe("CollectionWatchService bounds the unattributable cause summary", () => {
+  /** One reconcilable directory per name, each contributing one document. */
+  async function runBroadFailure(options: {
+    directories: string[];
+    errorCount: number;
+    observeFailures: boolean;
+  }) {
+    const root = await mkdtemp(join(tmpdir(), "gno-watch-broad-cause-"));
+    const direct: Record<string, string[]> = { "": [] };
+    for (const directory of options.directories) {
+      await mkdir(join(root, directory), { recursive: true });
+      await Bun.write(join(root, directory, "note.md"), "# atomic\n");
+      direct[directory] = [`${directory}/note.md`];
+    }
+    // A broad projection/store failure: many errors, none owned by a batched
+    // path, so attribution collapses for every contributing directory at once.
+    const errors = Array.from({ length: options.errorCount }, (_, index) => ({
+      relPath: `elsewhere/backlink-${index}.md`,
+      code: "QUERY_FAILED",
+      message: `listDocuments failed (${index})`,
+    }));
+
+    const harness = createReconcileHarness(createCollection("notes", root), {
+      store: createSubtreeStore({ direct }).store,
+      omitReconcileFailedObserver: !options.observeFailures,
+      syncResult: (relPaths) =>
+        createSyncResult({
+          filesProcessed: relPaths.length,
+          filesUpdated: relPaths.length,
+          files: relPaths.map((relPath) => ({ relPath, status: "updated" })),
+          errors,
+        }),
+    });
+
+    try {
+      harness.service.start();
+      harness.emit(
+        options.directories.map(
+          (directory) => ["rename", `${directory}/save.tmp`] as const
+        )
+      );
+      expect(await harness.settle()).toBe("settled");
+      return {
+        completed: [...harness.completed],
+        causes: harness.failed.map((event) =>
+          String((event.cause as Error | undefined)?.message)
+        ),
+      };
+    } finally {
+      await harness.service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  test(
+    "names a bounded sample of a broad failure and reuses it across directories",
+    async () => {
+      const directories = ["d0", "d1", "d2", "d3", "d4", "d5"];
+      const outcome = await runBroadFailure({
+        directories,
+        errorCount: 200,
+        observeFailures: true,
+      });
+
+      expect(outcome.completed).toEqual([]);
+      expect(outcome.causes).toHaveLength(directories.length);
+
+      // Bounded: a sample plus a truncated count, never all 200 errors.
+      const summary =
+        "200 collection-level failure(s) owned by no batched path";
+      for (const cause of outcome.causes) {
+        expect(cause).toContain(summary);
+        expect(cause).toContain("elsewhere/backlink-0.md");
+        expect(cause).toContain("(+197 more)");
+        expect(cause).not.toContain("elsewhere/backlink-3.md");
+      }
+
+      // Every directory reports the SAME summary, which is what makes building
+      // it once outside the per-directory loop the correct shape.
+      const summaries = outcome.causes.map((cause) =>
+        cause.slice(cause.indexOf(summary))
+      );
+      expect(new Set(summaries).size).toBe(1);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "still fails closed for every directory with no failure observer installed",
+    async () => {
+      const outcome = await runBroadFailure({
+        directories: ["d0", "d1", "d2"],
+        errorCount: 50,
+        observeFailures: false,
+      });
+
+      // Skipping the cause must skip only the DESCRIPTION. A directory whose
+      // sync failed unattributably still owes no completion.
+      expect(outcome.completed).toEqual([]);
+      expect(outcome.causes).toEqual([]);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * Epoch milliseconds cannot order an event against a `suppress()` call made in
+ * the same millisecond, so membership answered as `startMs <= atMs` let a window
+ * opened just AFTER an event suppress it retroactively - the exact defect
+ * interval membership exists to remove, surviving at millisecond scale.
+ *
+ * The fix is a second, causal reading: both events and `suppress()` draw from
+ * one monotonic sequence, and the window's START is recorded in it (R4).
+ */
+describe("CollectionWatchService orders events against same-millisecond suppression", () => {
+  test(
+    "reconciles a candidate whose event precedes suppress() within one millisecond",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-same-ms-"));
+      // A genuine external edit, reported only under its atomic temp name.
+      await Bun.write(join(root, "note.md"), "# edited in an editor\n");
+      const { store } = createSubtreeStore({ direct: { "": ["note.md"] } });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      const realNow = Date.now;
+      const frozenMs = realNow();
+      try {
+        harness.service.start();
+        // Both readings collapse onto one millisecond, which is the boundary a
+        // wall clock cannot resolve. The ORDER is unambiguous: the event
+        // happened, and only then did GNO open its window.
+        Date.now = () => frozenMs;
+        harness.emit([["rename", "note.md.tmp"]]);
+        harness.service.suppress(join(root, "note.md"), 5_000);
+        Date.now = realNow;
+
+        expect(await harness.settle()).toBe("settled");
+
+        // `startMs <= atMs` classified this external change as GNO's own write
+        // and dropped it in silence.
+        expect(harness.batches).toEqual([["note.md"]]);
+      } finally {
+        Date.now = realNow;
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * Reclamation ran only from `suppress()` and from a flush's `finally`. An
+ * ordinary window is still OPEN when its flush finishes, so the final
+ * reclamation correctly retained it - and on an idle daemon nothing ever came
+ * back for it. One entry per suppressed path then survived for the service
+ * lifetime (R4).
+ */
+describe("CollectionWatchService reclaims suppression history when idle", () => {
+  test(
+    "drops a lapsed window with no further events or flushes",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-idle-reclaim-"));
+      const { store } = createSubtreeStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // A short window, and then NOTHING: no event, no flush, no second
+        // `suppress()` to piggyback reclamation on.
+        harness.service.suppress(join(root, "note.md"), 25);
+        expect(harness.service.retainedSuppressionPathCount).toBe(1);
+
+        const deadline = Date.now() + AMBIGUOUS_EVENT_WAIT_MS;
+        while (
+          harness.service.retainedSuppressionPathCount > 0 &&
+          Date.now() < deadline
+        ) {
+          await Bun.sleep(5);
+        }
+        expect(harness.service.retainedSuppressionPathCount).toBe(0);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
