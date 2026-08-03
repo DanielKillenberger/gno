@@ -6,6 +6,9 @@
 
 // Chunker
 export { defaultChunker, MarkdownChunker } from "./chunker";
+// Bounded single-level directory enumeration
+export type { DirectoryChildrenOutcome } from "./directory-children";
+export { listEligibleDirectChildren } from "./directory-children";
 // Language detection
 export { defaultLanguageDetector, SimpleLanguageDetector } from "./language";
 // Sync service

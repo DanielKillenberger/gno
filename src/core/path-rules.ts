@@ -25,6 +25,36 @@ export function hasGlobMeta(pattern: string): boolean {
 }
 
 /**
+ * Normalize a collection-relative DIRECTORY path to the canonical POSIX form
+ * used as a directory key: no leading or trailing separator, no `.` segments,
+ * and the collection root as the empty string.
+ *
+ * Returns `null` when the path cannot be a directory inside the collection
+ * root - an absolute path, a Windows drive/UNC prefix, or any `..` segment.
+ * Callers must treat `null` as a refusal, never as the root.
+ */
+export function normalizeCollectionDirRelPath(
+  dirRelPath: string
+): string | null {
+  const normalized = dirRelPath.replaceAll("\\", "/");
+  if (normalized.startsWith("/") || /^[a-z]:/i.test(normalized)) {
+    return null;
+  }
+
+  const segments: string[] = [];
+  for (const segment of normalized.split("/")) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      return null;
+    }
+    segments.push(segment);
+  }
+  return segments.join("/");
+}
+
+/**
  * Bare values preserve historical component/prefix semantics. Values with
  * glob metacharacters match the complete normalized relative path.
  */

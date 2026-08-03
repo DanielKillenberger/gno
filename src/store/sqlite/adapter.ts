@@ -135,11 +135,13 @@ import {
 } from "../../core/graph-resolver";
 import { buildContentPrefilterNeedles } from "../../core/link-relevance";
 import { normalizeWikiName, stripWikiMdExt } from "../../core/links";
+import { normalizeCollectionDirRelPath } from "../../core/path-rules";
 import {
   parseActivationReceipt,
   serializeActivationReceipt,
 } from "../activation-receipts";
 import { getSchemaVersion, migrations, runMigrations } from "../migrations";
+import { ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL } from "../source-path-sql";
 import { err, ok } from "../types";
 import { getStoredEmbeddingFingerprint } from "../vector/freshness";
 import { modelTableName } from "../vector/sqlite-vec";
@@ -1662,6 +1664,38 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         cause instanceof Error
           ? cause.message
           : "Failed to list record documents",
+        cause
+      );
+    }
+  }
+
+  async listActiveDirectChildSourcePaths(
+    collection: string,
+    dirRelPath: string
+  ): Promise<StoreResult<string[]>> {
+    const parentPath = normalizeCollectionDirRelPath(dirRelPath);
+    if (parentPath === null) {
+      return err(
+        "INVALID_INPUT",
+        `Directory path escapes the collection root: ${dirRelPath}`
+      );
+    }
+
+    try {
+      const db = this.ensureOpen();
+      const rows = db
+        .query<{ source_path: string }, [string, string]>(
+          ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL
+        )
+        .all(collection, parentPath);
+
+      return ok(rows.map((row) => row.source_path));
+    } catch (cause) {
+      return err(
+        "QUERY_FAILED",
+        cause instanceof Error
+          ? cause.message
+          : "Failed to list active direct child source paths",
         cause
       );
     }

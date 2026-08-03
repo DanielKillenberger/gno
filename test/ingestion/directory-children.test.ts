@@ -1,0 +1,259 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import type { WalkConfig } from "../../src/ingestion/types";
+
+import { listEligibleDirectChildren } from "../../src/ingestion/directory-children";
+import { FileWalker } from "../../src/ingestion/walker";
+import { safeRm } from "../helpers/cleanup";
+
+function walkConfig(root: string, overrides: Partial<WalkConfig> = {}) {
+  return {
+    root,
+    pattern: "**/*",
+    include: [],
+    additionalDefaultExtensions: [],
+    exclude: [],
+    maxBytes: 10_000_000,
+    ...overrides,
+  } satisfies WalkConfig;
+}
+
+describe("listEligibleDirectChildren", () => {
+  let base = "";
+  let root = "";
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), "gno-dir-children-"));
+    root = join(base, "root");
+    await mkdir(root);
+  });
+
+  afterEach(async () => {
+    await safeRm(base);
+  });
+
+  test("returns eligible direct children of the collection root", async () => {
+    await writeFile(join(root, "note.md"), "a");
+    await writeFile(join(root, "other.md"), "b");
+    await mkdir(join(root, "sub"));
+    await writeFile(join(root, "sub", "nested.md"), "c");
+
+    const outcome = await listEligibleDirectChildren("", walkConfig(root));
+
+    expect(outcome).toEqual({
+      status: "present",
+      relPaths: ["note.md", "other.md"],
+    });
+  });
+
+  test("accepts '.' and slash-padded forms as the collection root", async () => {
+    await writeFile(join(root, "note.md"), "a");
+
+    for (const dir of [".", "./", ""]) {
+      expect(await listEligibleDirectChildren(dir, walkConfig(root))).toEqual({
+        status: "present",
+        relPaths: ["note.md"],
+      });
+    }
+  });
+
+  test("returns eligible direct children of a nested directory", async () => {
+    await mkdir(join(root, "a", "b"), { recursive: true });
+    await writeFile(join(root, "a", "top.md"), "a");
+    await writeFile(join(root, "a", "b", "deep.md"), "b");
+    await writeFile(join(root, "rootlevel.md"), "c");
+
+    expect(await listEligibleDirectChildren("a", walkConfig(root))).toEqual({
+      status: "present",
+      relPaths: ["a/top.md"],
+    });
+
+    expect(await listEligibleDirectChildren("a/b/", walkConfig(root))).toEqual({
+      status: "present",
+      relPaths: ["a/b/deep.md"],
+    });
+  });
+
+  test("does not recurse into nested subdirectories", async () => {
+    await mkdir(join(root, "deep", "deeper"), { recursive: true });
+    await writeFile(join(root, "deep", "deeper", "hidden-away.md"), "a");
+
+    expect(await listEligibleDirectChildren("deep", walkConfig(root))).toEqual({
+      status: "present",
+      relPaths: [],
+    });
+  });
+
+  test("applies include, exclude, and pattern rules via matchesWalkPath", async () => {
+    await writeFile(join(root, "keep.md"), "a");
+    await writeFile(join(root, "skip.txt"), "b");
+    await writeFile(join(root, "excluded.md"), "c");
+
+    const outcome = await listEligibleDirectChildren(
+      "",
+      walkConfig(root, { include: [".md"], exclude: ["excluded.md"] })
+    );
+
+    expect(outcome).toEqual({ status: "present", relPaths: ["keep.md"] });
+  });
+
+  test("respects a narrowing glob pattern", async () => {
+    await mkdir(join(root, "docs"));
+    await writeFile(join(root, "docs", "in.md"), "a");
+    await writeFile(join(root, "out.md"), "b");
+
+    expect(
+      await listEligibleDirectChildren(
+        "",
+        walkConfig(root, { pattern: "docs/**/*" })
+      )
+    ).toEqual({ status: "present", relPaths: [] });
+
+    expect(
+      await listEligibleDirectChildren(
+        "docs",
+        walkConfig(root, { pattern: "docs/**/*" })
+      )
+    ).toEqual({ status: "present", relPaths: ["docs/in.md"] });
+  });
+
+  test("excludes dotfiles and reserved virtual record paths", async () => {
+    await writeFile(join(root, "visible.md"), "a");
+    await writeFile(join(root, ".hidden.md"), "b");
+    await mkdir(join(root, ".dotdir"));
+    await writeFile(join(root, ".dotdir", "inner.md"), "d");
+    await mkdir(join(root, ".gno", "records"), { recursive: true });
+    await writeFile(join(root, ".gno", "records", "fake.md"), "c");
+
+    expect(await listEligibleDirectChildren("", walkConfig(root))).toEqual({
+      status: "present",
+      relPaths: ["visible.md"],
+    });
+    expect(
+      await listEligibleDirectChildren(".dotdir", walkConfig(root))
+    ).toEqual({ status: "present", relPaths: [] });
+    expect(
+      await listEligibleDirectChildren(".gno/records", walkConfig(root))
+    ).toEqual({ status: "present", relPaths: [] });
+
+    // Parity gate: reconciliation must not surface anything a full collection
+    // walk would refuse to index.
+    const walked = await new FileWalker().walk(walkConfig(root));
+    expect(walked.entries.map((entry) => entry.relPath)).toEqual([
+      "visible.md",
+    ]);
+  });
+
+  test("returns missing for a vanished directory", async () => {
+    expect(await listEligibleDirectChildren("gone", walkConfig(root))).toEqual({
+      status: "missing",
+    });
+  });
+
+  test("returns missing when the target path is a file, not a directory", async () => {
+    await writeFile(join(root, "file.md"), "a");
+
+    expect(
+      await listEligibleDirectChildren("file.md", walkConfig(root))
+    ).toEqual({ status: "missing" });
+  });
+
+  test("returns missing when the collection root itself is gone", async () => {
+    expect(
+      await listEligibleDirectChildren(
+        "",
+        walkConfig(join(base, "no-such-root"))
+      )
+    ).toEqual({ status: "missing" });
+  });
+
+  test("returns error with cause for an unreadable directory", async () => {
+    const locked = join(root, "locked");
+    await mkdir(locked);
+    await writeFile(join(locked, "note.md"), "a");
+    await chmod(locked, 0o000);
+
+    try {
+      const outcome = await listEligibleDirectChildren(
+        "locked",
+        walkConfig(root)
+      );
+      // Running as root defeats permission bits; only assert when it took hold.
+      if (outcome.status === "present") {
+        return;
+      }
+      expect(outcome.status).toBe("error");
+      const { cause } = outcome as { cause: { code?: string } };
+      expect(cause).toBeDefined();
+      expect(cause.code).toBe("EACCES");
+    } finally {
+      await chmod(locked, 0o755);
+    }
+  });
+
+  test("refuses a directory argument that escapes the collection root", async () => {
+    await writeFile(join(base, "outside.md"), "a");
+
+    for (const dir of ["..", "../", "a/../..", "/etc"]) {
+      const outcome = await listEligibleDirectChildren(dir, walkConfig(root));
+      expect(outcome.status).toBe("error");
+      expect(String((outcome as { cause: unknown }).cause)).toContain(
+        "escapes the collection root"
+      );
+    }
+  });
+
+  test("refuses a symlinked directory that resolves outside the collection root", async () => {
+    const outside = join(base, "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "far.md"), "a");
+    await symlink(outside, join(root, "linkdir"));
+
+    const outcome = await listEligibleDirectChildren(
+      "linkdir",
+      walkConfig(root)
+    );
+
+    expect(outcome.status).toBe("error");
+    expect(String((outcome as { cause: unknown }).cause)).toContain(
+      "escapes the collection root"
+    );
+  });
+
+  test("never throws for a bogus glob pattern", async () => {
+    await writeFile(join(root, "note.md"), "a");
+
+    const outcome = await listEligibleDirectChildren(
+      "",
+      walkConfig(root, { pattern: "[" })
+    );
+
+    expect(outcome).toEqual({ status: "present", relPaths: [] });
+  });
+
+  test("symlink handling matches FileWalker.walk", async () => {
+    const outside = join(base, "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "far.md"), "x");
+    await writeFile(join(root, "real.md"), "a");
+    await symlink(join(root, "real.md"), join(root, "link-inside.md"));
+    await symlink(join(outside, "far.md"), join(root, "link-outside.md"));
+    await symlink(join(base, "nope.md"), join(root, "broken.md"));
+
+    const walked = await new FileWalker().walk(walkConfig(root));
+    const walkedRootChildren = walked.entries
+      .map((entry) => entry.relPath)
+      .filter((relPath) => !relPath.includes("/"))
+      .sort();
+
+    const outcome = await listEligibleDirectChildren("", walkConfig(root));
+
+    // FileWalker scans with followSymlinks:false, so no symlink entry is
+    // returned - not even one resolving to a regular file inside the root.
+    expect(walkedRootChildren).toEqual(["real.md"]);
+    expect(outcome).toEqual({ status: "present", relPaths: ["real.md"] });
+  });
+});

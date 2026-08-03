@@ -1689,6 +1689,27 @@ export interface StorePort {
   ): Promise<StoreResult<DocumentRow[]>>;
 
   /**
+   * List the distinct effective source paths of ACTIVE documents that are
+   * direct children of `dirRelPath` within `collection`.
+   *
+   * The effective source path is `COALESCE(record_source_path, rel_path)`, so
+   * record-container documents resolve to their physical container path rather
+   * than their virtual `#record/...` path. Deeper descendants, inactive rows,
+   * and other collections are excluded.
+   *
+   * `dirRelPath` is collection-relative and POSIX-style; the collection root is
+   * `""`. A path that escapes the collection root is rejected with
+   * `INVALID_INPUT` rather than being enumerated.
+   *
+   * Index-served for both the root and nested directories via
+   * `idx_documents_source_parent_path` (migration 026).
+   */
+  listActiveDirectChildSourcePaths(
+    collection: string,
+    dirRelPath: string
+  ): Promise<StoreResult<string[]>>;
+
+  /**
    * Fetch documents by mirror hashes in batch.
    * Useful for retrieval pipelines to avoid full document scans.
    */
