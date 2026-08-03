@@ -614,43 +614,86 @@ function syncErrorAttribution(
 const MAX_DESCRIBED_FAILURES = 3;
 
 /**
- * How long any ONE named value may be before it is elided.
+ * How long any ONE named FIELD may be before it is elided.
  *
  * The count/sample bound alone still lets a single pathological value - a deep
  * path, or a store error that echoes a whole query back - carry an unbounded
  * diagnostic. Both halves of a cause draw their values from the same untrusted
- * places, so both get the same per-value ceiling.
+ * places, so every field gets its own copy of this ceiling: a fragment that
+ * names both a path and a message reserves the budget twice rather than sharing
+ * one, which keeps either field from crowding the other out.
+ *
+ * Exported so tests can assert against the real budget instead of a duplicate
+ * that can drift away from it.
  */
-const MAX_DESCRIBED_VALUE_LENGTH = 200;
-
-/** A relative path is already its own rendering. */
-const renderRelPath = (relPath: string): string => relPath;
+export const MAX_DESCRIBED_VALUE_LENGTH = 200;
 
 /**
- * The ONE bounded rendering both halves of a cause use: a sample of at most
- * `MAX_DESCRIBED_FAILURES` values, each capped at `MAX_DESCRIBED_VALUE_LENGTH`,
- * followed by an explicit count of what was elided.
+ * Cut ONE untrusted value down to its own budget.
  *
- * Every list that reaches a cause is proportional to the failure being
- * described, which is exactly when a diagnostic must not amplify it (R7/R9).
- * Both the resulting LENGTH and the WORK to build it are constant-bounded:
- * `render` is called only for the values that survive the sample, so a result
- * with thousands of failures never renders thousands of strings to throw all
- * but three away.
+ * Called on the RAW value, never on an interpolated string: a store error that
+ * echoes a multi-megabyte query back must never be materialized inside a larger
+ * string first and sliced afterwards. Truncating after interpolation bounds only
+ * the RESULT, while the intermediate still scales with the failure - which is
+ * the amplification the bound exists to stop, arriving during exactly the
+ * cascading store failure the cause is describing (R7/R9).
  */
-function describeBoundedSample<T>(
-  values: readonly T[],
-  render: (value: T) => string
-): string {
-  const described = values.slice(0, MAX_DESCRIBED_FAILURES).map((value) => {
-    const rendered = render(value);
-    return rendered.length > MAX_DESCRIBED_VALUE_LENGTH
-      ? `${rendered.slice(0, MAX_DESCRIBED_VALUE_LENGTH)}...`
-      : rendered;
-  });
-  const truncated = values.length - described.length;
+function boundValue(value: string): string {
+  return value.length > MAX_DESCRIBED_VALUE_LENGTH
+    ? `${value.slice(0, MAX_DESCRIBED_VALUE_LENGTH)}...`
+    : value;
+}
+
+/**
+ * Join already-bounded fragments and state exactly how many were elided.
+ *
+ * Takes fragments rather than values so no caller can hand it something
+ * unbounded: every composition step downstream of here is constant-size.
+ */
+function joinBoundedSample(total: number, fragments: string[]): string {
+  const truncated = total - fragments.length;
   const suffix = truncated > 0 ? ` (+${truncated} more)` : "";
-  return `${described.join("; ")}${suffix}`;
+  return `${fragments.join("; ")}${suffix}`;
+}
+
+/**
+ * Bounded sample of relative paths: at most `MAX_DESCRIBED_FAILURES` of them,
+ * each cut to `MAX_DESCRIBED_VALUE_LENGTH` before it is composed, plus an exact
+ * count of the remainder.
+ *
+ * Slicing the sample first means a result with thousands of failed paths never
+ * touches more than three of them.
+ */
+function describeBoundedPaths(relPaths: readonly string[]): string {
+  return joinBoundedSample(
+    relPaths.length,
+    relPaths.slice(0, MAX_DESCRIBED_FAILURES).map(boundValue)
+  );
+}
+
+/**
+ * Bounded sample of failures, where the path and the message are DISTINCT
+ * untrusted fields and each gets its own reserved budget.
+ *
+ * A single generic renderer could not do this: it had to produce the whole
+ * `path: message` string before anything could be truncated, so the work was
+ * unbounded even though the output was not. Reserving a per-field budget also
+ * keeps a pathological path from crowding the message out of the diagnostic
+ * entirely - both fields survive, both bounded.
+ */
+function describeBoundedFailures(
+  failures: readonly { relPath: string; message?: string }[]
+): string {
+  return joinBoundedSample(
+    failures.length,
+    failures
+      .slice(0, MAX_DESCRIBED_FAILURES)
+      .map((failure) =>
+        failure.message === undefined
+          ? boundValue(failure.relPath)
+          : `${boundValue(failure.relPath)}: ${boundValue(failure.message)}`
+      )
+  );
 }
 
 /**
@@ -670,11 +713,7 @@ function describeBoundedSample<T>(
  */
 function unattributableCauseDetail(attribution: SyncErrorAttribution): string {
   if (attribution.unowned.length > 0) {
-    const described = describeBoundedSample(attribution.unowned, (failure) =>
-      failure.message === undefined
-        ? failure.relPath
-        : `${failure.relPath}: ${failure.message}`
-    );
+    const described = describeBoundedFailures(attribution.unowned);
     return `${attribution.unowned.length} collection-level failure(s) owned by no batched path: ${described}`;
   }
   return `${attribution.undetailedCount} failure(s) reported with no per-path detail`;
@@ -1921,7 +1960,8 @@ export class CollectionWatchService {
       // Naming the contributed paths as the failure of an UNATTRIBUTABLE result
       // asserts that they failed, when the sync in fact failed at the
       // COLLECTION level and reported nothing about them (R7/R9).
-      // BOTH halves of the cause are bounded by the same helper. The unowned
+      // BOTH halves of the cause are bounded, each by the formatter for the
+      // fields it names, and always BEFORE composition. The unowned
       // SAMPLE was bounded first, but the contributed failed paths beside it
       // were not - and one unowned failure alongside thousands of contributed
       // ones still built a per-directory diagnostic that scaled with the
@@ -1929,11 +1969,11 @@ export class CollectionWatchService {
       // (R7/R9). The COUNTS are always exact; only the listing is sampled.
       const alsoFailed =
         failedPaths.length > 0
-          ? `${failedPaths.length} contributed path(s) also reported failed (${describeBoundedSample(failedPaths, renderRelPath)}); `
+          ? `${failedPaths.length} contributed path(s) also reported failed (${describeBoundedPaths(failedPaths)}); `
           : "";
       const cause = new Error(
         attribution.attributable
-          ? `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${describeBoundedSample(failedPaths, renderRelPath)}`
+          ? `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${describeBoundedPaths(failedPaths)}`
           : `sync failed at the collection level, so per-directory attribution was impossible; directory "${entry.directory}" fails closed over ${contributed.length} contributed path(s): ${alsoFailed}${unattributableDetail}`
       );
       this.#notifyDiagnostic(() =>

@@ -14,7 +14,10 @@ import type {
 } from "../../src/ingestion";
 
 import { defaultSyncService } from "../../src/ingestion";
-import { CollectionWatchService } from "../../src/serve/watch-service";
+import {
+  CollectionWatchService,
+  MAX_DESCRIBED_VALUE_LENGTH,
+} from "../../src/serve/watch-service";
 
 function createCollection(name: string, path: string): Collection {
   return {
@@ -4290,10 +4293,18 @@ describe("CollectionWatchService bounds the unattributable cause summary", () =>
  */
 describe("CollectionWatchService bounds every value it names in a cause", () => {
   const CONTRIBUTED_COUNT = 2000;
+  /**
+   * The surviving slice of the huge message. Requires a long run so it cannot
+   * match the stray `y` in the cause's own prose ("per-directory").
+   */
+  const HUGE_MESSAGE_RUN = /y{20,}/;
   /** Comfortably above a bounded cause, far below an unbounded one. */
   const BOUNDED_CAUSE_LIMIT = 2_000;
 
-  async function runContributedFailure(unownedMessage: string) {
+  async function runContributedFailure(
+    unownedMessage: string,
+    unownedRelPath = "elsewhere/backlinks.md"
+  ) {
     const root = await mkdtemp(join(tmpdir(), "gno-watch-bounded-cause-"));
     const relPaths = Array.from(
       { length: CONTRIBUTED_COUNT },
@@ -4321,7 +4332,7 @@ describe("CollectionWatchService bounds every value it names in a cause", () => 
               message: "disk full",
             })),
             {
-              relPath: "elsewhere/backlinks.md",
+              relPath: unownedRelPath,
               code: "QUERY_FAILED",
               message: unownedMessage,
             },
@@ -4371,6 +4382,35 @@ describe("CollectionWatchService bounds every value it names in a cause", () => 
       expect(causes).toHaveLength(1);
       const [cause] = causes as [string];
       expect(cause).toContain("elsewhere/backlinks.md");
+      expect(cause.length).toBeLessThan(BOUNDED_CAUSE_LIMIT);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "truncates each named field before it is interpolated, not after",
+    async () => {
+      // Bounding only the FINAL string still materializes the whole untrusted
+      // value first: `path: message` was composed at full size and sliced
+      // afterwards, so a multi-megabyte store error built a multi-megabyte
+      // intermediate during exactly the cascading failure it describes (R7/R9).
+      const hugeMessage = "y".repeat(2_000_000);
+      const longRelPath = `elsewhere/${"d/".repeat(150)}backlinks.md`;
+      const causes = await runContributedFailure(hugeMessage, longRelPath);
+
+      expect(causes).toHaveLength(1);
+      const [cause] = causes as [string];
+
+      // Each field kept its OWN budget. Composing first and slicing after would
+      // have spent the single budget on the path and dropped the message
+      // entirely; here the message survives at exactly its own ceiling.
+      const messageRun = HUGE_MESSAGE_RUN.exec(cause)?.[0] ?? "";
+      expect(messageRun.length).toBe(MAX_DESCRIBED_VALUE_LENGTH);
+      // The path is bounded on its own raw value too, not by what follows it.
+      expect(cause).toContain(
+        `${longRelPath.slice(0, MAX_DESCRIBED_VALUE_LENGTH)}...`
+      );
+      expect(cause).not.toContain(longRelPath);
       expect(cause.length).toBeLessThan(BOUNDED_CAUSE_LIMIT);
     },
     RED_TEST_TIMEOUT_MS
