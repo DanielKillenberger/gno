@@ -39,8 +39,8 @@ Both repos require their own commits, PRs, gates, and rollback points. Productio
 - [ ] All repo/hosted docs, handoff/PRD/checklist, schemas, CHANGELOG, product copy, and skill agree; driven local and authorized production QA evidence is retained.
 
 ## Done summary
-Added a real GNO publish-artifact producer and a cross-repo gno.sh consumer smoke that proves public, secret-link, encrypted, and legacy asset-free interoperability. The smoke renders real image DOM, verifies visibility-specific URL projection, ensures encrypted raster bytes remain ciphertext-only until Blob URL creation, and avoids production DB/object storage. Reconciled GNO docs/spec/skills/CHANGELOG and gno.sh handoff/PRD/checklist/hosted product copy. Local hosted-doc QA covered desktop and mobile rendering.
+Implemented and verified the bundled raster attachment contract end to end across GNO and gno.sh. The shipped work covers the versioned cross-repo contract, safe local attachment resolution, public/secret/encrypted delivery, transactional ingestion, renderer behavior, documentation, security hardening, and cross-repo release verification.
 ## Evidence
-- Commits: d21b169d, 7600bc3
-- Tests: GNO: bun run prerelease, GNO: bun test test/publish/export-service.test.ts (3 pass), GNO: bun run docs:verify (15 pass, 2 model-dependent skips), GNO skill autoresearch: 47/47 (100%), gno.sh: bun run check, gno.sh: bun run typecheck, gno.sh: bun run test (185 pass, 5 DB integration skips), gno.sh: bun run build (92 pages prerendered), gno.sh: GNO_REPO=/tmp/gno-pilot.0WHbYY bun run smoke:publish:gno, Local browser QA: publish docs/feature desktop and 390x844 mobile, no overflow
-- PRs:
+- Commits: 7129d3f609bf73b37286f253d5f7ea3bad80093a, 0948f4f8d30145e8671407ca4c1a5a1bcc73a9a1, 95163f597a4802b277f4b7f6e36337a12f34bebf
+- Tests: bun run prerelease (3907 pass, 2 intentional skips, docs 15/15, package smoke passed), gno.sh bun run check && bun run typecheck && bun run build, cross-repo publish contract and live-site local QA
+- PRs: https://github.com/gmickel/gno/pull/176, https://github.com/gmickel/gno.sh/pull/30

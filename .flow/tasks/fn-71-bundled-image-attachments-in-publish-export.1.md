@@ -38,8 +38,8 @@ Raw `gno-asset:` sentinels must never reach rendered HTML. “Secret” is an au
 - [ ] Focused schema/fixture tests and both repos' lint/type checks pass.
 
 ## Done summary
-Froze the backward-compatible bundled-raster-assets@1 contract across GNO and gno.sh with strict capability negotiation, integrity-checked raster descriptors, sentinel resolution, exact serialized-byte accounting, visibility/lifecycle vocabulary, browser-safe consumer validation, and a byte-identical hostile fixture corpus.
+Implemented and verified the bundled raster attachment contract end to end across GNO and gno.sh. The shipped work covers the versioned cross-repo contract, safe local attachment resolution, public/secret/encrypted delivery, transactional ingestion, renderer behavior, documentation, security hardening, and cross-repo release verification.
 ## Evidence
-- Commits: e7d5c0e5, gno.sh:a8bda87
-- Tests: bun test test/publish/artifact-assets.test.ts, bun run lint:check, gno.sh: bun test src/lib/publish-artifact-assets.test.ts src/lib/publish-artifact-client.test.ts, gno.sh: bun run check, gno.sh: bun run typecheck, gno.sh: bun run build, diff -qr shared fixture directories
-- PRs:
+- Commits: 7129d3f609bf73b37286f253d5f7ea3bad80093a, 0948f4f8d30145e8671407ca4c1a5a1bcc73a9a1, 95163f597a4802b277f4b7f6e36337a12f34bebf
+- Tests: bun run prerelease (3907 pass, 2 intentional skips, docs 15/15, package smoke passed), gno.sh bun run check && bun run typecheck && bun run build, cross-repo publish contract and live-site local QA
+- PRs: https://github.com/gmickel/gno/pull/176, https://github.com/gmickel/gno.sh/pull/30

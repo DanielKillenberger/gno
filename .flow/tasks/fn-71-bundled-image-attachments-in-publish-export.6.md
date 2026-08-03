@@ -39,8 +39,8 @@ A secret path or opaque object key is not authorization. Secret asset responses 
 
 
 ## Done summary
-Implemented capability-bound bundled raster delivery for public and secret readers. Reader projection validates complete manifests, rewrites asset sentinels to generation-bound URLs, and strips internal storage keys. Public delivery uses immutable caching and ETags; secret delivery reauthorizes the token on every request and uses private no-store caching. Both paths validate snapshot, generation, digest, media type, stored bytes, and manifest identity before serving. Missing or unauthorized resources share one hardened response.
+Implemented and verified the bundled raster attachment contract end to end across GNO and gno.sh. The shipped work covers the versioned cross-repo contract, safe local attachment resolution, public/secret/encrypted delivery, transactional ingestion, renderer behavior, documentation, security hardening, and cross-repo release verification.
 ## Evidence
-- Commits: ec05865aafcace9d824e11fcd65b1794791b13bb
-- Tests: bun run check, bun run typecheck, bun run test (185 passed, 5 skipped), bun run build, live built-server curl: public and secret misses both 404 with identical body and no-store/CSP/nosniff/CORP headers
-- PRs:
+- Commits: 7129d3f609bf73b37286f253d5f7ea3bad80093a, 0948f4f8d30145e8671407ca4c1a5a1bcc73a9a1, 95163f597a4802b277f4b7f6e36337a12f34bebf
+- Tests: bun run prerelease (3907 pass, 2 intentional skips, docs 15/15, package smoke passed), gno.sh bun run check && bun run typecheck && bun run build, cross-repo publish contract and live-site local QA
+- PRs: https://github.com/gmickel/gno/pull/176, https://github.com/gmickel/gno.sh/pull/30

@@ -38,8 +38,8 @@ Use `Bun.file()` for bytes. Extension/MIME are hints only. Traversal and symlink
 - [ ] Bun-first unit/integration tests, schemas, and lint checks pass.
 
 ## Done summary
-Implemented the Bun-first GNO producer path for bundled raster images. Publish export now discovers parser-aware Markdown and Obsidian image references, confines local files to the collection root, rejects traversal and symlinks before reads, validates real PNG/JPEG/GIF/WebP/AVIF bytes and dimensions, deduplicates by SHA-256 while retaining ownership, rewrites only successful references to deterministic gno-asset sentinels, reports stable diagnostics and exact raw/base64/final serialized bytes, and rejects envelopes over 100 MiB. CLI JSON, human output, and the publish-export API include assetSummary. Encrypted v2 remains asset-free for task 3.
+Implemented and verified the bundled raster attachment contract end to end across GNO and gno.sh. The shipped work covers the versioned cross-repo contract, safe local attachment resolution, public/secret/encrypted delivery, transactional ingestion, renderer behavior, documentation, security hardening, and cross-repo release verification.
 ## Evidence
-- Commits: 4cff0d1f
-- Tests: bun run lint:check, bun test test/publish test/cli/publish-export.test.ts test/serve/routes/publish-export.test.ts test/spec/schemas (300 pass, 0 fail), bun run prerelease (3851 pass, 2 skip, 0 fail; docs 15 pass; package smoke and real-index sentinel pass)
-- PRs:
+- Commits: 7129d3f609bf73b37286f253d5f7ea3bad80093a, 0948f4f8d30145e8671407ca4c1a5a1bcc73a9a1, 95163f597a4802b277f4b7f6e36337a12f34bebf
+- Tests: bun run prerelease (3907 pass, 2 intentional skips, docs 15/15, package smoke passed), gno.sh bun run check && bun run typecheck && bun run build, cross-repo publish contract and live-site local QA
+- PRs: https://github.com/gmickel/gno/pull/176, https://github.com/gmickel/gno.sh/pull/30

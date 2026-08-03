@@ -38,8 +38,8 @@ A stored object is not visible until the matching snapshot generation is committ
 - [ ] gno.sh check/typecheck/tests and focused storage/ingest integration pass.
 
 ## Done summary
-Implemented gno.sh's strict v1 bundled-raster ingest boundary. The consumer validates the complete artifact before writes, persists immutable private objects under opaque generation keys, enriches snapshots with digest-bound storage manifests, and activates fallback or database visibility only after every object is durable. Failed activation cleans newly created objects; same-generation requests are serialized; S3 creates are conditional and storage errors fail closed. Added idempotent delete, rollback, and orphan-cleanup lifecycle operations plus exact UTF-8 envelope enforcement.
+Implemented and verified the bundled raster attachment contract end to end across GNO and gno.sh. The shipped work covers the versioned cross-repo contract, safe local attachment resolution, public/secret/encrypted delivery, transactional ingestion, renderer behavior, documentation, security hardening, and cross-repo release verification.
 ## Evidence
-- Commits: e8dfdf8
-- Tests: cd /Users/gordon/work/gno.sh && bun run test (169 passed, 5 skipped, 0 failed), cd /Users/gordon/work/gno.sh && bun run check, cd /Users/gordon/work/gno.sh && bun run typecheck, cd /Users/gordon/work/gno.sh && bun run build, cd /Users/gordon/work/gno.sh && bun run test src/lib/publish-artifact-asset-storage.test.ts src/lib/publish-artifact-asset-lifecycle.test.ts src/lib/publish-artifact-asset-lifecycle.integration.test.ts (17 passed)
-- PRs:
+- Commits: 7129d3f609bf73b37286f253d5f7ea3bad80093a, 0948f4f8d30145e8671407ca4c1a5a1bcc73a9a1, 95163f597a4802b277f4b7f6e36337a12f34bebf
+- Tests: bun run prerelease (3907 pass, 2 intentional skips, docs 15/15, package smoke passed), gno.sh bun run check && bun run typecheck && bun run build, cross-repo publish contract and live-site local QA
+- PRs: https://github.com/gmickel/gno/pull/176, https://github.com/gmickel/gno.sh/pull/30

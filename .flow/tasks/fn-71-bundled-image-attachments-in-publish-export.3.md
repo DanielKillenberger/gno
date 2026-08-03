@@ -38,8 +38,8 @@ Blob URLs are capabilities scoped to the document; revocation is required. No de
 - [ ] Cross-repo encrypted fixtures, browser tests, and gates pass.
 
 ## Done summary
-Encrypted v2 exports now resolve and validate local raster attachments before AES-GCM encryption, keep descriptors and bytes exclusively inside client-decrypted plaintext, and declare the shared capability only on the outer envelope. The gno.sh encrypted reader fail-closes on malformed payloads, revalidates digest/MIME/dimensions/ownership, rewrites sentinels to generation-scoped Blob URLs, preserves safe external HTTPS images, rejects forged Blob URLs, and revokes URLs on failure, replacement, racing decrypt, and unmount.
+Implemented and verified the bundled raster attachment contract end to end across GNO and gno.sh. The shipped work covers the versioned cross-repo contract, safe local attachment resolution, public/secret/encrypted delivery, transactional ingestion, renderer behavior, documentation, security hardening, and cross-repo release verification.
 ## Evidence
-- Commits: b9e3bc94c736c9c724e2ea9c20d973a22cf66f6e, 9df0fa5beff526091593f0c86dd2f65d434c8aa9
-- Tests: gno: bun run prerelease (3855 pass, 2 skip, 0 fail; docs 15 pass; extension/package/real-index sentinel pass), gno.sh: bun run check, gno.sh: bun run typecheck, gno.sh: bun run test (152 pass, 5 skip, 0 fail), gno.sh: bun run build
-- PRs:
+- Commits: 7129d3f609bf73b37286f253d5f7ea3bad80093a, 0948f4f8d30145e8671407ca4c1a5a1bcc73a9a1, 95163f597a4802b277f4b7f6e36337a12f34bebf
+- Tests: bun run prerelease (3907 pass, 2 intentional skips, docs 15/15, package smoke passed), gno.sh bun run check && bun run typecheck && bun run build, cross-repo publish contract and live-site local QA
+- PRs: https://github.com/gmickel/gno/pull/176, https://github.com/gmickel/gno.sh/pull/30
