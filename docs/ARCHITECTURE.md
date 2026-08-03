@@ -176,7 +176,14 @@ do not surface stale edges.
 
 `syncAll` defers this projection until every collection has synced, then runs
 one exact global reconciliation. File-watcher batches use path-scoped ingestion
-and reproject changed sources plus known backlinks; periodic/full sync remains
+and reproject changed sources plus known backlinks. A batch is not always
+path-scoped in origin: an event that cannot name an eligible path (an atomic
+save reported under its temporary sibling, or a recursive directory delete
+reported as the bare directory) marks that directory dirty, and the flush
+reconciles the directory's direct eligible children on disk against its active
+indexed direct children before handing the deduplicated union to the same
+path-scoped ingestion. The blast radius stays one directory deep — never the
+whole collection. Periodic/full sync remains
 the exact fallback for previously unresolved frontmatter targets. Projection
 yields to the event loop in bounded intervals so HTTP requests remain
 responsive during larger graph rebuilds.

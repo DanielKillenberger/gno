@@ -387,11 +387,40 @@ gno ls
 gno daemon --status
 ```
 
+The watcher treats a filesystem event as a hint about a changed _area_, not as a
+trustworthy filename. When an event cannot name an eligible file — an atomic save
+that reports only its temporary sibling, or a directory delete that reports only
+the directory — GNO reconciles that one directory: it lists the eligible files
+directly inside it and the active indexed documents directly inside it, and syncs
+the union. Atomic saves and deletions therefore no longer need a manual
+`gno update`.
+
 Common causes:
 
 - no collections configured
 - file changes happened outside configured patterns
 - the daemon was started with `--no-sync-on-start` and is only watching future changes
+
+Cases the watcher still cannot recover on its own, where `gno update` remains the
+fix:
+
+- **Documents nested deeper than one level under a deleted directory.** Deleting
+  `notes/archive/` deactivates the indexed documents directly inside `archive/`,
+  but not those inside `archive/2024/`. Reconciliation is deliberately bounded to
+  the one affected directory.
+- **Subdirectories created on Linux after the watcher started.** Bun's recursive
+  watch does not extend to them ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939))
+  and emits no event at all for writes inside them, so there is no hint to
+  reconcile. Restart `gno serve` / `gno daemon`, or run `gno update`.
+
+Known limitation — **very large directories are slow to reconcile.** Listing the
+directory and the matching index lookup are cheap: measured at about 9 ms combined
+(median of five warm runs) for one directory holding 5,000 eligible files, 500
+excluded files, and 200 indexed-but-deleted paths. The sync pass that follows is
+the ceiling. It re-stats and re-hashes every eligible file in the directory, and
+on that fixture took roughly 17 seconds. While it runs, that collection's watcher
+is busy, so further changes land late rather than not at all. Splitting a very
+large collection across subdirectories keeps each reconciliation small.
 
 ### "I ran gno serve and gno daemon together"
 

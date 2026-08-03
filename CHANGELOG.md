@@ -48,6 +48,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reconciled resident watcher events against the changed directory instead of
+  trusting the reported filename. A recursive `fs.watch` does not reliably name
+  the file that actually changed: an atomic save (write a temporary sibling,
+  rename it into place) can report only the temporary name, and a recursive
+  directory delete can report only the directory. Both were discarded as
+  ineligible, so atomically saved documents stayed invisible and deleted ones
+  stayed retrievable until a manual `gno update`. An event that cannot name an
+  eligible path now marks its parent directory and the reported path itself as
+  dirty; at flush time the watcher reconciles the eligible files directly on
+  disk in that directory against the active indexed documents directly in it,
+  and hands one deduplicated batch to the existing path sync. The collection's
+  live `pattern`, `include`, `exclude`, dotfile and reserved-path rules, and
+  application-write suppression are re-applied to every candidate, so an
+  ineligible event never causes an ineligible file to be indexed. Reconciliation
+  stays bounded to the one affected directory: documents nested deeper than a
+  deleted directory's direct children, and Linux subdirectories created after
+  the watcher started (oven-sh/bun#15939, which emits no event at all), still
+  need `gno update`. Thanks @DanielKillenberger for the report.
+
 - Aligned encrypted publish ciphertext field bounds to the 100 MiB final
   envelope budget, recognized CommonMark tilde fences during attachment
   discovery, rejected bare `gno-asset:` sentinels, enforced `sourceRef`

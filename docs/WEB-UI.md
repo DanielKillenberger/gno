@@ -520,9 +520,17 @@ The dashboard health model now includes background-service state:
 
 This is meant to reduce the “why didn’t it refresh?” class of failures in long sessions.
 
-Watcher batches sync only the changed paths and refresh graph projection for
-those documents plus known backlinks. A full sync still performs one exact
-global graph reconciliation. Status aggregation is set-based, concurrent status
+Watcher batches sync only the affected paths and refresh graph projection for
+those documents plus known backlinks. When a filesystem event cannot name an
+eligible file — an atomic save reported under a temporary name, or a directory
+delete reported as the bare directory — the batch is the reconciled contents of
+that one directory (its eligible files on disk unioned with its active indexed
+documents) rather than a single path. It is never a whole-collection walk.
+Atomic saves and deletions are therefore picked up live, without a manual
+`gno update`. Two cases still need one: documents nested deeper than a deleted
+directory's direct children, and, on Linux, subdirectories created after the
+watcher started (Bun emits no event for those at all). A full sync still
+performs one exact global graph reconciliation. Status aggregation is set-based, concurrent status
 requests share the same in-flight build, and the dashboard reuses that response
 for its model selector instead of issuing a duplicate request.
 

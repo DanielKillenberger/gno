@@ -67,6 +67,28 @@ gno daemon --no-sync-on-start
 ```
 
 That starts the watcher immediately and only reacts to future file changes.
+Anything already on disk when the daemon starts stays unindexed until the next
+`gno update` or a restart without the flag.
+
+"Reacts to future file changes" includes changes the operating system does not
+report cleanly. An event that cannot name an eligible file — an atomic save
+reported only under its temporary sibling, or a recursive directory delete
+reported only as the directory — reconciles that one directory: the eligible
+files directly on disk in it are unioned with the active indexed documents
+directly in it, and the result is synced. Atomic saves and deletions are picked
+up live; the collection's `pattern`, `include`, `exclude`, and dotfile and
+reserved-path rules are re-applied, so an ineligible file is never indexed just
+because its event triggered reconciliation.
+
+Two changes still fall outside what the watcher can observe and need a
+`gno update` or a restart:
+
+- documents nested deeper than one level under a deleted directory — only the
+  deleted directory's direct indexed children deactivate;
+- on Linux, subdirectories created after the watcher started, which Bun's
+  recursive watch does not extend to
+  ([oven-sh/bun#15939](https://github.com/oven-sh/bun/issues/15939)); no event
+  is emitted for writes inside them at all, so there is nothing to reconcile.
 
 ## Managing the Daemon
 
