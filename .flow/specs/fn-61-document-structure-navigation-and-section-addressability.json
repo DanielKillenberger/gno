@@ -19,7 +19,7 @@
   "plan_reviewed_at": null,
   "ready": true,
   "spec_path": ".flow/specs/fn-61-document-structure-navigation-and-section-addressability.md",
-  "status": "open",
+  "status": "done",
   "title": "Document structure navigation and section addressability",
   "tracker": {
     "baseHashFlow": null,
@@ -32,5 +32,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-02T21:41:50.420550Z"
+  "updated_at": "2026-08-03T01:21:19.823900Z"
 }
