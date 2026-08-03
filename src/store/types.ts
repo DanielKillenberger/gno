@@ -14,6 +14,11 @@ import type {
 } from "../config/types";
 import type { RecordAnchor, RecordMetadata } from "../converters/types";
 import type { EgressLineage } from "../core/egress-provenance";
+import type {
+  FileRefactorJournalAdvance,
+  FileRefactorRecoveryReceipt,
+  FileRefactorRecoveryReceiptDraft,
+} from "../core/file-refactor-journal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Types
@@ -247,6 +252,52 @@ export interface DocLinkRow {
   endCol: number;
   /** Source of the link */
   source: DocLinkSource;
+}
+
+/**
+ * Bounded read snapshot for reference-safe rename/move planning.
+ * Content covers indexed backlinks unioned with a conservative content
+ * prefilter (opaque embeds/HTML/code/malformed may not be in doc_links).
+ * Never logged by callers.
+ */
+export interface FileRefactorResolutionCatalogDocument {
+  id: number;
+  uri: string;
+  relPath: string;
+  collection: string;
+  title: string | null;
+}
+
+export interface FileRefactorResolutionReferrerDocument extends FileRefactorResolutionCatalogDocument {
+  /** Markdown body when available; null when mirror content is missing. */
+  content: string | null;
+  contentTruncated: boolean;
+  /** True when a potentially relevant document had no loadable mirror. */
+  contentMissing: boolean;
+  editable: boolean;
+  editableReason?: string;
+  sourceExt: string;
+  sourceMime: string;
+  recordKey: string | null;
+}
+
+export interface FileRefactorResolutionSnapshot {
+  source: FileRefactorResolutionCatalogDocument & {
+    mirrorHash: string | null;
+    sourceExt: string;
+    sourceMime: string;
+    recordKey: string | null;
+    content: string | null;
+    contentTruncated: boolean;
+    editable: boolean;
+    editableReason?: string;
+  };
+  catalog: FileRefactorResolutionCatalogDocument[];
+  referrers: FileRefactorResolutionReferrerDocument[];
+  occupiedRelPaths: string[];
+  truncated: boolean;
+  /** Content-free truncation reason codes. */
+  truncationReasons: string[];
 }
 
 /** Semantic document edge row from DB. */
@@ -1710,6 +1761,27 @@ export interface StorePort {
   /** Purge the journal while retaining a cursor-expiry boundary. */
   purgeDocumentChanges(): Promise<StoreResult<DocumentChangePurgeResult>>;
 
+  /** Create a content-free prepared file-refactor recovery receipt. */
+  createFileRefactorPreparedReceipt(
+    draft: FileRefactorRecoveryReceiptDraft
+  ): Promise<StoreResult<FileRefactorRecoveryReceipt>>;
+
+  /** Advance phase/state on a file-refactor recovery receipt. */
+  advanceFileRefactorReceipt(
+    journalId: string,
+    update: FileRefactorJournalAdvance
+  ): Promise<StoreResult<FileRefactorRecoveryReceipt>>;
+
+  /** Load one file-refactor recovery receipt by journal id. */
+  getFileRefactorReceiptById(
+    journalId: string
+  ): Promise<StoreResult<FileRefactorRecoveryReceipt | null>>;
+
+  /** Latest receipt for a plan digest (deterministic retry/recovery lookup). */
+  getLatestFileRefactorReceiptByPlanDigest(
+    planDigest: string
+  ): Promise<StoreResult<FileRefactorRecoveryReceipt | null>>;
+
   /** Register one user-owned Capsule file and its metadata-only evidence refs. */
   upsertSavedCapsuleRegistration(
     input: SavedCapsuleRegistrationInput
@@ -1945,6 +2017,18 @@ export interface StorePort {
       Array<{ docid: string; uri: string; title: string | null } | null>
     >
   >;
+
+  /**
+   * Bounded resolution/inventory snapshot for reference-safe rename/move planning.
+   * Read-only: never mutates documents, links, or content.
+   */
+  getFileRefactorResolutionSnapshot?(input: {
+    sourceUri: string;
+    maxCatalogDocuments?: number;
+    maxReferrerDocuments?: number;
+    maxContentCharsPerDocument?: number;
+    maxTotalContentChars?: number;
+  }): Promise<StoreResult<FileRefactorResolutionSnapshot>>;
 
   /**
    * Set semantic edges for a document.

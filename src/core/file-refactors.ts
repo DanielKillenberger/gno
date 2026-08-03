@@ -1,7 +1,9 @@
 /**
- * Shared file refactor planning helpers.
+ * Shared file refactor planning helpers and reference-safe contract exports.
  *
- * Browser-safe path planning, with warning generation based on known link data.
+ * Browser-safe path planning and warning generation based on known link data.
+ * Versioned preview/apply contracts live in `file-refactor-contract.ts` and are
+ * re-exported here for a stable import path.
  *
  * @module src/core/file-refactors
  */
@@ -10,6 +12,86 @@
 import { posix as pathPosix } from "node:path";
 
 import { validateRelPath } from "./validation";
+
+export {
+  applyDestinationOnlyEdit,
+  compareExaminedReferences,
+  compareUtf16CodeUnits,
+  computeFileRefactorPlanDigest,
+  deriveCanApply,
+  FILE_REFACTOR_APPLY_CONFIRMATION,
+  FILE_REFACTOR_MUTATION_BOUNDARY,
+  FILE_REFACTOR_REASON_CODES,
+  FILE_REFACTOR_SCHEMA_VERSION,
+  fingerprintUtf8Content,
+  isBytePreservedOutsideSpan,
+  isContentPreservedOutsideSpan,
+  sortExaminedReferences,
+  stableStringify,
+  summarizeReferenceClassifications,
+  type FileRefactorAffectedDocument,
+  type FileRefactorApplyRequest,
+  type FileRefactorApplyResult,
+  type FileRefactorApplyStatus,
+  type FileRefactorConflictPolicy,
+  type FileRefactorDestinationSpan,
+  type FileRefactorDocumentRef,
+  type FileRefactorExaminedReference,
+  type FileRefactorFilesystemState,
+  type FileRefactorIndexConvergenceState,
+  type FileRefactorMutationBoundary,
+  type FileRefactorOperation,
+  type FileRefactorPreconditions,
+  type FileRefactorPreviewPlan,
+  type FileRefactorReasonCode,
+  type FileRefactorReferenceClassification,
+  type FileRefactorReferenceKind,
+  type FileRefactorSafetySummary,
+} from "./file-refactor-contract";
+
+export {
+  FILE_REFACTOR_PLANNER_CAPS,
+  planFileRefactorImpact,
+  type FileRefactorPlannerDocument,
+  type PlanFileRefactorImpactInput,
+} from "./file-refactor-planner";
+
+export {
+  planFileRefactorImpactFromSnapshot,
+  planInputFromResolutionSnapshot,
+  type FileRefactorSnapshotLike,
+} from "./file-refactor-from-snapshot";
+
+export {
+  applyFileRefactor,
+  createMemoryFileRefactorJournal,
+  journalPortFromStore,
+  type ApplyFileRefactorDeps,
+  type FileRefactorBoundaryHook,
+  type FileRefactorSyncCallback,
+} from "./file-refactor-service";
+
+export {
+  applyCanonicalFileRefactor,
+  assertFileRefactorSyncConverged,
+  buildCanonicalRefactorPlan,
+  buildDurableFileRefactorApplyDeps,
+  collectionRefactorLockPath,
+  FILE_REFACTOR_COLLECTION_LOCK_NAME,
+  parseRefactorApplyConfirmation,
+  resolveMoveTarget,
+  resolveRenameTarget,
+  type BuildCanonicalRefactorPlanInput,
+  type FileRefactorPathTarget,
+  type ParsedRefactorApplyConfirmation,
+} from "./file-refactor-adapter";
+
+export {
+  planMoveRefactor,
+  planRenameRefactor,
+  type MovePlan,
+  type RenamePlan,
+} from "./file-refactor-paths";
 
 export interface RefactorWarningSummary {
   warnings: string[];
@@ -22,16 +104,6 @@ export interface RefactorLinkSnapshot {
   backlinks: number;
   wikiLinks: number;
   markdownLinks: number;
-}
-
-export interface RenamePlan {
-  nextRelPath: string;
-  nextUri: string;
-}
-
-export interface MovePlan {
-  nextRelPath: string;
-  nextUri: string;
 }
 
 export interface DuplicatePlan {
@@ -89,50 +161,6 @@ function nextAvailableRelPath(relPath: string, existing: Set<string>): string {
     }
     counter += 1;
   }
-}
-
-export function planRenameRefactor(input: {
-  collection: string;
-  currentRelPath: string;
-  nextName: string;
-}): RenamePlan {
-  const current = validateRelPath(input.currentRelPath);
-  const directory = pathPosix.dirname(current);
-  const currentExt = pathPosix.extname(current);
-  const nextFilename = pathPosix.extname(input.nextName)
-    ? input.nextName
-    : `${input.nextName}${currentExt}`;
-  const nextRelPath =
-    directory === "."
-      ? validateRelPath(nextFilename)
-      : validateRelPath(`${directory}/${nextFilename}`);
-
-  return {
-    nextRelPath,
-    nextUri: `gno://${input.collection}/${nextRelPath}`,
-  };
-}
-
-export function planMoveRefactor(input: {
-  collection: string;
-  currentRelPath: string;
-  folderPath: string;
-  nextName?: string;
-}): MovePlan {
-  const current = validateRelPath(input.currentRelPath);
-  const safeFolder = validateRelPath(input.folderPath).replace(
-    /^\.\/|\/+$/g,
-    ""
-  );
-  const filename = input.nextName?.trim() || pathPosix.basename(current);
-  const nextRelPath = safeFolder
-    ? validateRelPath(`${safeFolder}/${filename}`)
-    : validateRelPath(filename);
-
-  return {
-    nextRelPath,
-    nextUri: `gno://${input.collection}/${nextRelPath}`,
-  };
 }
 
 export function planDuplicateRefactor(input: {
