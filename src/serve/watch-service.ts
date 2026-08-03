@@ -33,17 +33,8 @@ export interface CollectionWatchState {
   lastSyncAt: string | null;
 }
 
-/**
- * Why a filesystem event could not name an eligible path directly.
- *
- * `hint-budget-exhausted` is not an event of its own: it is emitted once per
- * affected directory per debounce window when the bounded directory-hint budget
- * fills, so the resulting degradation is visible instead of silent.
- */
-export type AmbiguousWatchEventReason =
-  | "ineligible-path"
-  | "missing-filename"
-  | "hint-budget-exhausted";
+/** Why a filesystem event could not name an eligible path directly. */
+export type AmbiguousWatchEventReason = "ineligible-path" | "missing-filename";
 
 /** Which half of a bounded reconciliation failed. */
 export type ReconciliationStage = "enumerate" | "store" | "sync";
@@ -99,21 +90,6 @@ export interface CollectionWatchCallbacks {
 }
 
 /**
- * How many reported-path directory hints one affected directory may accumulate
- * inside a single debounce window.
- *
- * A hint costs one directory enumeration plus one store query, so an unbounded
- * hint set turns ordinary temp-file churn with unique names (`note.md.tmp.0`,
- * `note.md.tmp.1`, ...) into unbounded sequential filesystem and database work
- * - the "reconciliation amplification" risk. The affected DIRECTORY is always
- * reconciled when the budget fills, which is a superset of every dropped hint
- * that was really a file. The residual, deliberately bounded, degradation is
- * the same class as the documented R12 direct-children boundary: beyond the
- * budget, a deleted SUBDIRECTORY's indexed children wait for `gno update`.
- */
-const MAX_DIRECTORY_HINTS = 8;
-
-/**
  * The queued dirty-directory work for ONE affected directory.
  *
  * Work is keyed by affected directory - the directory portion of the reported
@@ -126,6 +102,16 @@ const MAX_DIRECTORY_HINTS = 8;
  * its parent. Resolution order is unchanged - a hint resolves first, and the
  * affected directory is the fallback when the hint yields nothing.
  *
+ * `hints` is deliberately UNBOUNDED. An earlier revision capped it, which was
+ * the wrong lever: at queue time a dead temp name and a recursively deleted
+ * directory are the same thing - a name that no longer exists - so a cap that
+ * drops "probably a temp file" can drop the one hint that was a deletion, and
+ * R12 fails outright with no signal. What made a cap tempting was the per-hint
+ * COST, and that is now gone: the whole hint set is discriminated in ONE
+ * batched store lookup per flush, and the disk is enumerated only for hints
+ * that the indexed side proved are real directories. What remains is a Set of
+ * short strings living for at most one 300 ms debounce window.
+ *
  * Only the root is stamped at queue time. Resolution is ALWAYS performed
  * against the current collection configuration, so a generation stamp would
  * change nothing about filters, patterns, or sync options; a changed ROOT is
@@ -134,10 +120,8 @@ const MAX_DIRECTORY_HINTS = 8;
 interface DirtyDirectoryEntry {
   /** `normalize(collection.path)` when the first event for this key arrived. */
   root: string;
-  /** Reported paths under this directory, capped at `MAX_DIRECTORY_HINTS`. */
+  /** Reported paths under this directory, as candidate directories. */
   hints: Set<string>;
-  /** The budget filled and further hints were dropped for this window. */
-  hintsTruncated: boolean;
 }
 
 /** Outcome of reconciling one directory. */
@@ -484,9 +468,13 @@ export class CollectionWatchService {
    * is not a directory enumerates as `missing` and reconciles against the
    * indexed side only, which is exactly the deletion behavior.
    *
-   * Keying by directory is what bounds the work. 25 events naming 25 distinct
-   * temp files in one directory previously queued 25 independent units; they
-   * now collapse to one directory plus at most `MAX_DIRECTORY_HINTS` hints.
+   * Keying by directory is what bounds the WORK. 25 events naming 25 distinct
+   * temp files in one directory queue 25 hints, but those 25 hints cost one
+   * batched store lookup and zero directory enumerations at flush time (see
+   * `#reconcileDirtyDirectories`); only the one affected directory is
+   * enumerated. Retaining every hint is what keeps a deleted directory - which
+   * is indistinguishable from a dead temp name until the indexed side is
+   * consulted - from being silently discarded.
    */
   #queueDirtyDirectory(
     collection: Collection,
@@ -524,22 +512,13 @@ export class CollectionWatchService {
     let entry = dirty.get(directory);
     if (!entry || entry.root !== watchedRoot) {
       // A root change mid-window invalidates whatever was queued for this key.
-      entry = { root: watchedRoot, hints: new Set(), hintsTruncated: false };
+      entry = { root: watchedRoot, hints: new Set() };
       dirty.set(directory, entry);
     }
-    // A hint only earns budget if it could be reconciled at all; an excluded or
-    // dot-prefixed reported path is covered by the directory fallback alone.
-    if (reportedIsReconcilable && !entry.hints.has(reported)) {
-      if (entry.hints.size < MAX_DIRECTORY_HINTS) {
-        entry.hints.add(reported);
-      } else if (!entry.hintsTruncated) {
-        entry.hintsTruncated = true;
-        this.#notifyAmbiguous(
-          collection.name,
-          directory,
-          "hint-budget-exhausted"
-        );
-      }
+    // An excluded or dot-prefixed reported path is not retained: a full sync
+    // would never walk it either, so it is covered by the directory alone.
+    if (reportedIsReconcilable) {
+      entry.hints.add(reported);
     }
     this.#dirtyByCollection.set(collection.name, dirty);
     this.#armFlushTimer(collection.name);
@@ -785,16 +764,38 @@ export class CollectionWatchService {
   /**
    * Resolve queued dirty directories into concrete candidate relative paths.
    *
-   * Resolution order is unchanged by the directory keying: each retained hint
-   * (a reported path) resolves first, and the affected directory is the
-   * fallback. A hint that resolves to real work (a directory that exists on
-   * disk, or one with active indexed children) IS the affected area, so the
-   * directory is not enumerated for it - that keeps a recursive directory
-   * delete from dragging every unchanged sibling of the deleted directory into
-   * the batch. Only when a hint yields nothing is the event read as "a file
-   * changed here", and the affected directory is reconciled instead. A key
-   * whose hint budget filled always reconciles the directory, because the
-   * dropped hints were overwhelmingly ordinary file churn.
+   * The discriminator, and why it is batched
+   * ----------------------------------------
+   * A retained hint is a reported path that no longer names an eligible file.
+   * On disk it is indistinguishable from any other vanished name, but the two
+   * cases it can be demand opposite work:
+   *
+   * - a dead temp source (`note.md.tmp`) - the real change is a SIBLING, so the
+   *   affected DIRECTORY is what must be reconciled;
+   * - a recursively deleted directory (`dir1`) - its indexed documents are
+   *   direct children of the hint itself, and reconciling the parent can never
+   *   reach them (R12).
+   *
+   * The INDEXED side is what tells them apart: a deleted directory has active
+   * indexed children, a dead temp file does not. That question is asked for
+   * EVERY hint of this flush in ONE batched store lookup, so unique-temp-name
+   * churn costs one query for the window instead of one per filename. Only
+   * hints the store proved are real indexed directories are then enumerated on
+   * disk, so the enumeration count tracks affected directories rather than
+   * event count.
+   *
+   * A hint with no active indexed children is read as "a file changed here" and
+   * falls back to the affected directory - exactly as before. Note what is NOT
+   * done: such a hint is not speculatively enumerated on the chance that it is
+   * a brand-new subdirectory. On linux (fn-114 task .1) a `mkdir` is reported
+   * while the directory is still EMPTY and the writes that follow inside it are
+   * never reported at all, so that enumeration finds nothing on the one
+   * platform where it would be the only chance; on macOS the files inside
+   * produce their own eligible events and take the exact-path fast path.
+   *
+   * A hint that resolves to real work IS the affected area, so the directory is
+   * not enumerated for it - that keeps a recursive directory delete from
+   * dragging every unchanged sibling of the deleted directory into the batch.
    *
    * Generation drift is handled BEFORE enumeration (R6): an entry queued
    * against a different root is dropped, and everything else is re-resolved
@@ -811,6 +812,42 @@ export class CollectionWatchService {
     const walkConfig = collectionToWalkConfig(collection, 0);
     const resolved = new Map<string, DirectoryReconciliation>();
 
+    // The collection moved after these events were queued: the queued areas no
+    // longer exist in the current configuration.
+    const live = entries.filter(([, entry]) => entry.root === currentRoot);
+
+    // Every key the flush could need an indexed answer for, resolved in one
+    // round trip. Re-filtered against the CURRENT rules, so a directory the
+    // configuration started excluding mid-window is never even asked about.
+    const lookupKeys = new Set<string>();
+    for (const [directory, entry] of live) {
+      if (this.#isReconcilableDirectory(directory, collection)) {
+        lookupKeys.add(directory);
+      }
+      for (const hint of entry.hints) {
+        if (this.#isReconcilableDirectory(hint, collection)) {
+          lookupKeys.add(hint);
+        }
+      }
+    }
+    const indexed = await this.#listActiveDirectChildrenBatch(collection.name, [
+      ...lookupKeys,
+    ]);
+    if (this.#disposed) {
+      return [];
+    }
+
+    /**
+     * The indexed answer for one directory, in the same shape the unbatched
+     * seam returned. A failed lookup is propagated per directory rather than
+     * summarized once: reconciliation reports store failures against the
+     * directory they blocked, and infers no deactivation from them.
+     */
+    const indexedFor = (directory: string): StoreResult<string[]> =>
+      indexed.ok
+        ? { ok: true, value: indexed.value.get(directory) ?? [] }
+        : { ok: false, error: indexed.error };
+
     const reconcile = async (
       directory: string
     ): Promise<DirectoryReconciliation> => {
@@ -819,27 +856,36 @@ export class CollectionWatchService {
         return cached;
       }
       const outcome = this.#isReconcilableDirectory(directory, collection)
-        ? await this.#reconcileDirectory(collection, walkConfig, directory)
+        ? await this.#reconcileDirectory(
+            collection,
+            walkConfig,
+            directory,
+            indexedFor(directory)
+          )
         : { directory, candidates: [], enumerationFailed: false };
       resolved.set(directory, outcome);
       return outcome;
     };
 
-    for (const [directory, entry] of entries) {
+    for (const [directory, entry] of live) {
       if (this.#disposed) {
         break;
       }
-      if (entry.root !== currentRoot) {
-        // The collection moved after this event was queued; the queued area no
-        // longer exists in the current configuration.
-        continue;
-      }
-      // No hint, or a filled hint budget, means the affected directory itself
-      // is the only area we can honestly claim changed.
-      let needsDirectory = entry.hints.size === 0 || entry.hintsTruncated;
+      // No hint at all means the affected directory itself is the only area we
+      // can honestly claim changed.
+      let needsDirectory = entry.hints.size === 0;
       for (const hint of entry.hints) {
         if (this.#disposed) {
           break;
+        }
+        const hintIndexed = indexedFor(hint);
+        if (!(hintIndexed.ok && hintIndexed.value.length > 0)) {
+          // Nothing active is indexed under this hint (or the store could not
+          // answer, which is never read as "nothing is there"): it is not a
+          // deleted indexed directory, so the event means a file changed in the
+          // affected directory.
+          needsDirectory = true;
+          continue;
         }
         const hintOutcome = await reconcile(hint);
         if (
@@ -847,8 +893,7 @@ export class CollectionWatchService {
           !hintOutcome.enumerationFailed
         ) {
           // An unreadable hint directory is NOT retried through its parent: it
-          // failed closed on purpose. A failed STORE query still falls back,
-          // because no deactivation is ever inferred from the disk side alone.
+          // failed closed on purpose.
           needsDirectory = true;
         }
       }
@@ -862,11 +907,18 @@ export class CollectionWatchService {
     );
   }
 
-  /** Union the eligible disk children and the active indexed children. */
+  /**
+   * Union the eligible disk children and the active indexed children.
+   *
+   * `indexed` is the pre-resolved answer from the flush's single batched store
+   * lookup, passed in rather than fetched here so one directory is never
+   * queried twice within a flush.
+   */
   async #reconcileDirectory(
     collection: Collection,
     walkConfig: WalkConfig,
-    directory: string
+    directory: string,
+    indexed: StoreResult<string[]>
   ): Promise<DirectoryReconciliation> {
     this.#notifyDiagnostic(() =>
       this.#callbacks?.onReconcileStart?.({
@@ -897,10 +949,6 @@ export class CollectionWatchService {
     // The indexed side is what makes deletion work: a vanished file leaves
     // nothing on disk to enumerate, so its relPath can only come from the
     // store, and `syncPaths` marks it inactive through its own ENOENT branch.
-    const indexed = await this.#listActiveDirectChildren(
-      collection.name,
-      directory
-    );
     if (indexed.ok) {
       for (const relPath of indexed.value) {
         candidates.add(relPath);
@@ -932,26 +980,46 @@ export class CollectionWatchService {
     };
   }
 
-  /** Never throws: a store failure is reported, never inferred from. */
-  async #listActiveDirectChildren(
+  /**
+   * Resolve the active indexed direct children of many directories at once.
+   *
+   * Never throws: a store failure is reported, never inferred from.
+   *
+   * Prefers the batched seam so a whole flush costs ONE round trip. The
+   * per-directory seam remains a supported fallback for a store that predates
+   * the batched one; it is a correctness-preserving degradation, not a second
+   * strategy, and it restores the per-hint query cost the batch exists to
+   * remove. A store exposing neither seam fails closed.
+   */
+  async #listActiveDirectChildrenBatch(
     collectionName: string,
-    directory: string
-  ): Promise<StoreResult<string[]>> {
-    const store = this.#store as Partial<SqliteAdapter> | null;
-    if (typeof store?.listActiveDirectChildSourcePaths !== "function") {
-      return {
-        ok: false,
-        error: {
-          code: "INTERNAL",
-          message: "store does not expose listActiveDirectChildSourcePaths",
-        },
-      };
+    directories: string[]
+  ): Promise<StoreResult<Map<string, string[]>>> {
+    if (directories.length === 0) {
+      return { ok: true, value: new Map() };
     }
+    const store = this.#store as Partial<SqliteAdapter> | null;
     try {
-      return await store.listActiveDirectChildSourcePaths(
-        collectionName,
-        directory
-      );
+      if (typeof store?.listActiveDirectChildSourcePathsBatch === "function") {
+        return await store.listActiveDirectChildSourcePathsBatch(
+          collectionName,
+          directories
+        );
+      }
+      if (typeof store?.listActiveDirectChildSourcePaths === "function") {
+        const byDirectory = new Map<string, string[]>();
+        for (const directory of directories) {
+          const result = await store.listActiveDirectChildSourcePaths(
+            collectionName,
+            directory
+          );
+          if (!result.ok) {
+            return result;
+          }
+          byDirectory.set(directory, result.value);
+        }
+        return { ok: true, value: byDirectory };
+      }
     } catch (cause) {
       return {
         ok: false,
@@ -965,6 +1033,13 @@ export class CollectionWatchService {
         },
       };
     }
+    return {
+      ok: false,
+      error: {
+        code: "INTERNAL",
+        message: "store does not expose listActiveDirectChildSourcePaths",
+      },
+    };
   }
 
   #notifySettledIfIdle(): void {

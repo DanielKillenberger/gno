@@ -141,7 +141,11 @@ import {
   serializeActivationReceipt,
 } from "../activation-receipts";
 import { getSchemaVersion, migrations, runMigrations } from "../migrations";
-import { ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL } from "../source-path-sql";
+import {
+  ACTIVE_DIRECT_CHILD_BATCH_CHUNK,
+  ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL,
+  activeDirectChildSourcePathsBatchSql,
+} from "../source-path-sql";
 import { err, ok } from "../types";
 import { getStoredEmbeddingFingerprint } from "../vector/freshness";
 import { modelTableName } from "../vector/sqlite-vec";
@@ -1690,6 +1694,72 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         .all(collection, parentPath);
 
       return ok(rows.map((row) => row.source_path));
+    } catch (cause) {
+      return err(
+        "QUERY_FAILED",
+        cause instanceof Error
+          ? cause.message
+          : "Failed to list active direct child source paths",
+        cause
+      );
+    }
+  }
+
+  async listActiveDirectChildSourcePathsBatch(
+    collection: string,
+    dirRelPaths: string[]
+  ): Promise<StoreResult<Map<string, string[]>>> {
+    const normalized: string[] = [];
+    for (const raw of dirRelPaths) {
+      const parentPath = normalizeCollectionDirRelPath(raw);
+      if (parentPath === null) {
+        return err(
+          "INVALID_INPUT",
+          `Directory path escapes the collection root: ${raw}`
+        );
+      }
+      normalized.push(parentPath);
+    }
+
+    const unique = [...new Set(normalized)];
+    // Every requested directory gets an entry, so a caller can distinguish
+    // "asked and empty" from "never asked" without a second lookup.
+    const byDirectory = new Map<string, Set<string>>(
+      unique.map((directory) => [directory, new Set<string>()])
+    );
+    if (unique.length === 0) {
+      return ok(new Map());
+    }
+
+    try {
+      const db = this.ensureOpen();
+      for (
+        let index = 0;
+        index < unique.length;
+        index += ACTIVE_DIRECT_CHILD_BATCH_CHUNK
+      ) {
+        const chunk = unique.slice(
+          index,
+          index + ACTIVE_DIRECT_CHILD_BATCH_CHUNK
+        );
+        const rows = db
+          .query<{ parent_path: string; source_path: string }, string[]>(
+            activeDirectChildSourcePathsBatchSql(chunk.length)
+          )
+          .all(collection, ...chunk);
+        for (const row of rows) {
+          byDirectory.get(row.parent_path)?.add(row.source_path);
+        }
+      }
+
+      return ok(
+        new Map(
+          [...byDirectory].map(([directory, sourcePaths]) => [
+            directory,
+            [...sourcePaths],
+          ])
+        )
+      );
     } catch (cause) {
       return err(
         "QUERY_FAILED",

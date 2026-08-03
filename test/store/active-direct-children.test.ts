@@ -30,7 +30,9 @@ import {
   SqliteAdapter,
 } from "../../src/store";
 import {
+  ACTIVE_DIRECT_CHILD_BATCH_CHUNK,
   ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL,
+  activeDirectChildSourcePathsBatchSql,
   SOURCE_PARENT_INDEX_NAME,
 } from "../../src/store/source-path-sql";
 import { safeRm } from "../helpers/cleanup";
@@ -251,6 +253,169 @@ describe("listActiveDirectChildSourcePaths", () => {
     });
   });
 
+  /**
+   * Batched form (fn-114 task .3). The watcher uses it as a DISCRIMINATOR: at
+   * queue time a dead temp name and a recursively deleted directory are both
+   * just "a path that is gone", and only the indexed side separates them. That
+   * question has to be affordable for every hint of a debounce window at once,
+   * or the watcher is pushed back into capping - and dropping - hints.
+   */
+  describe("listActiveDirectChildSourcePathsBatch", () => {
+    async function expectBatch(
+      collection: string,
+      dirRelPaths: string[]
+    ): Promise<Map<string, string[]>> {
+      const result = await adapter.listActiveDirectChildSourcePathsBatch(
+        collection,
+        dirRelPaths
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      return new Map(
+        [...result.value].map(([dir, paths]) => [dir, [...paths].sort()])
+      );
+    }
+
+    test("answers several directories in one call", async () => {
+      await adapter.upsertDocument(doc({ relPath: "root.md" }));
+      await adapter.upsertDocument(doc({ relPath: "a/one.md" }));
+      await adapter.upsertDocument(doc({ relPath: "a/two.md" }));
+      await adapter.upsertDocument(doc({ relPath: "b/three.md" }));
+      await adapter.upsertDocument(doc({ relPath: "a/deep/skip.md" }));
+
+      expect(await expectBatch("notes", ["", "a", "b"])).toEqual(
+        new Map([
+          ["", ["root.md"]],
+          ["a", ["a/one.md", "a/two.md"]],
+          ["b", ["b/three.md"]],
+        ])
+      );
+    });
+
+    test("returns an entry for every requested directory, empty when nothing is active", async () => {
+      await adapter.upsertDocument(doc({ relPath: "a/keep.md" }));
+      await adapter.upsertDocument(doc({ relPath: "a/gone.md" }));
+      expect((await adapter.markInactive("notes", ["a/gone.md"])).ok).toBe(
+        true
+      );
+
+      // "asked and empty" must be distinguishable from "never asked": the
+      // watcher reads an empty answer as "this hint is a dead temp name", and
+      // a missing key would make that indistinguishable from a lookup it
+      // never performed.
+      expect(
+        await expectBatch("notes", ["a", "never-indexed", "note.md.tmp.7"])
+      ).toEqual(
+        new Map([
+          ["a", ["a/keep.md"]],
+          ["never-indexed", []],
+          ["note.md.tmp.7", []],
+        ])
+      );
+    });
+
+    test("matches the single-directory seam for every shape it supports", async () => {
+      await adapter.upsertDocument(doc({ relPath: "root.md" }));
+      await adapter.upsertDocument(doc({ relPath: "a/b/note.md" }));
+      await adapter.upsertDocument(
+        doc({ collection: "other", relPath: "a/b/foreign.md" })
+      );
+
+      for (const dir of ["", ".", "a/b", "a/b/", "a\\b", "./a/b"]) {
+        const single = await expectPaths("notes", dir);
+        const batched = await expectBatch("notes", [dir]);
+        expect([...batched.values()][0]).toEqual(single);
+      }
+    });
+
+    test("collapses a record container's logical rows to one source path (R10)", async () => {
+      const container = (relPath: string, key: string, sourcePath: string) =>
+        doc({
+          relPath,
+          sourceExt: ".jsonl",
+          sourceMime: "application/jsonl",
+          recordKey: key,
+          recordSourcePath: sourcePath,
+        });
+      await adapter.upsertDocument(
+        container(".gno/records/h/one.md", "one", "a/export.jsonl")
+      );
+      await adapter.upsertDocument(
+        container(".gno/records/h/two.md", "two", "a/export.jsonl")
+      );
+      await adapter.upsertDocument(
+        container(".gno/records/h/three.md", "three", "a/export.jsonl")
+      );
+
+      // The batched statement drops DISTINCT to keep the plan index-served, so
+      // the de-duplication has to happen here instead. Three logical records,
+      // one physical container path.
+      expect(await expectBatch("notes", ["a"])).toEqual(
+        new Map([["a", ["a/export.jsonl"]]])
+      );
+    });
+
+    test("de-duplicates repeated directory keys", async () => {
+      await adapter.upsertDocument(doc({ relPath: "a/one.md" }));
+
+      // `a` and `a/` normalize to the same key; the caller gets one entry.
+      expect(await expectBatch("notes", ["a", "a/", "./a"])).toEqual(
+        new Map([["a", ["a/one.md"]]])
+      );
+    });
+
+    test("returns an empty map for an empty request", async () => {
+      expect(await expectBatch("notes", [])).toEqual(new Map());
+    });
+
+    test("rejects the whole call when any directory escapes the collection root", async () => {
+      const result = await adapter.listActiveDirectChildSourcePathsBatch(
+        "notes",
+        ["a", "../outside"]
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.ok ? "" : result.error.code).toBe("INVALID_INPUT");
+    });
+
+    test("returns an explicit non-throwing failure when the store is closed", async () => {
+      await adapter.close();
+
+      const result = await adapter.listActiveDirectChildSourcePathsBatch(
+        "notes",
+        ["", "a"]
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.ok ? "" : result.error.code).toBe("QUERY_FAILED");
+    });
+
+    test("answers more directories than fit in one statement", async () => {
+      // Past the per-statement parameter chunk the lookup spans several
+      // statements. Nothing may be dropped at the seam - that is precisely the
+      // failure mode the batched discriminator exists to remove.
+      const directories: string[] = [];
+      for (
+        let index = 0;
+        index < ACTIVE_DIRECT_CHILD_BATCH_CHUNK + 5;
+        index += 1
+      ) {
+        directories.push(`d${index}`);
+        await adapter.upsertDocument(doc({ relPath: `d${index}/note.md` }));
+      }
+
+      const batched = await expectBatch("notes", directories);
+
+      expect(batched.size).toBe(directories.length);
+      expect(batched.get("d0")).toEqual(["d0/note.md"]);
+      expect(batched.get(`d${ACTIVE_DIRECT_CHILD_BATCH_CHUNK + 4}`)).toEqual([
+        `d${ACTIVE_DIRECT_CHILD_BATCH_CHUNK + 4}/note.md`,
+      ]);
+    });
+  });
+
   describe("index coverage (R11)", () => {
     async function queryPlan(
       collection: string,
@@ -262,6 +427,16 @@ describe("listActiveDirectChildSourcePaths", () => {
           `EXPLAIN QUERY PLAN ${ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL}`
         )
         .all(collection, parent)
+        .map((row) => row.detail);
+    }
+
+    function batchQueryPlan(collection: string, parents: string[]): string[] {
+      const db = adapter.getRawDb();
+      return db
+        .query<{ detail: string }, string[]>(
+          `EXPLAIN QUERY PLAN ${activeDirectChildSourcePathsBatchSql(parents.length)}`
+        )
+        .all(collection, ...parents)
         .map((row) => row.detail);
     }
 
@@ -307,6 +482,44 @@ describe("listActiveDirectChildSourcePaths", () => {
       );
       expect(plan.join("\n")).not.toContain("SCAN documents");
       expect(plan.join("\n")).not.toContain("TEMP B-TREE");
+    });
+
+    test("batched lookup stays index-served at every key count", () => {
+      // R11 for the batched form. The `INDEXED BY` hint in the statement is
+      // load-bearing rather than decorative: measured here, an UNHINTED
+      // `IN (...)` list of 26 keys made SQLite switch to
+      // `SEARCH documents USING INDEX idx_docs_wiki_relpath_resolve
+      // (collection=?)` - a collection-wide probe that reads every active row
+      // of the collection instead of one range per directory.
+      for (const keyCount of [1, 2, 9, 26, 200]) {
+        const parents = Array.from({ length: keyCount }, (_, index) =>
+          index === 0 ? "" : `d${index}`
+        );
+        const plan = batchQueryPlan("notes", parents).join("\n");
+
+        expect(plan).toContain(
+          `SEARCH documents USING INDEX ${SOURCE_PARENT_INDEX_NAME}`
+        );
+        expect(plan).not.toContain("SCAN documents");
+        expect(plan).not.toContain("TEMP B-TREE");
+      }
+    });
+
+    test("batched lookup agrees with the single-directory lookup at scale", async () => {
+      const batched = await adapter.listActiveDirectChildSourcePathsBatch(
+        "notes",
+        ["", "a", "a/deep"]
+      );
+
+      expect(batched.ok).toBe(true);
+      if (!batched.ok) {
+        return;
+      }
+      expect(batched.value.get("a")?.length).toBe(400);
+      expect(batched.value.get("a/deep")?.length).toBe(400);
+      expect([...(batched.value.get("a") ?? [])].sort()).toEqual(
+        await expectPaths("notes", "a")
+      );
     });
 
     test("an upgraded v25 database indexes its pre-existing rows", async () => {

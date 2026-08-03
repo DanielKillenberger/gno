@@ -1710,6 +1710,31 @@ export interface StorePort {
   ): Promise<StoreResult<string[]>>;
 
   /**
+   * Batched form of {@link listActiveDirectChildSourcePaths}: the same answer
+   * for SEVERAL directories in one round trip.
+   *
+   * The watcher needs this as a DISCRIMINATOR. A filesystem event that names a
+   * path which no longer exists on disk is ambiguous - a dead temp file and a
+   * recursively deleted directory are both just "a name that is gone" - and
+   * only the indexed side tells them apart. Resolving that one directory at a
+   * time makes ordinary temp-name churn cost one query per unique filename, so
+   * the whole hint set is resolved in one call instead.
+   *
+   * The returned map has an entry for EVERY requested directory (after
+   * normalization and de-duplication), empty when nothing active lives there,
+   * so "asked and empty" is distinguishable from "never asked". Source paths
+   * are de-duplicated per directory. As with the single-directory form, a path
+   * that escapes the collection root is rejected with `INVALID_INPUT` - for the
+   * whole call, since the caller controls the key set.
+   *
+   * Index-served via `idx_documents_source_parent_path` at any key count.
+   */
+  listActiveDirectChildSourcePathsBatch(
+    collection: string,
+    dirRelPaths: string[]
+  ): Promise<StoreResult<Map<string, string[]>>>;
+
+  /**
    * Fetch documents by mirror hashes in batch.
    * Useful for retrieval pipelines to avoid full document scans.
    */

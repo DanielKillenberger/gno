@@ -56,3 +56,38 @@ export const DROP_SOURCE_PARENT_INDEX_SQL = `DROP INDEX IF EXISTS ${SOURCE_PAREN
 export const ACTIVE_DIRECT_CHILD_SOURCE_PATHS_SQL = `SELECT DISTINCT ${SOURCE_PATH_EXPR} AS source_path
    FROM documents
    WHERE collection = ? AND ${SOURCE_PARENT_PATH_EXPR} = ? AND active = 1`;
+
+/**
+ * Directory keys per batched statement.
+ *
+ * SQLite's `SQLITE_LIMIT_VARIABLE_NUMBER` defaults to 999; one parameter is
+ * spent on `collection`. This is a STATEMENT-SHAPE bound, not a work budget:
+ * every requested directory is queried, just across more than one statement
+ * once there are more than this many of them. Nothing is ever dropped.
+ */
+export const ACTIVE_DIRECT_CHILD_BATCH_CHUNK = 898;
+
+/**
+ * Batched form of the direct-children lookup: the active effective source paths
+ * of several directories in one statement, tagged with their parent directory.
+ *
+ * Two deliberate differences from the single-directory statement above:
+ *
+ * - `INDEXED BY` pins the plan. Measured on a 800-row/ANALYZE-d database, an
+ *   unhinted `IN (...)` list of 26 keys made SQLite prefer
+ *   `idx_docs_wiki_relpath_resolve (collection=?)` - still a SEARCH, but a
+ *   collection-wide one that reads every active row of the collection. R11
+ *   requires the parent index specifically, and a hint is the only way to get
+ *   it deterministically at every IN-list size.
+ * - No `DISTINCT`. Across several IN values SQLite cannot satisfy `DISTINCT`
+ *   from index order alone and adds `USE TEMP B-TREE FOR DISTINCT`, which R11
+ *   forbids. The caller dedupes per directory in memory instead - the same
+ *   collapse of a record container's many logical rows to one physical source
+ *   path (R10), performed one layer up.
+ */
+export function activeDirectChildSourcePathsBatchSql(dirCount: number): string {
+  const placeholders = Array.from({ length: dirCount }, () => "?").join(", ");
+  return `SELECT ${SOURCE_PARENT_PATH_EXPR} AS parent_path, ${SOURCE_PATH_EXPR} AS source_path
+   FROM documents INDEXED BY ${SOURCE_PARENT_INDEX_NAME}
+   WHERE collection = ? AND ${SOURCE_PARENT_PATH_EXPR} IN (${placeholders}) AND active = 1`;
+}

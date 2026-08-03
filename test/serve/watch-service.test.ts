@@ -836,12 +836,19 @@ function createActiveChildrenStore(activeByDir: Record<string, string[]>): {
   return {
     calls,
     store: {
-      listActiveDirectChildSourcePaths(collection: string, dirRelPath: string) {
-        calls.push({ collection, dirRelPath });
-        return Promise.resolve({
-          ok: true as const,
-          value: activeByDir[dirRelPath] ?? [],
-        });
+      // The watcher resolves a whole flush through the batched seam; `calls`
+      // still records one entry per directory KEY so the assertions below stay
+      // about which directories were consulted.
+      listActiveDirectChildSourcePathsBatch(
+        collection: string,
+        dirRelPaths: string[]
+      ) {
+        const byDirectory = new Map<string, string[]>();
+        for (const dirRelPath of dirRelPaths) {
+          calls.push({ collection, dirRelPath });
+          byDirectory.set(dirRelPath, activeByDir[dirRelPath] ?? []);
+        }
+        return Promise.resolve({ ok: true as const, value: byDirectory });
       },
     },
   };
@@ -1139,23 +1146,38 @@ function createReconcileHarness(
   };
 }
 
-/** Store double recording every active-children lookup it is asked for. */
+/**
+ * Store double recording every active-children lookup it is asked for.
+ *
+ * `calls` counts directory KEYS consulted; `roundTrips` counts invocations of
+ * the store seam. The two are deliberately separate: the fix for the hint-cap
+ * regression is that a whole debounce window's hints are discriminated in ONE
+ * round trip, so key count may grow with event count while round trips must
+ * not.
+ */
 function createRecordingStore(
   activeByDir: Record<string, string[]>,
   behavior: "ok" | "fail" = "ok"
 ) {
   const calls: string[] = [];
+  const roundTrips: string[][] = [];
   return {
     calls,
+    roundTrips,
     store: {
-      listActiveDirectChildSourcePaths(
+      listActiveDirectChildSourcePathsBatch(
         _collection: string,
-        dirRelPath: string
+        dirRelPaths: string[]
       ) {
-        calls.push(dirRelPath);
+        roundTrips.push([...dirRelPaths]);
+        const byDirectory = new Map<string, string[]>();
+        for (const dirRelPath of dirRelPaths) {
+          calls.push(dirRelPath);
+          byDirectory.set(dirRelPath, activeByDir[dirRelPath] ?? []);
+        }
         return Promise.resolve(
           behavior === "ok"
-            ? { ok: true as const, value: activeByDir[dirRelPath] ?? [] }
+            ? { ok: true as const, value: byDirectory }
             : {
                 ok: false as const,
                 error: { code: "QUERY_FAILED", message: "store offline" },
@@ -1202,7 +1224,7 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
     async () => {
       const root = await mkdtemp(join(tmpdir(), "gno-watch-coalesce-"));
       await Bun.write(join(root, "note.md"), "# atomic\n");
-      const { store, calls } = createRecordingStore({});
+      const { store, calls, roundTrips } = createRecordingStore({});
       const harness = createReconcileHarness(createCollection("notes", root), {
         store,
       });
@@ -1226,22 +1248,26 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         ).toHaveLength(25);
 
         // The load-bearing assertion: the final batch alone cannot show that
-        // the WORK coalesced. 25 distinct temp names are one affected directory
-        // plus a bounded hint budget, so the enumerations (one per
-        // `onReconcileStart`) and store queries stay bounded instead of
-        // scaling with the number of unique filenames.
-        // MAX_DIRECTORY_HINTS (8) + the affected directory itself. Measured
-        // before this fix: 26 enumerations and 25 store queries, one of each
-        // per unique temp filename.
-        const workBudget = 9;
-        expect(harness.started.length).toBe(workBudget);
-        expect(calls.length).toBe(workBudget);
-        // The degradation at the budget is visible rather than silent.
-        expect(harness.ambiguous).toContainEqual({
-          collection: "notes",
-          directory: "",
-          reason: "hint-budget-exhausted",
-        });
+        // the WORK coalesced. 25 distinct temp names are ONE affected
+        // directory, and every hint is discriminated against the indexed side
+        // in ONE batched store round trip - so neither the filesystem work nor
+        // the database work scales with the number of unique filenames.
+        //
+        // Measured on this test, 25 unique temp names:
+        //   original (no coalescing): 26 enumerations, 25 store round trips
+        //   hint cap of 8:             9 enumerations,  9 store round trips
+        //                              (and a dropped hint could be a deleted
+        //                               directory - the regression this fixes)
+        //   batched discriminator:     1 enumeration,   1 store round trip
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+        expect(roundTrips).toHaveLength(1);
+        // Every hint IS asked about - no hint is ever dropped - but all 25 of
+        // them plus the affected directory ride in that single round trip.
+        expect(calls).toHaveLength(26);
+        expect(calls).toContain("");
+        expect(calls).toContain("note.md.tmp.24");
 
         // One reconciliation of the collection root, not 25.
         expect(
@@ -1253,6 +1279,55 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
           candidateCount: 1,
           syncedCount: 1,
         });
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps a deleted-directory hint behind a burst of unique temp-name hints",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-hint-burst-"));
+      await Bun.write(join(root, "note.md"), "# atomic\n");
+      const { store, calls, roundTrips } = createRecordingStore({
+        dir1: ["dir1/a.md"],
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // The exact shape that broke under a fixed hint budget: enough unique
+        // ambiguous temp names to exhaust any per-directory cap, and THEN the
+        // recursive-directory-delete hint. At queue time `dir1` is
+        // indistinguishable from the eight names before it - all are simply
+        // paths that no longer exist - so any budget that drops "one more
+        // ambiguous hint" can drop this one, and `dir1/a.md` then stays active
+        // until a manual `gno update`.
+        for (let index = 0; index < 8; index += 1) {
+          harness.emit([["rename", `note.md.tmp.${index}`]]);
+        }
+        harness.emit([["rename", "dir1"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toHaveLength(1);
+        // R12: the deleted directory's indexed child reaches `syncPaths`, which
+        // marks the missing file inactive.
+        expect(harness.batches[0]).toContain("dir1/a.md");
+        // The temp-name hints still resolve to their affected directory, so the
+        // atomically saved sibling is picked up in the SAME batch.
+        expect(harness.batches[0]).toContain("note.md");
+        expect(harness.batches[0]).not.toContain("dir1");
+        // ...and the hint that survived cost nothing extra: one round trip for
+        // all nine hints plus the affected directory, and one enumeration each
+        // for the deleted directory and the affected directory.
+        expect(roundTrips).toHaveLength(1);
+        expect(calls).toContain("dir1");
+        expect(harness.started).toHaveLength(2);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
@@ -1395,10 +1470,14 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         expect(await harness.settle()).toBe("settled");
 
         // An unreadable directory is never read as an authoritative empty
-        // directory: nothing syncs, nothing deactivates, the cause is visible,
-        // and the indexed side is not even consulted for it.
+        // directory: nothing syncs and nothing deactivates, even though the
+        // indexed side positively reported `locked/note.md` as still active.
+        // That is the stronger statement - the store answer was in hand and
+        // the failed enumeration VETOED it - and it is the assertion that
+        // matters, since the batched discriminator necessarily consults the
+        // indexed side before it knows whether a hint is a directory at all.
+        expect(calls).toContain("locked");
         expect(harness.batches).toEqual([]);
-        expect(calls).toEqual([]);
         expect(harness.failed).toHaveLength(1);
         expect(harness.failed[0]).toMatchObject({
           collection: "notes",
@@ -1528,7 +1607,12 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         // Reconciliation still happened despite every observer throwing.
         expect(harness.batches).toEqual([["note.md"]]);
         expect(harness.ambiguous).toHaveLength(2);
-        expect(harness.started).toHaveLength(2);
+        // One enumeration: the `note.md.tmp` hint has no active indexed
+        // children, so it never reaches the disk and only the affected
+        // directory is reconciled.
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
