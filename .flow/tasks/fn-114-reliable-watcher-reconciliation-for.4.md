@@ -291,3 +291,86 @@ No `GATE_SKIPPED` lines — every gate was run in full.
 - Commits: 160c5a056b6fcb08ecaf3f0fb5b058865c449f78, 7ad6078c66815c335504bcda1c9e6bf80cc5643b
 - Tests: bun test (FULL canonical gate) -> 3536 pass, 2 skip, 0 fail across 433 files. CONDUCTOR-VERIFIED independently at 3534 pass/0 fail before the +2 lifecycle tests were added., bun test test/serve/ test/ingestion/ test/store/ test/spec/ -> 1235 pass, 0 fail, bun test test/serve/watch-service.lifecycle.fs.test.ts (macOS) -> 2 pass, 0 fail (CONDUCTOR-VERIFIED), bun test test/serve/watch-service.lifecycle.fs.test.ts (LINUX, docker, Bun 1.3.11) -> 2 pass, 0 fail (CONDUCTOR-VERIFIED first-hand, not taken from the worker report), bun run lint:check -> 0 warnings, 0 errors; formatting clean, bunx tsc --noEmit -> clean, git diff --check -> clean
 - PRs:
+## Recorded evidence (conductor, at completion)
+
+`flowctl done` renders only `commits` / `tests` / `prs` into this file. The records
+below were in the evidence JSON but not in the rendered block, which made the task
+look unevidenced. Restated here so the task is self-contained.
+
+### Large-directory measurement
+
+Fixture: ONE directory, 5,000 eligible files, 500 excluded files, 200
+active-indexed-but-missing paths. Method: five warm runs of a single ambiguous event;
+median reported; stages timed separately.
+
+| stage | median |
+| --- | ---: |
+| enumeration | 7.2 ms |
+| store query | 1.5 ms |
+| **enumeration + store** | **8.6 ms** |
+| unchanged `syncPaths` pass | 16,689.7 ms |
+
+Criterion: enumeration + store query at or under 250 ms median → **PASS**, ~29x margin.
+
+Honest headline: the criterion gated the two stages this work added, and they are
+negligible. The limiting stage is `syncPaths` by ~1900x — it re-reads and SHA-256s all
+5,000 unchanged files because `decideAction` compares only `sourceHash` while
+`sourceMtime` / `sourceSize` sit unused in the store. Pre-existing on every sync path,
+but now reachable from one ambiguous filesystem event rather than only an explicit
+`gno update`. Documented as a ceiling in `docs/TROUBLESHOOTING.md`; no batching or
+pagination added, per the spec's own instruction. Follow-up filed as
+`fn-117-short-circuit-unchanged-files-in-sync`.
+
+### Fixture-scale query plan (R11 re-confirmed)
+
+Unchanged at fixture scale, for the single seam and for IN(1) / IN(3) / IN(26):
+
+```
+SEARCH documents USING INDEX idx_documents_source_parent_path (collection=? AND <expr>=?)
+```
+
+No `SCAN documents`, no `USE TEMP B-TREE FOR DISTINCT`.
+
+### Status-contract decision
+
+**No change needed — verified explicitly, not skipped.**
+`spec/output-schemas/status.schema.json`, `docs/API.md`, and `spec/cli.md` are
+unmodified on this branch (the only `spec/` change is `spec/db/schema.sql`).
+`CollectionWatchState` still carries exactly the seven fields the schema requires.
+Task `.3`'s diagnostics were delivered as additive optional **callbacks**, not status
+fields, specifically to avoid a public contract change.
+
+### Hosted site audit (`~/work/gno.sh`)
+
+**Could not survey** — the repo is not checked out on this machine (`~/work` does not
+exist; no `gno.sh` found under the user's home). Recorded as unavailable rather than
+silently skipped.
+
+Surfaces that need a matching update once that repo is available:
+
+- pages mirroring `docs/DAEMON.md` and `docs/TROUBLESHOOTING.md`
+- any "why didn't it refresh?" FAQ entry
+- continuous / auto-indexing product claims
+- anything mirroring `docs/ARCHITECTURE.md`'s now-corrected "path-scoped only" watcher
+  description
+
+### Real-filesystem lifecycle proof (R8)
+
+`test/serve/watch-service.lifecycle.fs.test.ts` — real `mkdtemp` root, real
+`CollectionWatchService` on its default `watchFactory` (real recursive `fs.watch`), real
+`defaultSyncService` ingestion, real on-disk `SqliteAdapter`. No fakes in the chain, no
+spy on `syncPaths`. Assertions are observable store queries: an atomic save must become
+retrievable via `searchFts` (which filters `active = 1`), and a genuine recursive delete
+must flip the direct children to `active === false` while a sibling stays active.
+
+Conductor-verified first-hand, not taken from a worker report:
+
+- macOS — 2 pass / 0 fail
+- Linux (Docker, Bun 1.3.11, tmpfs) — 2 pass / 0 fail
+
+Container caveat: the bare docker command mounts macOS-built `node_modules`, so
+`@napi-rs/canvas` has no Linux binding, `pdfjs-dist` cannot polyfill `DOMMatrix`, and
+every conversion fails — the initial sync then indexes zero files. Environment artifact,
+not a product defect (pre-existing `test/ingestion/sync-incremental.test.ts` fails
+identically in-container on this branch). Resolved by overlaying one read-only package
+built in a scratch container; nothing on the host was mutated.
