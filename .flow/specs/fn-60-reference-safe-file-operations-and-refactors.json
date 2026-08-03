@@ -1,7 +1,7 @@
 {
   "branch_name": "codex/fn-60-reference-safe-file-operations-and-refactors",
-  "completion_review_status": "unknown",
-  "completion_reviewed_at": null,
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-08-03T07:12:45.057131Z",
   "created_at": "2026-04-05T11:15:00Z",
   "default_impl": null,
   "default_review": null,
@@ -19,7 +19,7 @@
   "plan_reviewed_at": null,
   "ready": true,
   "spec_path": ".flow/specs/fn-60-reference-safe-file-operations-and-refactors.md",
-  "status": "open",
+  "status": "done",
   "title": "Reference-safe file operations and note refactors",
   "tracker": {
     "baseHashFlow": null,
@@ -32,5 +32,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-03T06:25:51.887465Z"
+  "updated_at": "2026-08-03T07:12:45.316340Z"
 }
