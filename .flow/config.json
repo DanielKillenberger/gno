@@ -1,8 +1,13 @@
 {
+  "$schema": "https://flow-next.dev/schema/flow-config.schema.json",
   "artifacts": {
     "html": {
       "enabled": false
     }
+  },
+  "chart": {
+    "claimStaleAfter": 24,
+    "maxDecisions": 12
   },
   "land": {
     "automatedReviewers": "",
@@ -53,6 +58,7 @@
     "github": false
   },
   "tracker": {
+    "charts": "off",
     "conflictTiebreak": "always-ask",
     "enabled": true,
     "perEvent": {

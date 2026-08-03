@@ -8,6 +8,7 @@ never read or written.
 
 import hashlib
 import importlib.util
+import json
 import os
 import sys
 import types
@@ -17,8 +18,11 @@ from pathlib import Path
 MIN_PYTHON = (3, 11)
 SOURCE_NAME = "flowctl.py"
 HELP_NAME = "flowctl-help.txt"
-SOURCE_SHA256 = "61030e2505f7139b5cdb727075e854b743346f35e976be72db79fdce5515b499"
-HELP_SHA256 = "ad7c987b1f90e8dd12f1e22c6ec4163c72222c3bbf49111ce278337258f01d85"
+# fn-139.5: the single-file SOURCE_SHA256 pin became the distribution manifest
+# (flowctl_tracker/MANIFEST.json) - one integrity mechanism, verified by
+# installers post-copy, consulted here only to authenticate the static-help
+# fast path. A missing/stale manifest declines the fast path safely.
+HELP_SHA256 = "9b17f24e169c3a4ccf74e5d34955b59999f90519efe44476b11ea99aeea2d178"
 HELP_PYTHON = (3, 14)
 USAGE_ERROR = (
     "No usage guide found (searched the plugin's templates/usage.md, then "
@@ -103,8 +107,28 @@ def _load_flowctl(source: Path):
     module.__package__ = ""
     module.__spec__ = spec
     sys.modules["flowctl"] = module
-    exec(code, module.__dict__)
+    exec(  # noqa: S102 - compiling flowctl.py in memory is this module's job
+        code, module.__dict__)
     return module
+
+
+def _manifest_source_sha(source: Path):
+    """flowctl.py's recorded hash from the sibling distribution manifest.
+
+    Returns None (never matches) when the manifest is absent or unreadable -
+    the fast path declines and live argparse serves help, exactly the old
+    mismatch behavior.
+    """
+    try:
+        manifest = json.loads(
+            (source.parent / "flowctl_tracker" / "MANIFEST.json")
+            .read_text(encoding="utf-8"))
+        for entry in manifest.get("files", []):
+            if entry.get("path") == SOURCE_NAME:
+                return entry.get("sha256")
+    except (OSError, ValueError):
+        pass
+    return None
 
 
 def _root_help_fast_path(source: Path) -> bool:
@@ -123,7 +147,7 @@ def _root_help_fast_path(source: Path) -> bool:
     try:
         source_bytes = source.read_bytes()
         help_bytes = help_path.read_bytes()
-        if hashlib.sha256(source_bytes).hexdigest() != SOURCE_SHA256:
+        if hashlib.sha256(source_bytes).hexdigest() != _manifest_source_sha(source):
             return False
         if hashlib.sha256(help_bytes).hexdigest() != HELP_SHA256:
             return False

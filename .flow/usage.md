@@ -15,9 +15,14 @@ Task tracking for AI agents. All state lives in `.flow/`.
 
 - Specs: `fn-N-slug` where slug is derived from title (e.g., fn-1-add-oauth, fn-2-fix-login-bug)
 - Tasks: `fn-N-slug.M` (e.g., fn-1-add-oauth.1, fn-2-fix-login-bug.2)
+- Charts share the native `fn-N` domain with specs (never the same id)
 - Tracker-keyed ids coexist and resolve (`wor-17-slug`, `gh-123-slug`, `gl-456-slug`). Default: `config set tracker.specIds tracker`.
 
 **Backwards compatibility**: Legacy formats `fn-N`, `fn-N-xxx`, `fn-N.M`, and `fn-N-xxx.M` still work.
+
+## Chart (optional pre-capture discovery)
+
+One oversized/unclear idea whose **destination is nameable but route is not** (a direction like "make X more Y" is refused - narrow it or run prospect); one decision (`<chart-id>.D<n>`) per invocation; never a pilot stage. `chart frontier` is the sole work-mode selection input; `chart claim` then `chart resolve --answer-file` close it; every work invocation ends with one greppable `CHART_VERDICT=...` line. Chart never writes specs; capture ingests the briefing.
 
 ## Common Commands
 
@@ -67,7 +72,7 @@ claude -p "<self-contained prompt>" --output-format text --allowedTools "Read,Ba
 # the prompt, so `grok -p --always-approve "..."` misparses (live-verified failure mode).
 # Model + effort are separate flags: `-m grok-4.5 --reasoning-effort high` (NOT `-m grok-4.5-high`).
 grok -m grok-4.5 --reasoning-effort high -p "<self-contained prompt>" </dev/null             # read-only one-shot
-grok --permission-mode acceptEdits -m grok-4.5 --reasoning-effort high -p "<self-contained prompt>" </dev/null  # WRITE mode (edits files - run inside a trusted git dir; --always-approve = blanket). Extras: --check, --best-of-n N, --json-schema. Grok 4.5 = fast + cheap first-draft; route to bulk/implementation, not UI or final taste-critical work.
+grok --always-approve --no-plan -m grok-4.5 --reasoning-effort high -p "<self-contained prompt>" </dev/null  # WRITE mode (blanket; trusted git dir ONLY - acceptEdits skips Bash and silently truncates shell-using tasks). Extras: --check, --best-of-n N, --json-schema. Grok 4.5 = fast cheap first-draft; bulk/implementation, never taste-critical work.
 ```
 
 The codex bridge also works FROM a Codex host (same-family self-bridge): `codex exec -m gpt-5.6-terra -c model_reasoning_effort=medium "<prompt>"` steers a different GPT tier reliably even where `spawn_agent`/Multi-Agent-V2 per-spawn model steering is broken (openai/codex#33268 and friends, Jul 2026). Keep the child prompt flat - no nested subagents.
