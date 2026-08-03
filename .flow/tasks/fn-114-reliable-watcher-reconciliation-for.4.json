@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-03T11:58:59.084584Z",
+  "depends_on": [
+    "fn-114-reliable-watcher-reconciliation-for.3"
+  ],
+  "id": "fn-114-reliable-watcher-reconciliation-for.4",
+  "priority": 4,
+  "spec": "fn-114-reliable-watcher-reconciliation-for",
+  "spec_path": ".flow/tasks/fn-114-reliable-watcher-reconciliation-for.4.md",
+  "status": "todo",
+  "title": "Verify the integrated watcher fix on Linux",
+  "updated_at": "2026-08-03T11:58:59.084584Z"
+}

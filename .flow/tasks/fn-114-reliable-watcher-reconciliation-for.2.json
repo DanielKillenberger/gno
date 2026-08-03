@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-03T11:58:57.977712Z",
+  "depends_on": [
+    "fn-114-reliable-watcher-reconciliation-for.1"
+  ],
+  "id": "fn-114-reliable-watcher-reconciliation-for.2",
+  "priority": 2,
+  "spec": "fn-114-reliable-watcher-reconciliation-for",
+  "spec_path": ".flow/tasks/fn-114-reliable-watcher-reconciliation-for.2.md",
+  "status": "todo",
+  "title": "Make deletion and watcher lifecycle reconciliation correct",
+  "updated_at": "2026-08-03T11:58:57.977712Z"
+}
