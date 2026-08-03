@@ -604,14 +604,54 @@ function syncErrorAttribution(
 }
 
 /**
- * How many unowned failures a cause summary names before it truncates.
+ * How many values a cause summary names before it truncates.
  *
  * A reader diagnosing a collection-level failure needs the SHAPE of it and a
  * couple of examples; the full list is neither readable in a log line nor
  * affordable to build. Typed-edge projection can report several failures per
  * document, so an unbounded list scaled with the failure it was describing.
  */
-const MAX_DESCRIBED_UNOWNED_FAILURES = 3;
+const MAX_DESCRIBED_FAILURES = 3;
+
+/**
+ * How long any ONE named value may be before it is elided.
+ *
+ * The count/sample bound alone still lets a single pathological value - a deep
+ * path, or a store error that echoes a whole query back - carry an unbounded
+ * diagnostic. Both halves of a cause draw their values from the same untrusted
+ * places, so both get the same per-value ceiling.
+ */
+const MAX_DESCRIBED_VALUE_LENGTH = 200;
+
+/** A relative path is already its own rendering. */
+const renderRelPath = (relPath: string): string => relPath;
+
+/**
+ * The ONE bounded rendering both halves of a cause use: a sample of at most
+ * `MAX_DESCRIBED_FAILURES` values, each capped at `MAX_DESCRIBED_VALUE_LENGTH`,
+ * followed by an explicit count of what was elided.
+ *
+ * Every list that reaches a cause is proportional to the failure being
+ * described, which is exactly when a diagnostic must not amplify it (R7/R9).
+ * Both the resulting LENGTH and the WORK to build it are constant-bounded:
+ * `render` is called only for the values that survive the sample, so a result
+ * with thousands of failures never renders thousands of strings to throw all
+ * but three away.
+ */
+function describeBoundedSample<T>(
+  values: readonly T[],
+  render: (value: T) => string
+): string {
+  const described = values.slice(0, MAX_DESCRIBED_FAILURES).map((value) => {
+    const rendered = render(value);
+    return rendered.length > MAX_DESCRIBED_VALUE_LENGTH
+      ? `${rendered.slice(0, MAX_DESCRIBED_VALUE_LENGTH)}...`
+      : rendered;
+  });
+  const truncated = values.length - described.length;
+  const suffix = truncated > 0 ? ` (+${truncated} more)` : "";
+  return `${described.join("; ")}${suffix}`;
+}
 
 /**
  * How to describe a collection-level failure that no batched path owns.
@@ -630,16 +670,12 @@ const MAX_DESCRIBED_UNOWNED_FAILURES = 3;
  */
 function unattributableCauseDetail(attribution: SyncErrorAttribution): string {
   if (attribution.unowned.length > 0) {
-    const described = attribution.unowned
-      .slice(0, MAX_DESCRIBED_UNOWNED_FAILURES)
-      .map((failure) =>
-        failure.message === undefined
-          ? failure.relPath
-          : `${failure.relPath}: ${failure.message}`
-      );
-    const truncated = attribution.unowned.length - described.length;
-    const suffix = truncated > 0 ? ` (+${truncated} more)` : "";
-    return `${attribution.unowned.length} collection-level failure(s) owned by no batched path: ${described.join("; ")}${suffix}`;
+    const described = describeBoundedSample(attribution.unowned, (failure) =>
+      failure.message === undefined
+        ? failure.relPath
+        : `${failure.relPath}: ${failure.message}`
+    );
+    return `${attribution.unowned.length} collection-level failure(s) owned by no batched path: ${described}`;
   }
   return `${attribution.undetailedCount} failure(s) reported with no per-path detail`;
 }
@@ -669,15 +705,21 @@ export class CollectionWatchService {
   /**
    * Suppression HISTORY per path - starts and ends, not a bare expiry.
    *
-   * Reclaimed against the oldest observation that could still consult it (see
-   * `#reclaimSuppressionHistory`), so it never grows without bound.
+   * Reclaimed opportunistically against the oldest observation that could still
+   * consult it (see `#reclaimSuppressionHistory`), which bounds it at one
+   * retained entry per suppressed path.
    */
   readonly #suppressedPaths = new Map<string, SuppressionInterval[]>();
   /**
    * A conservative LOWER BOUND on the earliest `endMs` still stored, used as an
-   * O(1) guard on the reclamation scan. Only ever too small (extending an open
-   * interval leaves it behind), which costs an occasional wasted scan and can
-   * never skip a reclamation that was due.
+   * O(1) guard on the reclamation scan.
+   *
+   * Every write of an `endMs` lowers it, including the write that SHORTENS an
+   * open interval (`suppress(path, 0)` closes a window early). Tracking only
+   * the opens left it too LARGE after a shortening, and the guard then skipped
+   * a scan that was in fact due - retaining a closed window until its ORIGINAL
+   * expiry. Too small is the safe direction: it costs a wasted scan that
+   * recomputes the exact floor, and can never skip a reclamation that was due.
    */
   #suppressionFloorEndMs = Number.POSITIVE_INFINITY;
   /**
@@ -688,18 +730,6 @@ export class CollectionWatchService {
    * relying on millisecond resolution (see `Observation`).
    */
   #nextSequence = 0;
-  /**
-   * Wakes reclamation when the LAST suppression window ends while the daemon is
-   * otherwise idle.
-   *
-   * Without it, reclamation ran only from `suppress()` and from a flush's
-   * `finally`, and an ordinary 5 s window is still open when its 300 ms flush
-   * finishes - so the final reclamation legitimately retained it and, with no
-   * further activity, nothing ever came back for it. One entry per suppressed
-   * path then survived for the service lifetime. Unref'd so it never holds a
-   * process open, and cleared on `dispose()`.
-   */
-  #reclaimTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Observation floors of flushes that have already DRAINED their queues.
    *
@@ -922,13 +952,14 @@ export class CollectionWatchService {
     const key = normalize(absPath);
     const { seq: startSeq, atMs: startMs } = this.#observe();
     const endMs = startMs + ms;
+    // Lowered for EVERY stored end, including the one that shortens an open
+    // window: `suppress(path, 0)` closes a window now, and a floor that still
+    // named the original expiry would let the O(1) guard skip the very scan
+    // that reclaims it.
+    this.#suppressionFloorEndMs = Math.min(this.#suppressionFloorEndMs, endMs);
     const intervals = this.#suppressedPaths.get(key);
     if (!intervals) {
       this.#suppressedPaths.set(key, [{ startSeq, endMs }]);
-      this.#suppressionFloorEndMs = Math.min(
-        this.#suppressionFloorEndMs,
-        endMs
-      );
       this.#reclaimSuppressionHistory();
       return;
     }
@@ -938,10 +969,6 @@ export class CollectionWatchService {
       open.endMs = endMs;
     } else {
       intervals.push({ startSeq, endMs });
-      this.#suppressionFloorEndMs = Math.min(
-        this.#suppressionFloorEndMs,
-        endMs
-      );
       while (intervals.length > MAX_SUPPRESSION_INTERVALS) {
         // Merge the two oldest into their span - conservative by construction.
         const [oldest, next] = intervals as [
@@ -1023,32 +1050,33 @@ export class CollectionWatchService {
    * An interval is therefore retained until the LATER of its own end and the
    * oldest observation that could still consult it - at most one debounce
    * window plus the flush it feeds beyond the window's own lifetime - and is
-   * then dropped, leaving at most one OPEN interval per suppressed path, which
-   * is exactly what the single-expiry map held.
+   * then dropped.
    *
-   * Reaching that bound needs a trigger the daemon does not otherwise have.
-   * Reclamation runs from `suppress()` and from every flush's `finally`, and a
-   * normal 5 s window is still open when its 300 ms flush finishes - so the
-   * final reclamation correctly retains it and, if nothing else ever happens,
-   * nothing comes back for it and it survives for the service lifetime. The
-   * scheduled wake-up below is what closes that: it fires when the earliest
-   * stored window ends, so an idle daemon converges to an empty map rather
-   * than accumulating one entry per path it has ever written.
+   * This is OPPORTUNISTIC: it runs from `suppress()` and from every flush's
+   * `finally`, and nowhere else. So the honest bound is at most ONE retained
+   * entry per suppressed path, reclaimed the next time either of those runs -
+   * a normal 5 s window is still open when its 300 ms flush finishes, so that
+   * flush's final reclamation correctly retains it, and on an idle service it
+   * stays until the next `suppress()` or flush. That is exactly the bound the
+   * single-expiry map this replaced already had, so nothing here regresses it;
+   * only the shape of what is retained changed. There is deliberately no
+   * background wake-up: a timer armed against a window end has to be re-armed
+   * from inside its own callback, has to be cancelled when live observations
+   * move the floor it cannot move itself, and gets its delay silently rounded
+   * to 1 ms by Bun above `2**31-1` - three ways to leak or spin, bought for a
+   * memory bound the daemon already met.
    */
   #reclaimSuppressionHistory(): void {
     if (this.#suppressedPaths.size === 0) {
-      this.#cancelScheduledReclamation();
       return;
     }
     // O(1) guard: nothing has ended yet, so nothing is reclaimable whatever
     // the floor turns out to be (the floor is never later than now).
     const nowMs = Date.now();
     if (this.#suppressionFloorEndMs > nowMs) {
-      this.#scheduleReclamation(false);
       return;
     }
-    const liveMs = this.#oldestLiveObservationMs();
-    const cutoffMs = liveMs ?? nowMs;
+    const cutoffMs = this.#oldestLiveObservationMs() ?? nowMs;
     let floorEndMs = Number.POSITIVE_INFINITY;
     for (const [key, intervals] of this.#suppressedPaths) {
       const kept = intervals.filter((interval) => interval.endMs > cutoffMs);
@@ -1064,53 +1092,6 @@ export class CollectionWatchService {
       }
     }
     this.#suppressionFloorEndMs = floorEndMs;
-    if (this.#suppressedPaths.size === 0) {
-      this.#cancelScheduledReclamation();
-      return;
-    }
-    this.#scheduleReclamation(liveMs !== null);
-  }
-
-  /**
-   * Arm the idle wake-up for the earliest stored window end.
-   *
-   * Skipped entirely when a LIVE observation blocked this pass: re-arming then
-   * would busy-loop against a floor the timer cannot move, and it is not
-   * needed - every live observation belongs to a queue that will flush, and
-   * every flush's `finally` reclaims again. The timer exists only for the case
-   * where no such wake-up is coming.
-   *
-   * `#suppressionFloorEndMs` is a conservative LOWER bound (extending an open
-   * interval leaves it behind), so an early wake costs one scan that recomputes
-   * the exact floor and re-arms against it - never a missed reclamation.
-   */
-  #scheduleReclamation(blockedByLiveObservation: boolean): void {
-    this.#cancelScheduledReclamation();
-    if (
-      this.#disposed ||
-      blockedByLiveObservation ||
-      !Number.isFinite(this.#suppressionFloorEndMs)
-    ) {
-      return;
-    }
-    const delayMs = Math.max(1, this.#suppressionFloorEndMs - Date.now() + 1);
-    const timer = setTimeout(() => {
-      this.#reclaimTimer = null;
-      if (!this.#disposed) {
-        this.#reclaimSuppressionHistory();
-      }
-    }, delayMs);
-    // A background housekeeping timer must never be the reason a process stays
-    // alive (or a test runner refuses to exit).
-    timer.unref?.();
-    this.#reclaimTimer = timer;
-  }
-
-  #cancelScheduledReclamation(): void {
-    if (this.#reclaimTimer !== null) {
-      clearTimeout(this.#reclaimTimer);
-      this.#reclaimTimer = null;
-    }
   }
 
   /** The earliest observation any queued or in-flight work still carries. */
@@ -1249,7 +1230,6 @@ export class CollectionWatchService {
       return;
     }
     this.#disposed = true;
-    this.#cancelScheduledReclamation();
     for (const timer of this.#timers.values()) {
       clearTimeout(timer);
     }
@@ -1275,8 +1255,10 @@ export class CollectionWatchService {
    * reclaimed interval and a lapsed one answer every suppression question
    * identically - so it is unobservable through `getState()` or through any
    * sync. This narrow counter is the seam that lets the bound be asserted
-   * rather than merely claimed. It is deliberately NOT part of reported watcher
-   * state and adds nothing to the public status schema.
+   * rather than merely claimed: at most one retained entry per suppressed path,
+   * reclaimed opportunistically on the next `suppress()` or flush end. It is
+   * deliberately NOT part of reported watcher state and adds nothing to the
+   * public status schema.
    */
   get retainedSuppressionPathCount(): number {
     return this.#suppressedPaths.size;
@@ -1939,13 +1921,19 @@ export class CollectionWatchService {
       // Naming the contributed paths as the failure of an UNATTRIBUTABLE result
       // asserts that they failed, when the sync in fact failed at the
       // COLLECTION level and reported nothing about them (R7/R9).
+      // BOTH halves of the cause are bounded by the same helper. The unowned
+      // SAMPLE was bounded first, but the contributed failed paths beside it
+      // were not - and one unowned failure alongside thousands of contributed
+      // ones still built a per-directory diagnostic that scaled with the
+      // failure, which is precisely the amplification the bound exists to stop
+      // (R7/R9). The COUNTS are always exact; only the listing is sampled.
       const alsoFailed =
         failedPaths.length > 0
-          ? `${failedPaths.length} contributed path(s) also reported failed (${failedPaths.join(", ")}); `
+          ? `${failedPaths.length} contributed path(s) also reported failed (${describeBoundedSample(failedPaths, renderRelPath)}); `
           : "";
       const cause = new Error(
         attribution.attributable
-          ? `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${failedPaths.join(", ")}`
+          ? `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${describeBoundedSample(failedPaths, renderRelPath)}`
           : `sync failed at the collection level, so per-directory attribution was impossible; directory "${entry.directory}" fails closed over ${contributed.length} contributed path(s): ${alsoFailed}${unattributableDetail}`
       );
       this.#notifyDiagnostic(() =>

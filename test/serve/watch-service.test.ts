@@ -4281,6 +4281,103 @@ describe("CollectionWatchService bounds the unattributable cause summary", () =>
 });
 
 /**
+ * The unowned SAMPLE was bounded, but the CONTRIBUTED failed paths named beside
+ * it in the same cause were not - so one unowned failure alongside thousands of
+ * contributed ones still built a per-directory diagnostic that scaled with the
+ * failure it was describing, which is the amplification the bound exists to
+ * stop (R7/R9). Nor was any single named value bounded, so one pathological
+ * error message carried an unbounded cause on its own.
+ */
+describe("CollectionWatchService bounds every value it names in a cause", () => {
+  const CONTRIBUTED_COUNT = 2000;
+  /** Comfortably above a bounded cause, far below an unbounded one. */
+  const BOUNDED_CAUSE_LIMIT = 2_000;
+
+  async function runContributedFailure(unownedMessage: string) {
+    const root = await mkdtemp(join(tmpdir(), "gno-watch-bounded-cause-"));
+    const relPaths = Array.from(
+      { length: CONTRIBUTED_COUNT },
+      (_, index) => `note-${index}.md`
+    );
+    await Promise.all(
+      relPaths.map((relPath) => Bun.write(join(root, relPath), "# note\n"))
+    );
+
+    const harness = createReconcileHarness(createCollection("notes", root), {
+      store: createSubtreeStore({ direct: { "": relPaths } }).store,
+      // Every contributed path is reported failed AND one failure is owned by
+      // no batched path, so the cause carries both halves at once.
+      syncResult: (batchedPaths) =>
+        createSyncResult({
+          filesProcessed: batchedPaths.length,
+          files: batchedPaths.map((relPath) => ({
+            relPath,
+            status: "skipped",
+          })),
+          errors: [
+            ...batchedPaths.map((relPath) => ({
+              relPath,
+              code: "WRITE_FAILED",
+              message: "disk full",
+            })),
+            {
+              relPath: "elsewhere/backlinks.md",
+              code: "QUERY_FAILED",
+              message: unownedMessage,
+            },
+          ],
+        }),
+    });
+
+    try {
+      harness.service.start();
+      harness.emit([["rename", "save.tmp"]]);
+      expect(await harness.settle()).toBe("settled");
+      return harness.failed.map((event) =>
+        String((event.cause as Error | undefined)?.message)
+      );
+    } finally {
+      await harness.service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  test(
+    "bounds a cause built from thousands of contributed failures",
+    async () => {
+      const causes = await runContributedFailure("store offline");
+
+      expect(causes).toHaveLength(1);
+      const [cause] = causes as [string];
+      // The COUNT stays exact - only the listing is sampled.
+      expect(cause).toContain(
+        `${CONTRIBUTED_COUNT} contributed path(s) also reported failed`
+      );
+      expect(cause).toContain("note-0.md");
+      expect(cause).toContain(`(+${CONTRIBUTED_COUNT - 3} more)`);
+      expect(cause).not.toContain(`note-${CONTRIBUTED_COUNT - 1}.md`);
+      expect(cause.length).toBeLessThan(BOUNDED_CAUSE_LIMIT);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "bounds the length of any single value it names",
+    async () => {
+      // One failure, one error message, nothing to sample away: without a
+      // per-value ceiling the sample bound does nothing here.
+      const causes = await runContributedFailure("x".repeat(50_000));
+
+      expect(causes).toHaveLength(1);
+      const [cause] = causes as [string];
+      expect(cause).toContain("elsewhere/backlinks.md");
+      expect(cause.length).toBeLessThan(BOUNDED_CAUSE_LIMIT);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
  * Epoch milliseconds cannot order an event against a `suppress()` call made in
  * the same millisecond, so membership answered as `startMs <= atMs` let a window
  * opened just AFTER an event suppress it retroactively - the exact defect
@@ -4329,17 +4426,16 @@ describe("CollectionWatchService orders events against same-millisecond suppress
 });
 
 /**
- * Reclamation ran only from `suppress()` and from a flush's `finally`. An
- * ordinary window is still OPEN when its flush finishes, so the final
- * reclamation correctly retained it - and on an idle daemon nothing ever came
- * back for it. One entry per suppressed path then survived for the service
- * lifetime (R4).
+ * Suppression history is reclaimed OPPORTUNISTICALLY - on `suppress()` and at
+ * the end of every flush - which bounds it at one retained entry per suppressed
+ * path. These pin that bound, and pin that the O(1) scan guard cannot be left
+ * naming an expiry the history no longer has (R4).
  */
-describe("CollectionWatchService reclaims suppression history when idle", () => {
+describe("CollectionWatchService bounds retained suppression history", () => {
   test(
-    "drops a lapsed window with no further events or flushes",
+    "reclaims a window closed early instead of waiting for its original expiry",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "gno-watch-idle-reclaim-"));
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-close-reclaim-"));
       const { store } = createSubtreeStore({});
       const harness = createReconcileHarness(createCollection("notes", root), {
         store,
@@ -4347,18 +4443,50 @@ describe("CollectionWatchService reclaims suppression history when idle", () => 
 
       try {
         harness.service.start();
-        // A short window, and then NOTHING: no event, no flush, no second
-        // `suppress()` to piggyback reclamation on.
-        harness.service.suppress(join(root, "note.md"), 25);
+        // A long window, then the documented early close.
+        harness.service.suppress(join(root, "note.md"), 60_000);
         expect(harness.service.retainedSuppressionPathCount).toBe(1);
 
-        const deadline = Date.now() + AMBIGUOUS_EVENT_WAIT_MS;
-        while (
-          harness.service.retainedSuppressionPathCount > 0 &&
-          Date.now() < deadline
-        ) {
-          await Bun.sleep(5);
+        // `suppress(path, 0)` ends the window NOW, so the very reclamation it
+        // triggers must see it as closed. Tracking the scan floor only on the
+        // windows that OPEN left it naming the 60 s expiry, and the O(1) guard
+        // then skipped this scan entirely - the closed window stayed retained
+        // for another minute.
+        harness.service.suppress(join(root, "note.md"), 0);
+        expect(harness.service.retainedSuppressionPathCount).toBe(0);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "keeps at most one entry per suppressed path and drops lapsed ones at flush end",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-flush-reclaim-"));
+      await Bun.write(join(root, "note.md"), "# note\n");
+      const { store } = createSubtreeStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        const lapsed = join(root, "lapsed.md");
+        // Many windows on ONE path collapse into one retained entry: repeated
+        // application writes cannot grow the history per write.
+        for (let index = 0; index < 20; index += 1) {
+          harness.service.suppress(lapsed, 5);
         }
+        expect(harness.service.retainedSuppressionPathCount).toBe(1);
+        await Bun.sleep(25);
+
+        // A flush is the other reclamation trigger, and it runs after the
+        // window it could still have been asked about has lapsed.
+        harness.emit([["change", "note.md"]]);
+        expect(await harness.settle()).toBe("settled");
         expect(harness.service.retainedSuppressionPathCount).toBe(0);
       } finally {
         await harness.service.dispose();

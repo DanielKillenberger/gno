@@ -451,15 +451,22 @@ proportional to the event.
   queued or in-flight observation that can still consult it — at most one
   debounce window plus the flush it feeds beyond the window's lifetime — after
   which it is dropped, leaving at most one OPEN window per suppressed path,
-  which is what the expiry map held. Reaching that bound needs a trigger the
-  daemon does not otherwise have: an ordinary window is still open when the
-  300 ms flush that queued it finishes, so the flush's final reclamation
-  legitimately retains it and an idle daemon never comes back for it. A
-  scheduled wake-up at the earliest stored window end supplies that trigger, so
-  an idle service converges to an empty history instead of accumulating one
-  entry per path it has ever written. Two hard caps bound the pathological case
-  where nothing is reclaimable, and both degrade in the fail-closed direction
-  the rest of this requirement takes.
+  which is what the expiry map held. Reclamation is OPPORTUNISTIC — it runs on
+  `suppress()` and at the end of every flush, and nowhere else — so the bound
+  this requirement claims is exactly that: **at most one retained entry per
+  suppressed path**, reclaimed the next time either trigger fires. An ordinary
+  window is still open when the 300 ms flush that queued it finishes, so that
+  flush's final reclamation correctly retains it and, on an otherwise idle
+  service, it stays until the next `suppress()` or flush. That is the bound the
+  single-expiry map already had, so nothing regresses; only the shape of what is
+  retained changed. This requirement deliberately does NOT promise that an idle
+  service converges to an empty history — no background timer is armed to make
+  that true, because a timer armed against a window end must re-arm from its own
+  callback, must be cancelled when live observations move a floor it cannot move
+  itself, and has its delay silently rounded to 1 ms by Bun above `2**31-1`;
+  three ways to spin or leak, bought for a memory bound already met. Two hard
+  caps bound the pathological case where nothing is reclaimable, and both
+  degrade in the fail-closed direction the rest of this requirement takes.
 
   Coalescing follows the same `a && b` rule on both routes. A named exact path
   observed at least once OUTSIDE its window is an external change; a resolved
@@ -660,7 +667,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed against the oldest live observation AND woken by a scheduled reclamation at the earliest window end, so an idle daemon converges to an empty history; never applied to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection, published from the ELIGIBLE observation rather than the latest one seen, and carried beside the capped witness set so a stream past the observation cap still publishes the latest ACCEPTED observation; per-directory sync outcomes only where the failure is owned by a batched path, with the unattributable cause summarized once per sync result, bounded, and skipped when no observer is installed | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — |
