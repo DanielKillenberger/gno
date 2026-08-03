@@ -380,6 +380,14 @@ proportional to the event.
   are now decided separately. Absence (`ENOENT`/`ENOTDIR`) deactivates; a root
   that merely cannot be statted (`EACCES`/`EIO`, a hung mount) fails closed
   under R9 and deactivates nothing.
+
+  The classification never rests on the NAME. A directory may legitimately
+  carry a filename-shaped name — `archive.md/` matches a `*.md` collection
+  pattern exactly as a document does — so an eligible reported name is not
+  evidence that the thing that vanished was a file. A vanished path whose
+  parent survived is therefore treated as a POSSIBLE directory and decided on
+  the indexed side (R12), never collapsed to its parent because its name looked
+  like a document.
 - **R4:** Reconciliation consults the current collection configuration and preserves
   `pattern`/`include`/`exclude` behavior, dotfile/temporary/reserved-path exclusions,
   path normalization and collection-root containment, configured limits and
@@ -448,6 +456,19 @@ proportional to the event.
   whole-collection indexed seam that the bounded descendant lookup cannot
   express for `""`.
 
+  This holds however the removed directory is NAMED, including a name that
+  matches the collection pattern. A deleted `archive.md/` holding
+  `archive.md/child.md` reports the bare `archive.md`, which is ELIGIBLE and so
+  arrives on the exact-path route rather than the ambiguous-event route; its
+  documents still deactivate. The directory-vs-file decision is made in the
+  watcher's classification step, on the indexed side, using the same batched
+  active-descendant lookup the ambiguous route uses: descendants beneath the
+  vanished path mean a removed subtree, none means an ordinary vanished file
+  that collapses to its surviving parent. The path-resolution module stays
+  filesystem-only and holds no store dependency, and the discriminator costs no
+  per-path query — a whole debounce window's vanished paths are answered in one
+  round trip per seam (R5).
+
   Two documented limitations remain, neither about depth:
 
   - Linux subdirectories created after the watcher started emit no event at all
@@ -473,7 +494,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 |-----|-------------|---------|-------------------|
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
-| R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
+| R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R4  | Eligibility, normalization, containment, suppression preserved | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
@@ -482,7 +503,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query and an unstattable collection root | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R11 | Active-children AND active-descendant lookups are index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
-| R12 | Recursive directory delete deactivates the whole removed subtree, collection root included | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |
+| R12 | Recursive directory delete deactivates the whole removed subtree, collection root included, and directories whose names match the collection pattern | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |
 
 ## Test strategy
 

@@ -91,8 +91,18 @@ export type VanishedPathOutcome =
    * - `true` - `directory` itself was OBSERVED missing on disk (including the
    *   collection root). Everything indexed beneath it, at any depth, is
    *   implicated.
-   * - `false` - only the file vanished; `directory` survived and is reconciled
-   *   against its direct children alone.
+   * - `false` - no ancestor of the reported path was observed missing;
+   *   `directory` is its surviving parent.
+   *
+   * `false` is NOT the claim that the vanished path was a file. Nothing here
+   * can make that claim: a directory may legitimately carry a filename-shaped
+   * name, and a `*.md` collection pattern matches the directory `archive.md`
+   * exactly as it matches a document. Once the path is gone the disk cannot
+   * say which it was either. The caller must treat the reported path as
+   * a POSSIBLE directory and discriminate on the INDEXED side - active indexed
+   * descendants mean a removed subtree, none means an ordinary vanished file.
+   * That decision deliberately lives with the caller: this module is
+   * filesystem-only and holds no store dependency.
    *
    * A caller that re-stats `directory` later can see a RECREATED directory and
    * silently narrow a subtree removal to its direct children. The flag exists so
@@ -228,7 +238,11 @@ function shallowestRemovedChild(
   survivingDirectory: string
 ): string {
   if (parentDirectoryOf(vanishedRelPath) === survivingDirectory) {
-    // Only the file itself vanished: reconcile the directory it lived in.
+    // Nothing ABOVE the reported path was observed missing, so the survivor is
+    // the reconciled area. The reported path itself may still have been a
+    // directory - see `VanishedPathOutcome.directoryRemoved`; that is the
+    // caller's discriminator to make against the indexed side, not a question
+    // this string walk can answer.
     return survivingDirectory;
   }
   const rest =

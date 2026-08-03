@@ -2306,6 +2306,11 @@ function createSubtreeStore(options: {
   const directCalls: string[] = [];
   const descendantCalls: string[] = [];
   const allCalls: string[] = [];
+  // `*Calls` count directory KEYS consulted; `*RoundTrips` count invocations of
+  // the seam. The two are deliberately separate: a debounce window may consult
+  // more keys as it learns more, but it must never spend more round trips.
+  const directRoundTrips: string[][] = [];
+  const descendantRoundTrips: string[][] = [];
   const descendantError = {
     ok: false as const,
     error: { code: "QUERY_FAILED", message: "store offline" },
@@ -2315,12 +2320,15 @@ function createSubtreeStore(options: {
     directCalls,
     descendantCalls,
     allCalls,
+    directRoundTrips,
+    descendantRoundTrips,
     store: {
       async listActiveDirectChildSourcePathsBatch(
         _collection: string,
         dirRelPaths: string[]
       ) {
         await options.duringLookup?.();
+        directRoundTrips.push([...dirRelPaths]);
         const byDirectory = new Map<string, string[]>();
         for (const dirRelPath of dirRelPaths) {
           directCalls.push(dirRelPath);
@@ -2350,6 +2358,7 @@ function createSubtreeStore(options: {
         _collection: string,
         dirRelPaths: string[]
       ) {
+        descendantRoundTrips.push([...dirRelPaths]);
         const byDirectory = new Map<string, string[]>();
         for (const dirRelPath of dirRelPaths) {
           descendantCalls.push(dirRelPath);
@@ -2482,10 +2491,14 @@ describe("CollectionWatchService full-subtree deletion reconciliation", () => {
         const batch = harness.batches[0] ?? [];
         // The deleted file still reaches `syncPaths`, which marks it inactive.
         expect(batch).toContain("dir1/gone.md");
-        // Widening stops at the directory the file lived in: it survived, so
-        // no subtree lookup is made and nothing outside it is touched.
-        expect(descendantCalls).toEqual([]);
-        expect(directCalls).toEqual(["dir1"]);
+        // The vanished path is asked about ONCE, on the discriminator seam,
+        // because an eligible name proves nothing about whether it was a file
+        // or a directory. It has no indexed descendants, so widening collapses
+        // to the directory it lived in - which survived - and nothing outside
+        // that directory is touched. The parent is never queried on the
+        // subtree seam: it was never observed missing.
+        expect(descendantCalls).toEqual(["dir1/gone.md"]);
+        expect(directCalls).toEqual(["dir1", "dir1/gone.md"]);
         expect(batch).not.toContain("dir2/other.md");
         expect(harness.started).toEqual([
           { collection: "notes", directory: "dir1" },
@@ -2603,6 +2616,219 @@ describe("CollectionWatchService full-subtree deletion reconciliation", () => {
 
         expect(harness.batches[0]).toEqual(["dir1/a.md"]);
         expect(descendantCalls).toEqual(["dir1"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
+ * fn-114 corrective coverage — a DIRECTORY whose name matches the collection
+ * pattern.
+ *
+ * `archive.md` is a legal directory name and `**\/*.md` matches it exactly as
+ * it matches a document, so an event naming the bare `archive.md` takes the
+ * ELIGIBLE exact-path route. Once it has vanished neither `matchesWalkPath`
+ * (filesystem-free by design) nor the disk (the path is gone) can say which it
+ * was. Collapsing it to its surviving parent on the strength of the NAME left
+ * every document under `archive.md/` active and searchable indefinitely — the
+ * same silent-staleness class this reconciliation work exists to remove,
+ * reached through a name that merely looks like a file.
+ *
+ * The decision therefore belongs to the INDEXED side, on the same batched
+ * descendant seam the ineligible-event route already uses: active indexed
+ * descendants mean a removed directory subtree, none means an ordinary
+ * vanished file that collapses to its parent. These tests pin both directions
+ * plus the round-trip budget, because a per-hint query would be a real
+ * regression even with a correct answer.
+ */
+describe("CollectionWatchService file-like directory names", () => {
+  test(
+    "deactivates the whole subtree of a deleted directory named like a document",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-dirname-md-"));
+      // Post-delete disk state: `archive.md/` and everything under it is gone;
+      // the untouched root document survives.
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+
+      const { store, descendantCalls, descendantRoundTrips } =
+        createSubtreeStore({
+          descendants: {
+            "archive.md": ["archive.md/child.md", "archive.md/sub/deep.md"],
+          },
+        });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // The bare directory name is ELIGIBLE, so this is the exact-path route,
+        // not the ambiguous-event route.
+        harness.emit([["rename", "archive.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // The documents the event never named. Before the fix they stayed
+        // active forever: the parent's direct-child query cannot see beneath
+        // `archive.md/`, so nothing ever implicated them.
+        expect(batch).toContain("archive.md/child.md");
+        // Any depth, not just direct children.
+        expect(batch).toContain("archive.md/sub/deep.md");
+        // Bounded: the surviving root document is not dragged in.
+        expect(batch).not.toContain("keep.md");
+        // The removed directory IS the reconciled area, so the root is neither
+        // enumerated nor reconciled.
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "archive.md" },
+        ]);
+        expect(descendantCalls).toEqual(["archive.md"]);
+        expect(descendantRoundTrips).toHaveLength(1);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "collapses a vanished file-like name with no indexed descendants to its parent",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-dirname-file-"));
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+
+      // Same event shape as the test above, opposite indexed answer:
+      // `archive.md` was an ordinary root-level document. The discriminator
+      // must not over-widen it into a subtree removal.
+      const { store, descendantCalls, directCalls } = createSubtreeStore({
+        direct: { "": ["archive.md", "keep.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "archive.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // The deleted file still reaches `syncPaths`, which marks it inactive.
+        expect(batch).toContain("archive.md");
+        expect(batch).toContain("keep.md");
+        // Collapsed to the surviving parent - here the collection root - and
+        // reconciled as an ordinary vanished file. `archive.md` is never
+        // treated as a directory: it is not enumerated and never started.
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+        // Asked once, on the discriminator seam, and answered "nothing here".
+        expect(descendantCalls).toEqual(["archive.md"]);
+        expect(directCalls).toEqual(["", "archive.md"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reconciles exactly the surviving directory of an ordinary vanished file",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-dirname-narrow-"));
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await mkdir(join(root, "dir2"), { recursive: true });
+      // `dir1/note.md` was deleted; its directory and neighbour survive.
+      await Bun.write(join(root, "dir1", "neighbour.md"), "# neighbour\n");
+      await Bun.write(join(root, "dir2", "other.md"), "# other\n");
+
+      const { store, descendantCalls, directCalls } = createSubtreeStore({
+        direct: { dir1: ["dir1/note.md", "dir1/neighbour.md"] },
+        descendants: { dir1: ["dir1/note.md", "dir1/neighbour.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/note.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        expect(batch).toContain("dir1/note.md");
+        expect(batch).toContain("dir1/neighbour.md");
+        // Not widened: the untouched sibling directory stays out of the batch,
+        // is never enumerated, and is never queried on either seam.
+        expect(batch).not.toContain("dir2/other.md");
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "dir1" },
+        ]);
+        // The vanished path is discriminated; its SURVIVING parent is not asked
+        // about on the subtree seam, because nothing observed it missing.
+        expect(descendantCalls).toEqual(["dir1/note.md"]);
+        expect(directCalls).toEqual(["dir1", "dir1/note.md"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "discriminates a whole window of vanished paths in one round trip per seam",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-dirname-budget-"));
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await Bun.write(join(root, "dir1", "neighbour.md"), "# neighbour\n");
+
+      const { store, directRoundTrips, descendantRoundTrips } =
+        createSubtreeStore({
+          direct: { dir1: ["dir1/neighbour.md"] },
+          descendants: {
+            "archive.md": ["archive.md/child.md"],
+          },
+        });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // Five vanished eligible paths in one debounce window: four ordinary
+        // files in a surviving directory plus one directory named like a
+        // document. Every one of them needs the discriminator.
+        harness.emit([
+          ["rename", "dir1/a.md"],
+          ["rename", "dir1/b.md"],
+          ["rename", "dir1/c.md"],
+          ["rename", "dir1/d.md"],
+          ["rename", "archive.md"],
+        ]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The budget is the point: key count tracks event count, round trips do
+        // not. A per-hint query here would be a coalescing regression even
+        // though every answer would be correct.
+        expect(descendantRoundTrips).toHaveLength(1);
+        expect(descendantRoundTrips[0]?.slice().sort()).toEqual([
+          "archive.md",
+          "dir1/a.md",
+          "dir1/b.md",
+          "dir1/c.md",
+          "dir1/d.md",
+        ]);
+        expect(directRoundTrips).toHaveLength(1);
+        // Still correct, not just cheap.
+        const batch = harness.batches[0] ?? [];
+        expect(batch).toContain("archive.md/child.md");
+        expect(batch).toContain("dir1/neighbour.md");
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });

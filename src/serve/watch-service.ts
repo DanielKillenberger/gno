@@ -588,9 +588,7 @@ export class CollectionWatchService {
     }
     // An excluded or dot-prefixed reported path is not retained: a full sync
     // would never walk it either, so it is covered by the directory alone.
-    if (reportedIsReconcilable) {
-      entry.hints.add(reported);
-    }
+    this.#addDirectoryHint(entry, collection, reported);
     this.#dirtyByCollection.set(collection.name, dirty);
     this.#armFlushTimer(collection.name);
   }
@@ -1044,6 +1042,28 @@ export class CollectionWatchService {
    * parent directory, when only the file went) is queued as dirty, and the
    * ordinary bounded reconciliation takes it from there.
    *
+   * Where the DIRECTORY-VS-FILE decision is made
+   * --------------------------------------------
+   * An eligible reported name is NOT evidence that the thing it named was a
+   * file. `archive.md` is a legal DIRECTORY name, and a `*.md` collection
+   * pattern matches it exactly as it matches a document, so an event naming
+   * the bare `archive.md` takes the exact-path route while `archive.md/child.md`
+   * lives beneath it. `matchesWalkPath` is deliberately filesystem-free and
+   * cannot tell the two apart, and once the path has vanished neither can the
+   * disk. Collapsing it to its surviving parent on the strength of the NAME
+   * left every document under `archive.md/` active and searchable forever -
+   * the same silent staleness this whole path exists to remove.
+   *
+   * So the name decides nothing here. A vanished path whose parent SURVIVED is
+   * queued as a directory HINT under that parent, and the decision is deferred
+   * to the one place that can actually make it: the indexed-descendant
+   * discriminator in `#reconcileDirtyDirectories`. A hint with active indexed
+   * descendants was a directory and is reconciled as a removed subtree; a hint
+   * with none was an ordinary file and collapses to the surviving parent,
+   * exactly as before. This costs no per-path store query - the hint joins the
+   * flush's single batched descendant lookup, which is the same seam the
+   * ineligible-event route has always used.
+   *
    * Nothing is dropped: the exact paths stay in the batch either way, so a
    * plain single-file delete still deactivates exactly that file through the
    * existing `syncPaths` ENOENT branch.
@@ -1065,21 +1085,56 @@ export class CollectionWatchService {
         // is never read as "the file is gone".
         continue;
       }
-      const existing = byDirectory.get(outcome.directory);
-      if (existing) {
+      let entry = byDirectory.get(outcome.directory);
+      if (entry) {
         // The classification is recorded on the queue, never re-derived later:
         // one removed-directory sample in this window is enough, and a second
         // path that only says "my parent survived" must not clear it.
-        existing.subtree ||= outcome.directoryRemoved;
-        continue;
+        entry.subtree ||= outcome.directoryRemoved;
+      } else {
+        entry = {
+          root,
+          hints: new Set<string>(),
+          subtree: outcome.directoryRemoved,
+        };
+        byDirectory.set(outcome.directory, entry);
       }
-      byDirectory.set(outcome.directory, {
-        root,
-        hints: new Set(),
-        subtree: outcome.directoryRemoved,
-      });
+      if (!outcome.directoryRemoved) {
+        // The vanished path's own parent survived, so the path itself is the
+        // shallowest thing known to be gone - and it may be a directory whose
+        // name merely looks like a file. Retain it as a hint so the indexed
+        // side, not the name, decides which it was. When the ancestor walk
+        // already OBSERVED a removed directory (`directoryRemoved`), that
+        // directory is the queued area and the discriminator is not needed.
+        this.#addDirectoryHint(entry, collection, relPath);
+      }
     }
     return [...byDirectory];
+  }
+
+  /**
+   * Retain a reported path as a candidate removed directory under its queued
+   * entry. Shared by both routes into the dirty queue so a hint means exactly
+   * the same thing however the event arrived.
+   *
+   * A path the current rules would never walk is not retained: a full
+   * `gno update` would not descend into it either, so the directory alone
+   * covers it and the flush's batched lookups are not widened for it.
+   */
+  #addDirectoryHint(
+    entry: DirtyDirectoryEntry,
+    collection: Collection,
+    relPath: string
+  ): void {
+    const reported = normalizeCollectionDirRelPath(relPath);
+    if (
+      reported === null ||
+      reported === "" ||
+      !this.#isReconcilableDirectory(reported, collection)
+    ) {
+      return;
+    }
+    entry.hints.add(reported);
   }
 
   /**
