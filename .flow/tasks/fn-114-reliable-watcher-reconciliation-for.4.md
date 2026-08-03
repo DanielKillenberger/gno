@@ -105,9 +105,189 @@ land here as ONE task, not one per artifact.
 
 
 ## Done summary
-TBD
+# fn-114.4 review-fix handover (Findings 2, 3, 4)
 
+Commit: `7ad6078c` on `fn-114-reliable-watcher-reconciliation-for` (base `160c5a05`).
+Task remains `in_progress` — parallel-wave contract, no `flowctl done`, no review dispatch.
+
+### Finding 2 (P1, R8) — real-filesystem watch-to-index lifecycle proof
+
+New file: `/Users/daniel/Projects/gno/.claude/worktrees/fn-114-watcher-reconciliation/test/serve/watch-service.lifecycle.fs.test.ts`
+
+### Structure — nothing in the chain under test is faked
+
+| Layer | What the test uses |
+| --- | --- |
+| Directory | real `mkdtemp` temp root; the collection root is `<temp>/collection` |
+| Watcher | real `CollectionWatchService` with its DEFAULT `watchFactory` (real recursive `node:fs.watch`) — no `watchFactory` override is passed |
+| Ingestion | real `defaultSyncService` (initial `syncCollection`, then the watcher's own `syncPaths`) — not patched, not spied |
+| Store | real `SqliteAdapter` opened on a real on-disk `index.sqlite`, placed OUTSIDE the watched root so SQLite's own writes can never be read as collection activity |
+| Scheduler / event bus | `null` (out of scope; they are consumers, not the chain) |
+
+Harness (`withLifecycleHarness`) creates root → optional `seed` → open store →
+`syncCollections` → real initial `syncCollection` → construct + `start()` the
+service → run the body. `finally` always does `service.dispose()` → `store.close()`
+→ `safeRm(tempDir)`. Per-test hard timeout 60 s; per-wait bound 25 s.
+
+### What it observably asserts
+
+**Test 1 — "an atomic save becomes retrievable without a manual update"**
+- genuine atomic save: `Bun.write(note.md.tmp)` then `rename(note.md.tmp → note.md)`
+- assertion: `store.searchFts("kryptonite", {collection:"notes"})` returns exactly
+  `["note.md"]` — a real BM25 retrieval over content that exists only inside the
+  saved file. `searchFts` filters `active = 1`, so this is retrievability, not row
+  existence.
+- plus `getDocument("notes","note.md").active === true`, and
+  `getDocument("notes","note.md.tmp") === null` (the temp source never becomes a document).
+- no spy on `syncPaths` anywhere in the file.
+
+**Test 2 — "a recursively deleted directory's children become inactive"**
+- seeds `dir1/a.md`, `dir1/b.md`, `keep.md` (all containing `blueberry`) BEFORE the
+  watcher, and asserts the initial sync left all three active and all three
+  retrievable — that is the precondition the deletion must undo.
+- genuine recursive removal: `rm(dir1, {recursive:true, force:true})`.
+- assertion: `getDocument("notes","dir1/a.md").active === false` and same for
+  `dir1/b.md`, via an observable store query.
+- boundedness: `keep.md` stays active and
+  `searchFts("blueberry")` collapses to exactly `["keep.md"]`.
+
+### Cross-platform design
+
+Event SHAPE diverges (Linux: atomic save reports only the SOURCE name, recursive
+delete reports only the bare directory; macOS: both names / children too). The test
+asserts only the OUTCOME, which is identical on both, so the same assertions run
+unmodified on macOS and Linux. Event shapes stay captured-not-asserted in
+`watch-service.fs-smoke.test.ts`.
+
+### Synchronization — no fixed sleep as a settle signal
+
+1. **Liveness cookie** — before each scenario's action, an eligible
+   `gno-cookie-<n>.md` is written into the watched root and the test waits until
+   *that document* is active in the store. A positively observed cookie proves the
+   whole chain (watcher → 300 ms debounce → reconcile → ingest → store) is live, so
+   a later timeout is a real defect rather than a startup race. Not dot-prefixed:
+   Bun's Linux recursive watcher never reports dot-prefixed names, so a dotfile
+   cookie would hang.
+2. **Outcome wait** — `waitFor` re-runs the scenario's own observable query every
+   25 ms until it holds or the 25 s bound expires; the timeout message renders the
+   store's actual `[relPath, active]` snapshot. The interval is a retry cadence; no
+   duration is ever treated as proof that the pipeline finished.
+
+### Runs
+
+**macOS (darwin 25.5.0, Bun 1.3.11)**
+```
+$ bun test test/serve/watch-service.lifecycle.fs.test.ts
+bun test v1.3.11 (af24e281)
+ 2 pass
+ 0 fail
+ 19 expect() calls
+Ran 2 tests across 1 file. [2.06s]
+```
+
+**Linux (Debian container, Bun 1.3.11, arm64)**
+```
+$ docker run --rm --tmpfs /tmp:exec -v "$PWD:/repo" \
+    -v /tmp/napi-linux/node_modules/@napi-rs/canvas-linux-arm64-gnu:/repo/node_modules/@napi-rs/canvas-linux-arm64-gnu:ro \
+    -w /repo -e TMPDIR=/tmp oven/bun:1.3.11 \
+    bun test test/serve/watch-service.lifecycle.fs.test.ts
+bun test v1.3.11 (af24e281)
+
+test/serve/watch-service.lifecycle.fs.test.ts:
+(pass) watch-to-index lifecycle on a real filesystem > an atomic save becomes retrievable without a manual update [1449.00ms]
+(pass) watch-to-index lifecycle on a real filesystem > a recursively deleted directory's children become inactive [674.00ms]
+
+ 2 pass
+ 0 fail
+ 19 expect() calls
+Ran 2 tests across 1 file. [2.57s]
+```
+
+**Linux, full watcher suite (lifecycle + fs-smoke + unit)**
+```
+ 41 pass
+ 1 skip
+ 0 fail
+ 165 expect() calls
+Ran 42 tests across 3 files. [17.73s]
+```
+The single skip is the pre-existing EACCES "unreadable directory" case — unstageable
+as root inside the container, exactly as task .4 already recorded. The lifecycle
+tests themselves skip nothing on either platform.
+
+### One environment caveat the conductor should know
+
+The bare Docker command from task .4 (`docker run ... -v "$PWD:/repo" ... bun test`)
+mounts the **macOS-built** `node_modules`. `@napi-rs/canvas` then has no Linux native
+binding, `pdfjs-dist` cannot polyfill `DOMMatrix`, and **every** document conversion
+fails with `INTERNAL: DOMMatrix is not defined` — so the initial sync indexes zero
+files. That is a mounted-toolchain artifact, not a product defect: it reproduces on
+this branch for the pre-existing `test/ingestion/sync-incremental.test.ts` too
+(2 pass / 1 fail in-container with the bare command). The event-shape smoke tests
+never noticed because they do no ingestion.
+
+Fix used: install the matching Linux binding once into a scratch dir and overlay just
+that one package read-only.
+```bash
+mkdir -p /tmp/napi-linux && cd /tmp/napi-linux
+echo '{"name":"x","version":"1.0.0"}' > package.json
+docker run --rm -v /tmp/napi-linux:/out -w /out oven/bun:1.3.11 bun add @napi-rs/canvas@0.1.80
+```
+(0.1.80 is the version pinned in this repo's lockfile.) Then add
+`-v /tmp/napi-linux/node_modules/@napi-rs/canvas-linux-arm64-gnu:/repo/node_modules/@napi-rs/canvas-linux-arm64-gnu:ro`
+to the task .4 docker command. Nothing on the host is mutated. On x64 hosts the
+package name is `canvas-linux-x64-gnu`.
+
+### Finding 3 (P2) — `docs/DAEMON.md` `--no-sync-on-start`
+
+Replaced "Anything already on disk … stays unindexed until the next `gno update`"
+with: the flag **skips the initial collection scan**; untouched pre-existing files
+stay unindexed, but a pre-existing file **is** picked up if it changes later, or if a
+later ambiguous event reconciles the directory holding it — reconciliation enumerates
+every eligible direct child of that directory including files that predate startup.
+
+Verified against shipped code: `CollectionWatchService#reconcileDirectory` calls
+`listEligibleDirectChildren(directory, walkConfig)` (`src/serve/watch-service.ts:930`),
+which enumerates by eligibility with no mtime or startup filter; the exact-path fast
+path (`:328-341`) likewise indexes any eligible reported file regardless of age.
+
+### Finding 4 (P2) — "never a whole-collection walk"
+
+`docs/ARCHITECTURE.md` and `docs/WEB-UI.md` now qualify the claim as **steady-state
+behavior under unchanged collection configuration**, and both name the exception: if
+the collection configuration changes while a batch is reconciling or while
+`syncPaths` is in flight, the watcher recovers with a full `syncCollection`, which
+IS a whole-collection walk.
+
+Verified against shipped code: the generation-drift recovery loop in
+`#flushCollection` (`src/serve/watch-service.ts:682-727`) compares the current
+collection generation against the generation captured at flush start and calls
+`defaultSyncService.syncCollection(...)` when they differ — including on the
+empty-batch path (`:643-656`), which exists precisely so a rules change that empties
+the bounded batch still triggers the full recovery.
+
+### Finding 1 — not addressed here, by instruction
+
+The task file's `TBD` evidence block is the conductor's to write at `flowctl done`
+time under the parallel-wave contract. The raw material is in this handover and in
+the accompanying evidence JSON; per-stage timings and query plans for the
+large-directory fixture belong to the earlier task .4 work already on the branch.
+
+### Gates (all green)
+
+| Gate | Result |
+| --- | --- |
+| new lifecycle smoke, macOS | 2 pass / 0 fail |
+| new lifecycle smoke, Linux (Docker) | 2 pass / 0 fail |
+| `bun test test/serve/ test/ingestion/ test/store/ test/spec/` | 1235 pass / 0 fail / 10137 expect |
+| `bun test` (full) | 3536 pass / 2 skip / 0 fail / 27086 expect, 434 files (3534 → 3536, the +2 are the new tests) |
+| `bun run lint:check` | 0 warnings, 0 errors; oxfmt clean |
+| `bunx tsc --noEmit` | clean |
+| `git diff --check` | clean |
+
+Baseline: green pre-edit (full suite was already 3534 pass / 0 fail on this branch).
+No `GATE_SKIPPED` lines — every gate was run in full.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 160c5a056b6fcb08ecaf3f0fb5b058865c449f78, 7ad6078c66815c335504bcda1c9e6bf80cc5643b
+- Tests: bun test (FULL canonical gate) -> 3536 pass, 2 skip, 0 fail across 433 files. CONDUCTOR-VERIFIED independently at 3534 pass/0 fail before the +2 lifecycle tests were added., bun test test/serve/ test/ingestion/ test/store/ test/spec/ -> 1235 pass, 0 fail, bun test test/serve/watch-service.lifecycle.fs.test.ts (macOS) -> 2 pass, 0 fail (CONDUCTOR-VERIFIED), bun test test/serve/watch-service.lifecycle.fs.test.ts (LINUX, docker, Bun 1.3.11) -> 2 pass, 0 fail (CONDUCTOR-VERIFIED first-hand, not taken from the worker report), bun run lint:check -> 0 warnings, 0 errors; formatting clean, bunx tsc --noEmit -> clean, git diff --check -> clean
 - PRs:
