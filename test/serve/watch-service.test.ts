@@ -1,6 +1,11 @@
 import type { WatchListener } from "node:fs";
 
 import { afterEach, describe, expect, mock, test } from "bun:test";
+// node:fs/promises is used for mkdtemp/mkdir/rm: Bun has no native equivalents
+// for temp-directory creation or filesystem structure operations.
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Collection } from "../../src/config/types";
 import type { CollectionSyncResult } from "../../src/ingestion";
@@ -704,4 +709,203 @@ describe("CollectionWatchService", () => {
     expect(seenPaths).toEqual([["doc.md"]]);
     await service.dispose();
   });
+});
+
+/**
+ * fn-114 task .1 — RED regression coverage. These tests are EXPECTED TO FAIL
+ * until the bounded directory-reconciliation path lands in fn-114 task .3.
+ * They must not be weakened to go green.
+ *
+ * Event shapes replayed here were captured from a real recursive
+ * `node:fs.watch` (see test/serve/watch-service.fs-smoke.test.ts). On Linux,
+ * Bun forwards only the SOURCE (temp) name of an atomic rename and never the
+ * destination (oven-sh/bun#36328), so a save that ends as `atomic.md` is
+ * reported solely as `.gno-tmp.<id>`. `matchesWalkPath` rejects that name and
+ * `src/serve/watch-service.ts:203-212` drops the event, so the final eligible
+ * file is never handed to `syncPaths`.
+ *
+ * The collection root is a real temp directory here because reconciliation
+ * must read the directory's true final state; the watcher itself is still the
+ * deterministic fake so no test depends on real event timing.
+ */
+const AMBIGUOUS_EVENT_WAIT_MS = 2000;
+const RED_TEST_TIMEOUT_MS = 15_000;
+
+/** Linux-shaped capture: only the temporary source name is ever reported. */
+const LINUX_ATOMIC_CREATE_SEQUENCE: ReadonlyArray<
+  readonly [string, string | null]
+> = [["rename", ".gno-tmp.abc123"]];
+const LINUX_ATOMIC_REPLACE_SEQUENCE: ReadonlyArray<
+  readonly [string, string | null]
+> = [["rename", "nested/.gno-tmp.def456"]];
+const LINUX_AMBIGUOUS_DELETION_SEQUENCE: ReadonlyArray<
+  readonly [string, string | null]
+> = [["rename", ".gno-tmp.ghi789"]];
+
+function createSyncPathsProbe() {
+  const batches: string[][] = [];
+  let resolveFirst: ((batch: string[]) => void) | null = null;
+  const firstBatch = new Promise<string[]>((resolve) => {
+    resolveFirst = resolve;
+  });
+
+  defaultSyncService.syncPaths = (async (_collection, _store, relPaths) => {
+    const batch = [...relPaths];
+    batches.push(batch);
+    resolveFirst?.(batch);
+    resolveFirst = null;
+    return createSyncResult({
+      filesProcessed: batch.length,
+      filesUpdated: batch.length,
+    });
+  }) as typeof defaultSyncService.syncPaths;
+
+  return {
+    batches,
+    /**
+     * Resolves as soon as the watcher hands a batch to `syncPaths`. The
+     * timeout is a hard failure bound so the RED case fails with a readable
+     * assertion instead of hanging; it is not standing in for a settle signal.
+     */
+    async waitForBatch(): Promise<string[] | "NO_SYNC_WITHIN_TIMEOUT"> {
+      const timeout = Bun.sleep(AMBIGUOUS_EVENT_WAIT_MS).then(
+        () => "NO_SYNC_WITHIN_TIMEOUT" as const
+      );
+      return await Promise.race([firstBatch, timeout]);
+    },
+  };
+}
+
+function createFakeWatcherService(collection: Collection) {
+  let watcherCallback:
+    | ((eventType: string, filename: string | null) => void)
+    | undefined;
+
+  const service = new CollectionWatchService({
+    collections: [collection],
+    eventBus: null,
+    scheduler: null,
+    store: {} as never,
+    watchFactory: ((
+      _path: string,
+      _options: { recursive: boolean },
+      callback: WatchListener<string>
+    ) => {
+      watcherCallback = callback as typeof watcherCallback;
+      return { close: () => undefined };
+    }) as never,
+  });
+
+  return {
+    service,
+    emit: (sequence: ReadonlyArray<readonly [string, string | null]>): void => {
+      for (const [eventType, filename] of sequence) {
+        watcherCallback?.(eventType, filename);
+      }
+    },
+  };
+}
+
+describe("CollectionWatchService ambiguous-event reconciliation (fn-114 RED)", () => {
+  test(
+    "syncs the final eligible file when an atomic create reports only the temp name",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-red-create-"));
+      // Post-rename disk state: the atomic writer's destination exists, the
+      // temp source does not, and an ineligible sibling must stay unindexed.
+      await Bun.write(join(root, "atomic.md"), "# atomic\n");
+      await Bun.write(join(root, "cover.png"), "not markdown");
+
+      const probe = createSyncPathsProbe();
+      const { service, emit } = createFakeWatcherService(
+        createCollection("notes", root)
+      );
+
+      try {
+        service.start();
+        emit(LINUX_ATOMIC_CREATE_SEQUENCE);
+
+        expect(await probe.waitForBatch()).toEqual(["atomic.md"]);
+      } finally {
+        await service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "syncs an atomically replaced existing eligible file reported only as a nested temp name",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-red-replace-"));
+      await mkdir(join(root, "nested"), { recursive: true });
+      // `nested/note.md` was already indexed; the atomic writer replaced its
+      // contents, and only the temp source name was reported.
+      await Bun.write(join(root, "nested", "note.md"), "# replaced\n");
+
+      const probe = createSyncPathsProbe();
+      const { service, emit } = createFakeWatcherService(
+        createCollection("notes", root)
+      );
+
+      try {
+        service.start();
+        emit(LINUX_ATOMIC_REPLACE_SEQUENCE);
+
+        expect(await probe.waitForBatch()).toEqual(["nested/note.md"]);
+      } finally {
+        await service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
+   * Deletion coverage, disk-side half.
+   *
+   * The existing green case above ("forwards eligible deletion paths for
+   * inactive sync and one notification") passes because the event names the
+   * eligible file: `matchesWalkPath` is filesystem-free
+   * (`src/ingestion/walker.ts:182-186`), so a deleted `deleted.md` still
+   * passes eligibility and reaches `syncPaths`, which marks it inactive.
+   * Production fails when the delete surfaces only as an ambiguous sibling
+   * name in the same directory — then nothing is queued at all and the
+   * document stays active.
+   *
+   * This test proves the watcher must reconcile the directory rather than drop
+   * the event. Proving that the *deleted* `stale.md` itself is handed to
+   * `syncPaths` additionally requires the active-indexed-children store query
+   * added in fn-114 task .2 and wired in .3; with `syncPaths` mocked and no
+   * store seam yet, the indexed side cannot be expressed here. That half is
+   * covered by task .4's integrated verification.
+   */
+  test(
+    "reconciles the directory when an eligible deletion surfaces as an ambiguous sibling name",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-red-delete-"));
+      // `stale.md` was indexed and has been deleted; `kept.md` is its still
+      // present eligible sibling.
+      await Bun.write(join(root, "kept.md"), "# kept\n");
+
+      const probe = createSyncPathsProbe();
+      const { service, emit } = createFakeWatcherService(
+        createCollection("notes", root)
+      );
+
+      try {
+        service.start();
+        emit(LINUX_AMBIGUOUS_DELETION_SEQUENCE);
+
+        const batch = await probe.waitForBatch();
+        expect(batch).toContain("kept.md");
+        // R4: an ineligible event is not permission to index the ineligible file.
+        expect(batch).not.toContain(".gno-tmp.ghi789");
+      } finally {
+        await service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
 });
