@@ -9,10 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.33.0] - 2026-08-03
+
+### Added
+
 - Added bundled local raster attachments to publish export for PNG, JPEG, GIF,
   WebP, and AVIF, including content-addressed deduplication, exact serialized
   size accounting, public/secret hosted delivery, and ciphertext-only
-  encrypted reader Blob URLs.
+  encrypted reader Blob URLs. Thanks [@DanielKillenberger](https://github.com/DanielKillenberger)
+  for the original contribution.
 
 ### Changed
 
@@ -26,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   envelope budget, recognized CommonMark tilde fences during attachment
   discovery, rejected bare `gno-asset:` sentinels, enforced `sourceRef`
   1..1024, and required AV1-decodable AVIF at producer ingress.
+- Hardened raster ingestion against malformed container streams, incomplete
+  GIF pixel data, PNG decompression bombs, unsafe traversal and symlink paths,
+  exclusion bypasses, ambiguous references, and upload-budget drift.
 
 ## [1.32.0] - 2026-08-03
 
@@ -2074,7 +2086,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.32.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.33.0...HEAD
+[1.33.0]: https://github.com/gmickel/gno/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/gmickel/gno/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/gmickel/gno/compare/v1.30.7...v1.31.0
 [1.30.7]: https://github.com/gmickel/gno/compare/v1.30.6...v1.30.7
