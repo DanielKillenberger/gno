@@ -2042,7 +2042,7 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
  *
  * The original design split events into "ineligible => hint" and "eligible =>
  * authoritative". Bun 1.3.14 disproved the second half. Measured on the
- * maintainer's Linux/ext4 hardware with real inotify, `rm -rf dir1/` holding
+ * the reporter's Linux/ext4 VPS with real inotify, `rm -rf dir1/` holding
  * `a.md` and `b.md` reports:
  *
  *   Bun 1.3.11 -> [["rename", "dir1"]]      (the directory)

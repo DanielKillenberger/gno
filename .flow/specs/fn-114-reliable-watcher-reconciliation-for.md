@@ -89,10 +89,10 @@ This measurement corrects three assumptions the plan was originally written on:
    passes and why the live failure was never reproducible from it. The real stale-active
    condition is a **recursive directory delete** reporting only the directory.
 
-### Bun 1.3.14 divergence (post-review, maintainer hardware + container)
+### Bun 1.3.14 divergence (post-review, reporter's Linux VPS + container)
 
 The shapes above are **not stable across Bun patch releases**. Re-captured on the
-maintainer's production hardware (Bun 1.3.14, kernel 7.0.0-27-generic, ext4, real
+the reporter's own Linux VPS running GNO (Bun 1.3.14, kernel 7.0.0-27-generic, ext4, real
 inotify, not a container) and reproduced in a `tmpfs` container on the same version:
 
 | scenario | Bun 1.3.11 / linux | Bun 1.3.14 / linux |
