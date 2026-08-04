@@ -121,6 +121,7 @@ import {
   CaptureDestinationError,
   defaultSyncService,
   prepareCaptureDestination,
+  requireActiveCaptureDocument,
   type SyncResult,
   withContentTypeRules,
 } from "../../ingestion";
@@ -3044,6 +3045,19 @@ export async function handleDuplicateDoc(
         store,
         withContentTypeRules({ runUpdateCmd: false }, ctxHolder.config)
       );
+      // A sync that did not throw is not proof the copy is indexed: an
+      // excluded or unreachable destination is `skipped`, a perfectly ordinary
+      // non-error. The copy DID land on disk, so this is not a failed request -
+      // but the response must not let `uri` imply an indexed document it does
+      // not have. Same channel the refresh failure already uses.
+      const indexed = await requireActiveCaptureDocument(
+        store,
+        collection.name,
+        plan.nextRelPath
+      );
+      if (!indexed.ok) {
+        warning = `File duplicated on disk, but it is not indexed: ${indexed.message}`;
+      }
     } catch {
       warning =
         "File duplicated on disk, but index refresh failed. Run Update All to reconcile the workspace.";
@@ -3810,6 +3824,17 @@ export async function handleCreateDoc(
           withContentTypeRules({ runUpdateCmd: false }, ctxHolder.config),
           deps?.syncCollection
         );
+        // The 202 above promised only that a job started; a job reporting
+        // `completed` is where this write is claimed to have succeeded. Demand
+        // the ACTIVE document HERE - `syncCollection` not erroring is not proof
+        // that the new file was indexed, and a "completed" job for an
+        // unindexed path is the same silent success one step removed.
+        const indexed = await requireActiveCaptureDocument(
+          store,
+          collection.name,
+          posixRelPath
+        );
+        if (!indexed.ok) throw new Error(indexed.message);
         // Notify scheduler after sync completes (use gnoUri as docid placeholder)
         // The sync will create a proper docid, but we don't have it here yet
         // Using normalizedRelPath as identifier since docid is generated during sync

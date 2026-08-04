@@ -7,7 +7,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { lstat, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -110,6 +117,67 @@ describe("prepareCaptureDestination", () => {
     )) as CaptureDestinationError | null;
 
     expect(error?.code).toBe("PATH_OUTSIDE_COLLECTION");
+  });
+
+  test("classifies a DANGLING alias inside a SYMLINKED collection root as unwalkable", async () => {
+    // The root is legitimately reached through a symlink (`/tmp -> /private/tmp`
+    // is the everyday case). Containment is judged against the CANONICAL root,
+    // so a lexical dangling target - which still carries the link path - looks
+    // like an escape when it is nothing of the sort.
+    const realRoot = join(root, "real-root");
+    const linkedRoot = join(root, "linked-root");
+    await mkdir(realRoot, { recursive: true });
+    await symlink(realRoot, linkedRoot);
+    await symlink(join(linkedRoot, "missing"), join(linkedRoot, "alias"));
+
+    const error = (await prepareCaptureDestination(
+      linkedRoot,
+      "alias/note.md"
+    ).then(
+      () => null,
+      (cause: unknown) => cause
+    )) as CaptureDestinationError | null;
+
+    expect(error?.code).toBe("PATH_NOT_WALKABLE");
+  });
+
+  test("classifies a DANGLING alias under a symlinked ancestor as containment", async () => {
+    // `root/hop -> outside/real` exists, so `root/hop/missing` is lexically
+    // inside the collection and canonically outside it, and the collection
+    // path here is the CANONICAL root so nothing else can explain the verdict.
+    // Only canonical resolution is the truth about where a write would land.
+    const canonicalRoot = await realpath(root);
+    await mkdir(join(outside, "real"), { recursive: true });
+    await symlink(join(outside, "real"), join(canonicalRoot, "hop"));
+    await symlink(
+      join(canonicalRoot, "hop", "missing"),
+      join(canonicalRoot, "alias")
+    );
+
+    const error = (await prepareCaptureDestination(
+      canonicalRoot,
+      "alias/note.md"
+    ).then(
+      () => null,
+      (cause: unknown) => cause
+    )) as CaptureDestinationError | null;
+
+    expect(error?.code).toBe("PATH_OUTSIDE_COLLECTION");
+  });
+
+  test("refuses an alias whose target cannot be resolved at all", async () => {
+    // `ENOTDIR`, not `ENOENT`: the target's ancestor is a regular file, so the
+    // destination is unknowable rather than merely absent. Guessing lexically
+    // here is what let a real escape read as "just not indexable".
+    await writeFile(join(root, "file.txt"), "body");
+    await symlink(join(root, "file.txt", "under-a-file"), join(root, "alias"));
+
+    const error = (await prepareCaptureDestination(root, "alias/note.md").then(
+      () => null,
+      (cause: unknown) => cause
+    )) as CaptureDestinationError | null;
+
+    expect(error?.code).toBe("PATH_UNRESOLVED");
   });
 
   test("refuses a symlinked leaf name", async () => {

@@ -35,7 +35,15 @@
 // node:fs/promises structure/link operations have no Bun equivalent.
 import { mkdir, readlink, realpath } from "node:fs/promises";
 // node:path has no Bun path utilities.
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 import type { DocumentRow, StorePort } from "../store/types";
 
@@ -78,6 +86,60 @@ function isContained(rootReal: string, candidate: string): boolean {
   return !(rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel));
 }
 
+/** `errno`-style code of a rejected filesystem operation, if it carried one. */
+function errnoOf(cause: unknown): string | undefined {
+  const code = (cause as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/**
+ * Canonicalize a path that may not exist yet.
+ *
+ * `realpath` on a dangling target fails, and the lexical target is NOT a safe
+ * substitute for the answer we need: containment is judged against the
+ * canonical collection root, so a lexical path disagrees with it whenever the
+ * root itself is reached through a symlink (`/tmp -> /private/tmp` on macOS is
+ * the everyday case) or whenever the missing target sits under an existing
+ * symlinked ancestor. Both make a merely-unreachable alias look like an escape.
+ *
+ * So: canonicalize the deepest ancestor that DOES exist and re-append the
+ * missing tail. That is the path the target would have if it were created,
+ * which is exactly what containment has to be decided on.
+ *
+ * @returns the canonical path, or the `errno` of the failure that stopped
+ *   resolution - anything other than a missing component (`EACCES`, `EIO`,
+ *   `ENOTDIR`, `ELOOP`, ...) is a genuine resolution failure and must not be
+ *   answered with a guess.
+ */
+async function canonicalizePossiblyMissing(
+  target: string
+): Promise<{ ok: true; path: string } | { ok: false; errno: string }> {
+  const missingTail: string[] = [];
+  let current = target;
+  for (;;) {
+    try {
+      const real = await realpath(current);
+      return {
+        ok: true,
+        path:
+          missingTail.length === 0
+            ? real
+            : join(real, ...missingTail.slice().reverse()),
+      };
+    } catch (cause) {
+      const errno = errnoOf(cause) ?? "UNKNOWN";
+      if (errno !== "ENOENT") return { ok: false, errno };
+      const parent = dirname(current);
+      if (parent === current) {
+        // Walked to the filesystem root without finding anything that exists.
+        return { ok: false, errno: "ENOENT" };
+      }
+      missingTail.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
 /**
  * Classify a symlink component: does it escape the collection, or is it merely
  * out of the walker's reach?
@@ -114,14 +176,21 @@ async function classifySymlinkComponent(
     );
   }
 
-  // A DANGLING alias still has a destination; fall back to the lexical target
-  // so `alias -> /outside/missing` is reported as containment, not as unreadable.
-  let resolved = target;
-  try {
-    resolved = await realpath(target);
-  } catch {
-    resolved = target;
+  // A DANGLING alias still has a destination, so `alias -> /outside/missing`
+  // stays a containment error rather than becoming "unreadable". But only a
+  // MISSING component justifies resolving past the failure: `EACCES`, `EIO`,
+  // `ENOTDIR`, `ELOOP` and friends mean we do not know where the alias points,
+  // and guessing there is how a real escape gets reported as merely
+  // unreachable. Those fail as `PATH_UNRESOLVED`.
+  const canonical = await canonicalizePossiblyMissing(target);
+  if (!canonical.ok) {
+    return new CaptureDestinationError(
+      "PATH_UNRESOLVED",
+      `Refusing to write ${relPath}: the target of symlink ${absPath} could not be resolved (${canonical.errno}).`,
+      relPath
+    );
   }
+  const resolved = canonical.path;
 
   if (isContained(rootReal, resolved)) {
     return new CaptureDestinationError(

@@ -31,6 +31,7 @@ import {
   type CollectionSyncResult,
   defaultSyncService,
   prepareCaptureDestination,
+  requireActiveCaptureDocument,
   type SyncResult,
   withContentTypeRules,
 } from "../ingestion";
@@ -238,6 +239,17 @@ export const executeResidentCapturePlan = async (
         store,
         syncCollection
       );
+      // The 202 receipt promised nothing except that a job started, so THIS is
+      // where completion is claimed - and a completed sync job is where a
+      // caller learns the capture worked. Demand the proof here: a job that
+      // reports `completed` for a path with no ACTIVE document would relocate
+      // the silent success one step, not remove it.
+      const indexed = await requireActiveCaptureDocument(
+        store,
+        collection.name,
+        plan.relPath
+      );
+      if (!indexed.ok) throw new Error(indexed.message);
       context.scheduler?.notifySyncComplete([plan.relPath]);
       context.eventBus?.emit({
         type: "document-changed",

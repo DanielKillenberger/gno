@@ -29,7 +29,7 @@ import {
   requireActiveCaptureDocument,
   withContentTypeRules,
 } from "../../ingestion";
-import { runTool, type ToolResult } from "./index";
+import { captureDestinationToolError, runTool, type ToolResult } from "./index";
 
 interface CaptureInput extends Omit<
   SharedCaptureInput,
@@ -180,9 +180,7 @@ export function handleCapture(
           await prepareCaptureDestination(collection.path, plan.relPath);
         } catch (error) {
           if (error instanceof CaptureDestinationError) {
-            throw new Error(
-              `${MCP_ERRORS.INVALID_INPUT.code}: ${error.message}`
-            );
+            throw captureDestinationToolError(error);
           }
           throw error;
         }

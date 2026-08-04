@@ -184,6 +184,13 @@ from a closed `clipper-error@1.0` body instead of treating every 409 as failure.
 CSRF and failure responses use
 [`clipper-csrf@1.0`](../spec/output-schemas/clipper-csrf.schema.json) and
 [`clipper-error@1.0`](../spec/output-schemas/clipper-error.schema.json).
+A write refused because the destination is one the indexer could never reach
+returns `VALIDATION` with HTTP 409 and the optional closed
+`details: { reason, relPath }`, where `reason` is `PATH_OUTSIDE_COLLECTION`,
+`PATH_NOT_WALKABLE`, `PATH_UNRESOLVED`, or `NOT_DIRECTORY`. Nothing is written,
+and the idempotency key is left unused, so the same key may be retried once the
+destination is fixed. Every other clipper error carries `code` and `message`
+only.
 
 The Chromium client uses `credentials: "omit"` for every extension-origin
 request. Its service worker is the only component that sees the bearer grant.

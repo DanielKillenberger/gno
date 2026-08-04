@@ -220,6 +220,13 @@ describe("gno_capture MCP", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("symlink");
+    // DISCRIMINATING for the structured reason: at ede2ed1a the payload was
+    // `{error, message}` only, so a machine caller had to read the sentence to
+    // tell "unreachable alias" from "escapes the collection".
+    expect(result.structuredContent).toMatchObject({
+      error: "INVALID_INPUT",
+      details: { code: "PATH_NOT_WALKABLE", relPath: "alias/note.md" },
+    });
     expect(await Bun.file(join(tmpDir, "real", "note.md")).exists()).toBe(
       false
     );
@@ -246,6 +253,15 @@ describe("gno_capture MCP", () => {
       expect(result.content[0]?.text).toContain(
         "resolving outside the collection root"
       );
+      // DISCRIMINATING: the reason is carried structurally, and it is the
+      // containment code - not the same code the unreachable alias reports.
+      expect(result.structuredContent).toMatchObject({
+        error: "INVALID_INPUT",
+        details: {
+          code: "PATH_OUTSIDE_COLLECTION",
+          relPath: "escape/note.md",
+        },
+      });
       expect(await Bun.file(join(outsideDir, "note.md")).exists()).toBe(false);
     } finally {
       await safeRm(outsideDir);

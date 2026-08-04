@@ -1932,19 +1932,34 @@ class GnoClientImpl implements GnoClient {
     if (!linksResult.ok || !backlinksResult.ok) {
       throw sdkError("STORE", "Failed to compute refactor warnings");
     }
+    const warnings = buildRefactorWarnings({
+      backlinks: backlinksResult.value.length,
+      wikiLinks: linksResult.value.filter((entry) => entry.linkType === "wiki")
+        .length,
+      markdownLinks: linksResult.value.filter(
+        (entry) => entry.linkType === "markdown"
+      ).length,
+    }).warnings;
+    // A sync that did not throw is not proof the copy is indexed: an excluded
+    // or unreachable destination is `skipped`, an ordinary non-error. Unlike
+    // `createNote`, the duplicate already exists on disk and the caller needs
+    // its path back, so this is reported rather than thrown - but `uri` must
+    // not silently imply an indexed document.
+    const indexed = await requireActiveCaptureDocument(
+      this.store,
+      collection.name,
+      plan.nextRelPath
+    );
+    if (!indexed.ok) {
+      warnings.push(
+        `File duplicated on disk, but it is not indexed: ${indexed.message}`
+      );
+    }
     return {
       uri: plan.nextUri,
       path: nextPath,
       relPath: plan.nextRelPath,
-      warnings: buildRefactorWarnings({
-        backlinks: backlinksResult.value.length,
-        wikiLinks: linksResult.value.filter(
-          (entry) => entry.linkType === "wiki"
-        ).length,
-        markdownLinks: linksResult.value.filter(
-          (entry) => entry.linkType === "markdown"
-        ).length,
-      }).warnings,
+      warnings,
     };
   }
 

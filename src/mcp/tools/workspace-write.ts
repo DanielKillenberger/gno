@@ -36,9 +36,10 @@ import {
   CaptureDestinationError,
   defaultSyncService,
   prepareCaptureDestination,
+  requireActiveCaptureDocument,
   withContentTypeRules,
 } from "../../ingestion";
-import { runTool, type ToolResult } from "./index";
+import { captureDestinationToolError, runTool, type ToolResult } from "./index";
 
 interface CreateFolderInput {
   collection: string;
@@ -439,9 +440,7 @@ export function handleDuplicateNote(
           await prepareCaptureDestination(collection.path, plan.nextRelPath);
         } catch (error) {
           if (error instanceof CaptureDestinationError) {
-            throw new Error(
-              `${MCP_ERRORS.INVALID_INPUT.code}: ${error.message}`
-            );
+            throw captureDestinationToolError(error);
           }
           throw error;
         }
@@ -452,12 +451,27 @@ export function handleDuplicateNote(
           withContentTypeRules({ runUpdateCmd: false }, ctx.config)
         );
         recordContentMutation(syncResult, ctx.markContentMutation);
+        const warnings = buildRefactorWarnings(
+          await getRefactorSnapshot(ctx, doc.id)
+        ).warnings;
+        // A sync that did not error is not proof the copy is indexed - an
+        // excluded or unreachable destination is `skipped`, an ordinary
+        // non-error. The copy exists on disk, so this is not a tool failure,
+        // but `uri` must not silently imply a document that is not there.
+        const indexed = await requireActiveCaptureDocument(
+          ctx.store,
+          collection.name,
+          plan.nextRelPath
+        );
+        if (!indexed.ok) {
+          warnings.push(
+            `File duplicated on disk, but it is not indexed: ${indexed.message}`
+          );
+        }
         return {
           uri: plan.nextUri,
           relPath: plan.nextRelPath,
-          warnings: buildRefactorWarnings(
-            await getRefactorSnapshot(ctx, doc.id)
-          ).warnings,
+          warnings,
         };
       });
     },

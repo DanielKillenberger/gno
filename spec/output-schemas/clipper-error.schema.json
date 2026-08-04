@@ -39,7 +39,23 @@
             "VALIDATION"
           ]
         },
-        "message": { "type": "string", "minLength": 1 }
+        "message": { "type": "string", "minLength": 1 },
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason", "relPath"],
+          "properties": {
+            "reason": {
+              "enum": [
+                "PATH_OUTSIDE_COLLECTION",
+                "PATH_NOT_WALKABLE",
+                "PATH_UNRESOLVED",
+                "NOT_DIRECTORY"
+              ]
+            },
+            "relPath": { "type": "string", "minLength": 1 }
+          }
+        }
       }
     }
   }

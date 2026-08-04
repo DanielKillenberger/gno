@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Proved every write destination before writing it, and demanded an indexed
+  document afterwards. `mkdir -p` does not create real directories — it follows
+  an existing directory symlink — so a capture beneath `alias -> real/` landed
+  where the no-follow indexer never looks, came back `skipped` (an ordinary
+  non-error), and was reported as a successful capture; `alias -> /outside`
+  wrote outside the collection entirely. Captures and note creation now prove
+  the parent chain component by component through the same reachability seam the
+  walker uses, refuse any symlink below the collection root before anything is
+  written, and distinguish an escaping alias (containment) from an unreachable
+  one. Destinations that cannot be resolved at all — permission, I/O, or a
+  non-directory ancestor — are refused as unresolved instead of being guessed
+  from the path text, and a merely missing target is judged against the
+  canonical collection root, so a collection reached through a symlink (macOS
+  `/tmp -> /private/tmp`) no longer reports a perfectly ordinary alias as an
+  escape. The refusal reason (`PATH_OUTSIDE_COLLECTION`, `PATH_NOT_WALKABLE`,
+  `PATH_UNRESOLVED`, `NOT_DIRECTORY`) is now carried structurally on the CLI,
+  SDK, REST, MCP, and browser-clipper surfaces rather than only inside the
+  message. A browser clip into such a destination returns that structured 409
+  instead of a generic 500, and releases the idempotency key it claimed, since
+  nothing was written. Where a write is confirmed asynchronously, the sync job
+  itself now fails rather than reporting `completed` for a file the index does
+  not have, and a duplicate that lands somewhere the collection does not index
+  says so instead of handing back a `gno://` URI that resolves to nothing.
+
 ## [1.34.0] - 2026-08-04
 
 ### Added

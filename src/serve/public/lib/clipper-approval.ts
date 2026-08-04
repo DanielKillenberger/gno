@@ -92,7 +92,12 @@ const parseError = (value: unknown): ClipperApprovalError | null => {
     !isRecord(value) ||
     !hasExactKeys(value, ["error"]) ||
     !isRecord(value.error) ||
-    !hasExactKeys(value.error, ["code", "message"]) ||
+    // `details` is the optional structured refusal reason the capture route
+    // adds to a `VALIDATION` error; no pairing route emits it.
+    !(
+      hasExactKeys(value.error, ["code", "message"]) ||
+      hasExactKeys(value.error, ["code", "message", "details"])
+    ) ||
     typeof value.error.code !== "string" ||
     !KNOWN_ERROR_CODES.has(value.error.code) ||
     typeof value.error.message !== "string" ||
