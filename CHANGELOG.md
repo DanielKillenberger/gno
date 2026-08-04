@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.34.0] - 2026-08-04
+
+### Added
+
 - Added deterministic, offline `gno audit` and read-only MCP `gno_audit` for
   link integrity, declared provenance completeness, and source/index freshness.
   Reports use stable finding IDs, exact totals under bounded output, explicit
@@ -2095,7 +2103,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.33.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.34.0...HEAD
+[1.34.0]: https://github.com/gmickel/gno/compare/v1.33.0...v1.34.0
 [1.33.0]: https://github.com/gmickel/gno/compare/v1.32.0...v1.33.0
 [1.32.0]: https://github.com/gmickel/gno/compare/v1.31.0...v1.32.0
 [1.31.0]: https://github.com/gmickel/gno/compare/v1.30.7...v1.31.0
