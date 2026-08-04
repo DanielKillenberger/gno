@@ -500,6 +500,17 @@ The written file is identified by `path`/`relPath` in both cases. The
 type-check until you narrow on `kind` - a URI that `client.get()` cannot
 resolve is not something the API hands back.
 
+`reason` also discloses a **partial import**: an adapter that accepts one
+record and rejects another still yields a non-error write, so the container
+sentence alone would read as clean. It states how many records were rejected -
+and, because this result carries no sync result, it says the per-record
+failures are not on the response and names where they are: re-run the
+collection sync with `gno update --verbose`, which re-imports the container
+(containers are never skipped as unchanged) and prints each rejected record's
+code, source locator, and message. Only the REST job handle
+(`result.written`, see [API.md](API.md)) rides inside a `SyncResult`, so only
+it points at `collections[].files[].recordImport.failures` directly.
+
 `recordUris` is a **bounded page**, not the container's contents: it lists at
 most the first 1,000 of `recordCount` records, and `recordUrisTruncated` says
 how many it omits. One valid export can hold six figures of records, so the

@@ -479,8 +479,9 @@ export function handleDuplicateNote(
           }
           // The copy is imported by the adapter exactly like the original was,
           // so it can be PARTIAL for the same reasons - and the container
-          // sentence above says nothing about it. Same shared fragment every
-          // other surface discloses it with.
+          // sentence above says nothing about it. Same shared FRAGMENT every
+          // other surface discloses it with - and its default pointer, because this
+          // response carries the count and not the failures themselves.
           const partialImport = captureRecordImportReason(
             captureFileSyncResult(syncResult, plan.nextRelPath)?.recordImport
           );

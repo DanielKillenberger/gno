@@ -283,9 +283,16 @@ export interface GnoCreatedNoteRecordContainer extends GnoCreateNoteFile {
    * When the adapter rejected part of what was written, or reported a partial
    * snapshot, that is stated here too: an adapter that accepts one record and
    * rejects another still yields a non-error write, so the container sentence
-   * alone would read as a clean import. Composed by the same
-   * `captureSyncReason` every capture surface uses, so the wording is identical
-   * wherever a container is written.
+   * alone would read as a clean import. The FACTS are composed by the same
+   * `captureSyncReason` every capture surface uses, so they cannot drift.
+   *
+   * Their consequences are this shape's own. This is not a capture receipt: it
+   * has no `docid`, so what the container costs its caller is the single
+   * fetchable `uri` - hence `recordUris`. And it carries no sync result, so it
+   * does not send you to `recordImport.failures`: the rejected records' detail
+   * is not on this response, and `reason` says where it is (re-running the
+   * collection sync with `gno update --verbose` re-imports the container and
+   * prints each rejected record).
    *
    * There is no dedicated per-container enumeration endpoint, so `reason`
    * promises no continuation offset. It does not claim the omitted records are

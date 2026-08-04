@@ -618,6 +618,10 @@ describe("captureSyncReason - container shape and import completeness", () => {
   const CONTAINER_ONLY =
     "Written as a record container: imported as 2 logical record documents at virtual paths; the container path itself has no document, so this receipt carries no docid.";
 
+  // The same FACT, finished with the consequence a handle actually has.
+  const CONTAINER_ONLY_HANDLE =
+    "Written as a record container: imported as 2 logical record documents at virtual paths; the container path itself has no document, so there is no single fetchable URI for it - fetch the records in recordUris instead.";
+
   test("a fully successful import reads exactly as it did before", () => {
     // The whole no-false-alarm requirement: an import with nothing rejected and
     // a complete snapshot must not gain a word.
@@ -692,6 +696,70 @@ describe("captureSyncReason - container shape and import completeness", () => {
       "gno://notes/note.md"
     );
     expect(document.reason).toBeUndefined();
+  });
+
+  test("the handle states the consequence a handle HAS, not a receipt's", () => {
+    // DISCRIMINATING against 386aa65d: there every consumer inherited the
+    // receipt's consequence, so this handle - which has no docid field in its
+    // type at all - announced that "this receipt carries no docid". A caller
+    // reading it went looking for a docid contract that does not exist, and
+    // was told nothing about the thing it had actually lost: the single
+    // fetchable URI. At 386aa65d this asserted exactly CONTAINER_ONLY.
+    const clean = captureWrittenHandle(containerProof, {
+      collection: "records",
+      relPath: "clean.jsonl",
+    });
+
+    expect(clean.reason).toBe(CONTAINER_ONLY_HANDLE);
+    expect(clean.reason).not.toContain("docid");
+    // The receipt surfaces keep the clause that IS true of them.
+    expect(captureSyncReason(containerProof)).toBe(CONTAINER_ONLY);
+  });
+
+  test("each surface points at failures its own caller can reach", () => {
+    // DISCRIMINATING against 386aa65d: both of these ended "See the sync
+    // result's recordImport.failures", and neither caller holds a sync result
+    // in the receipt case - the CaptureReceipt has no recordImport field, so
+    // the pointer named a dead end. The handle DOES ride inside the job's
+    // SyncResult, which is the whole difference.
+    const partial = recordImport({
+      accepted: 2,
+      failed: 1,
+      snapshotState: "complete",
+    });
+    const receipt = captureSyncReason(containerProof, partial);
+    const handle = captureWrittenHandle(
+      containerProof,
+      { collection: "records", relPath: "partial.jsonl" },
+      partial
+    );
+
+    expect(receipt).toContain(
+      "This response does not carry the per-record failures"
+    );
+    expect(receipt).toContain("gno update --verbose");
+    expect(receipt).not.toContain("recordImport.failures");
+
+    expect(handle.reason).toContain(
+      "collections[].files[].recordImport.failures"
+    );
+    expect(handle.reason).not.toContain("does not carry");
+  });
+
+  test("a partial snapshot alone points nowhere, having no per-record list", () => {
+    // NON-DISCRIMINATING against 386aa65d, and deliberately so: the pointer
+    // was already gated on `failed > 0` there and must stay gated now that
+    // there are two of them. A snapshot the adapter could not complete names
+    // no individual record, so promising a list would be the same defect in
+    // the opposite direction.
+    const reason = captureSyncReason(
+      containerProof,
+      recordImport({ accepted: 2, failed: 0, snapshotState: "partial" })
+    );
+
+    expect(reason).toContain("preserved from the previous import");
+    expect(reason).not.toContain("does not carry the per-record failures");
+    expect(reason).not.toContain("recordImport.failures");
   });
 });
 

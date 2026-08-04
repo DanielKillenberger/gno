@@ -657,6 +657,22 @@ describe("SDK client", () => {
     // Only the accepted record is indexed, which is exactly what the sentence
     // above claims.
     expect(created.recordCount).toBe(1);
+
+    // DISCRIMINATING against 386aa65d: sharing the composer there also shared
+    // the capture RECEIPT's consequences, and neither is true of this shape.
+    // `GnoCreateNoteResult` has no `docid` field, so "this receipt carries no
+    // docid" named a contract it does not have - while saying nothing about
+    // what the caller actually lost, the single fetchable `uri`. And it holds
+    // no sync result, so "See the sync result's recordImport.failures" pointed
+    // at an object it never receives.
+    expect(created.reason).toContain("no single fetchable URI");
+    expect(created.reason).toContain("recordUris");
+    expect(created.reason).not.toContain("docid");
+    expect(created.reason).toContain(
+      "This response does not carry the per-record failures"
+    );
+    expect(created.reason).toContain("gno update --verbose");
+    expect(created.reason).not.toContain("recordImport.failures");
   });
 
   test("captures notes with provenance receipt through the SDK", async () => {
@@ -1003,6 +1019,17 @@ describe("SDK client", () => {
       "rejected by the adapter/jsonl adapter and NOT indexed"
     );
     expect(partial).toContain("(1 accepted)");
+    // DISCRIMINATING against 386aa65d: the warning ended "See the sync
+    // result's recordImport.failures", and a `GnoDuplicateNoteResult` is a
+    // uri/relPath/warnings triple - there is no sync result on it, so the
+    // caller was told records were dropped and sent to a field it cannot
+    // reach. It now says the failures are not on this response, and names the
+    // re-sync that does print them.
+    expect(partial).not.toContain("recordImport.failures");
+    expect(partial).toContain(
+      "This response does not carry the per-record failures"
+    );
+    expect(partial).toContain("gno update --verbose");
   });
 
   test("multi-gets several documents", async () => {

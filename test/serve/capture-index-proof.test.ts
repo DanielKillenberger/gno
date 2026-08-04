@@ -287,8 +287,13 @@ describe("REST create hands back a resolvable handle for a container", () => {
 
     // REST writes the caller's bytes verbatim, so this import really is fully
     // successful - and a fully successful import must not gain a word.
+    //
+    // DISCRIMINATING against 386aa65d for the CLAUSE: the handle inherited the
+    // capture receipt's "so this receipt carries no docid", which is not true
+    // of a `written` handle - it is not a receipt and its type has no docid
+    // field. It now ends with the consequence it does have.
     expect(job.result?.written?.reason).toBe(
-      "Written as a record container: imported as 2 logical record documents at virtual paths; the container path itself has no document, so this receipt carries no docid."
+      "Written as a record container: imported as 2 logical record documents at virtual paths; the container path itself has no document, so there is no single fetchable URI for it - fetch the records in recordUris instead."
     );
   });
 
@@ -306,6 +311,19 @@ describe("REST create hands back a resolvable handle for a container", () => {
     expect(job.result?.written?.reason).toContain(
       "1 record rejected by the adapter/jsonl adapter and NOT indexed (2 accepted)"
     );
+    // DISCRIMINATING against 386aa65d for the POINTER: it said "the sync
+    // result's recordImport.failures" without naming a shape, and the caller
+    // holding only the 202 body had no such object. This handle is different
+    // from every other surface precisely BECAUSE it rides inside the job's
+    // SyncResult - so the pointer names that path, and the path resolves.
+    expect(job.result?.written?.reason).toContain(
+      "collections[].files[].recordImport.failures"
+    );
+    const failures =
+      job.result?.collections?.[0]?.files?.find(
+        (file) => file.relPath === "partial.jsonl"
+      )?.recordImport?.failures ?? [];
+    expect(failures.length).toBeGreaterThan(0);
   });
 
   test("an ordinary document still hands back its fetchable URI", async () => {

@@ -11,8 +11,13 @@ export type {
   CaptureDestinationErrorCode,
 } from "./capture-destination";
 export {
+  CAPTURE_CONTAINER_HANDLE_CONSEQUENCE,
+  CAPTURE_CONTAINER_RECEIPT_CONSEQUENCE,
+  CAPTURE_FAILURES_NOT_CARRIED,
+  CAPTURE_FAILURES_ON_SYNC_RESULT,
   CaptureDestinationError,
   captureFileSyncResult,
+  captureProofContainerReason,
   captureProofContainerSummary,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,

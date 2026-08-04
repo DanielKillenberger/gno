@@ -1180,7 +1180,16 @@ supplying it is a `400 VALIDATION`, never a wider listing.
 `reason` also discloses a _partial_
 record import — records the adapter rejected (and therefore did not index) or a
 partial snapshot — which the container's own file status reports as an ordinary
-non-error. Broad sync jobs (`POST /api/sync`) write nothing of their own and
+non-error. When records were rejected, `reason` points at
+`collections[].files[].recordImport.failures` **in this same job result**, which
+is where each rejected record's code, source locator, and message live. That
+pointer is specific to `result.written`: a capture receipt, an SDK
+`createNote()` result, and a duplicate warning carry the rejected COUNT and no
+sync result, so they say the failures are not on the response and name a
+re-sync (`gno update --verbose`) instead — a record container is re-imported on
+every collection sync, so the same failures are re-derived and printed.
+
+Broad sync jobs (`POST /api/sync`) write nothing of their own and
 omit `written` entirely.
 
 **Example**:

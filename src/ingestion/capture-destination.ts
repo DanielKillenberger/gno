@@ -411,17 +411,92 @@ export const captureProofContainerSummary = (
 };
 
 /**
- * The `sync.reason` that keeps a container receipt from reading as a plain
- * document capture whose docid merely went missing.
+ * The consequence the container fact has for a RECEIPT.
+ *
+ * A capture receipt ({@link CaptureReceipt}) carries a `uri` for the written
+ * FILE and an optional `docid`, and a container has no document at that path -
+ * so the honest thing to say about a receipt is that its `docid` is absent
+ * rather than lost. Only surfaces with a docid contract may say this.
  */
-export const captureProofSyncReason = (
-  proof: ActiveCaptureProof
+export const CAPTURE_CONTAINER_RECEIPT_CONSEQUENCE =
+  "so this receipt carries no docid";
+
+/**
+ * The consequence the container fact has for a HANDLE.
+ *
+ * {@link WrittenPathHandle} and the SDK's `GnoCreateNoteResult` have no docid
+ * field at all, so "carries no docid" would name a contract they do not have.
+ * What their caller loses is the single fetchable URI, and what it gets
+ * instead is `recordUris` - which both shapes actually carry.
+ */
+export const CAPTURE_CONTAINER_HANDLE_CONSEQUENCE =
+  "so there is no single fetchable URI for it - fetch the records in recordUris instead";
+
+/**
+ * The container FACT plus the consequence the calling surface actually has.
+ *
+ * The fact - this write produced a record container, indexed as N logical
+ * record documents with nothing at the written path - is identical everywhere
+ * and is composed once, in {@link captureProofContainerSummary}. The
+ * CONSEQUENCE is not: a receipt loses its docid, a handle loses its single
+ * fetchable URI, a duplicate loses the target URI's resolvability. Sharing the
+ * consequence too is how a receipt sentence ended up on a shape with no docid
+ * contract, which was simply false there. Each caller passes its own.
+ */
+export const captureProofContainerReason = (
+  proof: ActiveCaptureProof,
+  wording: { lead: string; consequence: string }
 ): string | undefined => {
   const summary = captureProofContainerSummary(proof);
   return summary === undefined
     ? undefined
-    : `Written as a record container: ${summary}, so this receipt carries no docid.`;
+    : `${wording.lead}: ${summary}, ${wording.consequence}.`;
 };
+
+/**
+ * The `sync.reason` that keeps a container receipt from reading as a plain
+ * document capture whose docid merely went missing.
+ *
+ * `consequence` defaults to the receipt's, because every surface that renders
+ * a `sync.reason` into a {@link CaptureReceipt} has a docid contract. A caller
+ * whose shape does not (the written handle, `createNote`) passes its own.
+ */
+export const captureProofSyncReason = (
+  proof: ActiveCaptureProof,
+  consequence: string = CAPTURE_CONTAINER_RECEIPT_CONSEQUENCE
+): string | undefined =>
+  captureProofContainerReason(proof, {
+    lead: "Written as a record container",
+    consequence,
+  });
+
+/**
+ * Where the per-record failures are, for a caller holding the SYNC RESULT.
+ *
+ * True only where the shape carrying this sentence sits inside a `SyncResult`
+ * whose `collections[].files[].recordImport` the same caller can read - which
+ * is the create/capture JOB result (`GET /api/jobs/:id` returns the whole
+ * `SyncResult`, and `syncCollection` populates `files`). Nothing else.
+ */
+export const CAPTURE_FAILURES_ON_SYNC_RESULT =
+  "See this sync job result's collections[].files[].recordImport.failures for each rejected record.";
+
+/**
+ * Where the per-record failures are, for every caller that does NOT hold the
+ * sync result.
+ *
+ * A capture receipt, a `createNote` result and a duplicate warning all carry
+ * the COUNT of rejected records and none of the failures themselves, so
+ * pointing them at `recordImport.failures` named a field they have no route
+ * to. It says so, and names a route that exists: a record container is
+ * re-imported on every collection sync - `SyncService.processFile` hands a
+ * file with a configured record adapter to `processRecordContainer` before the
+ * unchanged/skip decision is ever reached - so re-syncing re-derives the same
+ * failures, and `formatSyncResultLines` prints each one's code, source locator
+ * and message under `--verbose`.
+ */
+export const CAPTURE_FAILURES_NOT_CARRIED =
+  "This response does not carry the per-record failures; re-run the collection sync with `gno update --verbose`, which re-imports the container and prints each rejected record.";
 
 /**
  * The `sync.reason` fragment for a record import that did NOT take everything
@@ -437,9 +512,15 @@ export const captureProofSyncReason = (
  *
  * `undefined` for a fully successful import (and for a file that is not a
  * record container at all), so a clean capture reads exactly as it did before.
+ *
+ * `pointer` is where THIS surface's caller can reach the failures themselves.
+ * The fact (N records rejected) is shareable; the route to their detail is
+ * not, so it defaults to {@link CAPTURE_FAILURES_NOT_CARRIED} - the honest
+ * answer for every shape that carries only the count.
  */
 export const captureRecordImportReason = (
-  recordImport: FileSyncResult["recordImport"]
+  recordImport: FileSyncResult["recordImport"],
+  pointer: string = CAPTURE_FAILURES_NOT_CARRIED
 ): string | undefined => {
   if (!recordImport) return undefined;
   const { accepted, failed } = recordImport.records;
@@ -456,34 +537,42 @@ export const captureRecordImportReason = (
       "the adapter reported a partial snapshot, so records it did not see were preserved from the previous import rather than refreshed"
     );
   }
-  const pointer =
-    failed > 0
-      ? " See the sync result's recordImport.failures for each rejected record."
-      : "";
-  return `Record import was partial: ${parts.join("; ")}.${pointer}`;
+  // Only a REJECTION has per-record detail to point at. A partial snapshot
+  // names no individual record, so a pointer there would send the caller
+  // looking for a list that does not exist.
+  const suffix = failed > 0 ? ` ${pointer}` : "";
+  return `Record import was partial: ${parts.join("; ")}.${suffix}`;
 };
 
 /**
  * The whole `sync.reason` a proven capture receipt should carry.
  *
  * Two independent facts can need stating about one write - the path is a
- * container (so the receipt carries no docid) and the import was partial (so
- * some of what was written is not indexed) - and they are orthogonal: a
- * container can import cleanly, and either fact alone must still be said. The
- * capture surfaces that share this receipt shape (CLI `gno capture`, MCP
- * `gno_capture`, SDK `capture()`, REST resident capture) all compose them here
- * so none of them can drift into reporting only half of it.
+ * container and the import was partial (so some of what was written is not
+ * indexed) - and they are orthogonal: a container can import cleanly, and
+ * either fact alone must still be said. The capture surfaces that share this
+ * receipt shape (CLI `gno capture`, MCP `gno_capture`, SDK `capture()`, REST
+ * resident capture) all compose them here so none of them can drift into
+ * reporting only half of it.
+ *
+ * What is composed here is the FACTS. Their consequences are surface-specific
+ * and are passed in: what the container costs THIS shape, and where THIS
+ * caller can reach the rejected records. The defaults are the receipt's,
+ * because the receipt is what most callers of this composer render; a shape
+ * with no docid contract, or one that carries its own sync result, overrides
+ * them rather than inheriting a sentence that is false of it.
  *
  * `undefined` when there is nothing unusual to say, which is the entire
  * ordinary case.
  */
 export const captureSyncReason = (
   proof: ActiveCaptureProof,
-  recordImport?: FileSyncResult["recordImport"]
+  recordImport?: FileSyncResult["recordImport"],
+  wording: { containerConsequence?: string; failurePointer?: string } = {}
 ): string | undefined => {
   const stated = [
-    captureProofSyncReason(proof),
-    captureRecordImportReason(recordImport),
+    captureProofSyncReason(proof, wording.containerConsequence),
+    captureRecordImportReason(recordImport, wording.failurePointer),
   ].filter((reason): reason is string => reason !== undefined);
   return stated.length === 0 ? undefined : stated.join(" ");
 };
@@ -577,13 +666,22 @@ export const captureWrittenRecordPageReason = (page: {
  * Same facts as {@link captureSyncReason}, addressed to a caller that gets a
  * HANDLE rather than a rendered receipt: which URIs it can actually fetch - and
  * a BOUNDED page of them (see {@link captureWrittenRecordPage}).
+ *
+ * Same facts, different consequences, because this is not a receipt. It has no
+ * docid field to be missing, so the container costs it the single fetchable
+ * URI, not a docid. And it is returned INSIDE the create/capture job's
+ * `SyncResult`, so its caller - unlike a receipt's - really can read
+ * `collections[].files[].recordImport.failures` and is told to.
  */
 export const captureWrittenHandle = (
   proof: ActiveCaptureProof,
   location: { collection: string; relPath: string },
   recordImport?: FileSyncResult["recordImport"]
 ): WrittenPathHandle => {
-  const reason = captureSyncReason(proof, recordImport);
+  const reason = captureSyncReason(proof, recordImport, {
+    containerConsequence: CAPTURE_CONTAINER_HANDLE_CONSEQUENCE,
+    failurePointer: CAPTURE_FAILURES_ON_SYNC_RESULT,
+  });
   if (proof.kind === "file") {
     return {
       kind: "document",
@@ -614,15 +712,18 @@ export const captureWrittenHandle = (
  * "is this file indexed?" - and must ask it the same way, by effective source
  * path. Only the sentence differs: nothing was written just now, so the reason
  * cannot say "Written as".
+ *
+ * The consequence is the receipt's, and stays fixed: every caller of this
+ * (CLI `gno capture`, MCP `gno_capture`, SDK `capture()`, resident capture)
+ * renders it into a {@link CaptureReceipt}, which does have a docid contract.
  */
 export const captureProofOpenedExistingSyncReason = (
   proof: ActiveCaptureProof
-): string | undefined => {
-  const summary = captureProofContainerSummary(proof);
-  return summary === undefined
-    ? undefined
-    : `Existing file is a record container: ${summary}, so this receipt carries no docid.`;
-};
+): string | undefined =>
+  captureProofContainerReason(proof, {
+    lead: "Existing file is a record container",
+    consequence: CAPTURE_CONTAINER_RECEIPT_CONSEQUENCE,
+  });
 
 /**
  * The proof a capture/create caller must demand after syncing its own write.

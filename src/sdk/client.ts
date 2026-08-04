@@ -145,6 +145,7 @@ import {
 import { normalizeStructuredQueryInput } from "../core/structured-query";
 import { parseAndValidateTagFilter } from "../core/tags";
 import {
+  CAPTURE_CONTAINER_HANDLE_CONSEQUENCE,
   CaptureDestinationError,
   captureFileSyncResult,
   captureProofContainerSummary,
@@ -1673,12 +1674,21 @@ class GnoClientImpl implements GnoClient {
     // from the container proof alone reports a half-imported export as a clean
     // one. `captureSyncReason` is the single composer for that pair of facts -
     // the same one CLI `gno capture`, MCP `gno_capture`, `capture()` and the
-    // REST create handle use - so the disclosure here is identical to theirs
+    // REST create handle use - so the FACTS here are identical to theirs
     // rather than a second wording that can drift.
+    //
+    // The CONSEQUENCES are this shape's own, and sharing those was wrong. A
+    // `GnoCreateNoteResult` is not a receipt: it has no docid contract to
+    // report missing, so it states what it actually costs the caller (no
+    // single fetchable `uri`; use `recordUris`). And it carries no sync
+    // result, so it cannot send the caller to `recordImport.failures` - it
+    // says the failures are not on this response and names a route that is.
     const page = captureWrittenRecordPage(indexed.records);
     const truncated = captureWrittenRecordPageReason(page);
     const reason = [
-      captureSyncReason(indexed, syncResult.recordImport),
+      captureSyncReason(indexed, syncResult.recordImport, {
+        containerConsequence: CAPTURE_CONTAINER_HANDLE_CONSEQUENCE,
+      }),
       truncated,
     ]
       .filter((part): part is string => part !== undefined)
@@ -2048,8 +2058,9 @@ class GnoClientImpl implements GnoClient {
       }
       // The copy is imported by the adapter exactly like the original was, so
       // it can be PARTIAL for the same reasons - and the container sentence
-      // above says nothing about it. Same shared fragment every other surface
-      // discloses it with.
+      // above says nothing about it. Same shared FRAGMENT every other surface
+      // discloses it with - and its default pointer, because this response
+      // carries the count and not the failures themselves.
       const partialImport = captureRecordImportReason(
         captureFileSyncResult(syncResult, plan.nextRelPath)?.recordImport
       );

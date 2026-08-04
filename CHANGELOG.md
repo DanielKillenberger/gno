@@ -90,7 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were visible only by digging into the sync result. Capture receipts now state
   it in the existing `sync.reason`, on `gno capture`, `gno_capture`, SDK
   `capture()`, and the REST capture/create jobs alike. A fully successful import
-  is unchanged.
+  is unchanged. The FACT is shared; the consequence is per surface. A capture
+  receipt says the container leaves it with no `docid`; a write handle and SDK
+  `createNote()` — which have no `docid` at all — say there is no single
+  fetchable URI and to use `recordUris`. And each names a route to the rejected
+  records that its own caller has: the REST job result points at
+  `collections[].files[].recordImport.failures` on that same result, while the
+  shapes that carry only a count say so and name `gno update --verbose`, which
+  re-imports the container and prints every rejected record.
 
 - Made the REST create/capture job result hand back a handle that resolves.
   `POST /api/docs` answers `202` before the write is proven, so its `uri` is a
