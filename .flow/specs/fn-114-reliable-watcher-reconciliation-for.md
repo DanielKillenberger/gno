@@ -408,6 +408,16 @@ proportional to the event.
   nothing about what is ELIGIBLE — a symlinked directory is still simply skipped,
   exactly as `FileWalker.walk` and `Dirent.isDirectory()` skip it.
 
+  That no-follow rule covers the ENTRY POINT too. The requested directory and
+  every component between it and the collection root are examined unresolved
+  (`lstat`, no-follow) BEFORE anything is canonicalized, so an in-root alias
+  (`root/alias -> root/real`) is not silently dereferenced into an enumeration
+  of its target: it reports no eligible children, which is exactly what a full
+  `FileWalker.walk` indexes under it. `realpath` is used only to prove
+  containment (an alias resolving OUTSIDE the root is still refused). The
+  collection root itself is still canonicalized — it is legitimately a symlink
+  (`/tmp -> /private/tmp` on macOS).
+
   Suppression is scoped to SYNCING, not to classification. Its purpose is that an
   application-originated write is not fed back into the watcher as a change, so a
   suppressed path that still exists on disk is never re-synced. It must not also
@@ -512,6 +522,13 @@ proportional to the event.
   if it were a temp name, and drains on the ceiling instead of growing for as
   long as the churn lasts. A burst that finishes inside the ceiling still
   coalesces into exactly one batch and one store round trip per seam.
+
+  The ceiling is measured on a MONOTONIC clock, never on wall time. A backward
+  wall-clock step (NTP, a manual change, a resume) makes each event of a
+  churning window compute a larger remaining delay and re-arm the full debounce
+  again, which would make the "hard" ceiling hold only while the clock is
+  well-behaved. Wall-clock readings stay where they are reported or compared
+  against caller-supplied durations (`lastEventAt`, suppression window ends).
 - **R6:** Queued work is evaluated against the current collection path, filters, sync
   options, and generation. A collection update, removal, root change, or service
   disposal cannot flush stale reconciliation work into the wrong configuration.

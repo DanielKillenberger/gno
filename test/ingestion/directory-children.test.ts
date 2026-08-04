@@ -251,6 +251,45 @@ describe("listEligibleDirectChildren", () => {
     );
   });
 
+  /**
+   * The entry point itself must not be dereferenced.
+   *
+   * Canonicalizing the argument before the no-follow check made the guarantee
+   * hold for every NESTED level and for nothing else: an in-root alias
+   * (`root/alias -> root/real`) was resolved first, so both identity checks saw
+   * the target and the alias' children were enumerated - under names the walker
+   * never produces. Against the pre-fix code this returns
+   * `["real/note.md"]` and reads `root/real`; both assertions below are
+   * discriminating, neither only pins direction.
+   */
+  test("does not dereference a symlinked entry point", async () => {
+    await mkdir(join(root, "real"));
+    await writeFile(join(root, "real", "note.md"), "a");
+    await symlink(join(root, "real"), join(root, "alias"), "dir");
+
+    const reads: string[] = [];
+    const outcome = await listEligibleDirectChildren(
+      "alias",
+      walkConfig(root),
+      {
+        beforeReadDirectory: (absPath) => {
+          reads.push(absPath);
+        },
+      }
+    );
+
+    const walked = (await new FileWalker().walk(walkConfig(root))).entries
+      .map((entry) => entry.relPath)
+      .sort();
+
+    // FileWalker.walk skips the symlinked directory outright, so nothing is
+    // indexed under `alias/` by a full sync...
+    expect(walked).toEqual(["real/note.md"]);
+    // ...and this seam reports the same, having read nothing through it.
+    expect(outcome).toEqual({ status: "present", relPaths: [] });
+    expect(reads).toEqual([]);
+  });
+
   test("never throws for a bogus glob pattern", async () => {
     await writeFile(join(root, "note.md"), "a");
 
@@ -334,6 +373,33 @@ describe("listEligibleSubtreeFiles", () => {
       status: "present",
       relPaths: ["dir1/sub/kept.md"],
     });
+  });
+
+  /**
+   * The same defect one level up: `alias/sub` names a real directory through a
+   * symlinked ANCESTOR. Pre-fix the whole argument was canonicalized, so the
+   * ancestor was dereferenced silently and this returned
+   * `["real/sub/note.md"]` after reading `root/real/sub` - discriminating on
+   * both the outcome and the read log.
+   */
+  test("does not dereference a symlinked ancestor of the entry point", async () => {
+    await mkdir(join(root, "real", "sub"), { recursive: true });
+    await writeFile(join(root, "real", "sub", "note.md"), "a");
+    await symlink(join(root, "real"), join(root, "alias"), "dir");
+
+    const reads: string[] = [];
+    const outcome = await listEligibleSubtreeFiles(
+      "alias/sub",
+      walkConfig(root),
+      {
+        beforeReadDirectory: (absPath) => {
+          reads.push(absPath);
+        },
+      }
+    );
+
+    expect(outcome).toEqual({ status: "present", relPaths: [] });
+    expect(reads).toEqual([]);
   });
 
   test("reports a genuinely absent directory as missing", async () => {

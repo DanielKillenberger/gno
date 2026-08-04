@@ -383,6 +383,70 @@ async function readContainedDirectory(
   return { status: "read", entries };
 }
 
+/** What the UNRESOLVED entry-point path turned out to be, before any deref. */
+type EntryPathCheck =
+  /** Every component below the root is a real directory. Enumerate it. */
+  | { status: "walkable" }
+  /**
+   * A component below the root - the requested directory itself, or one of its
+   * ancestors - is a symlink. `FileWalker.walk` never descends into one, so
+   * neither may this seam.
+   */
+  | { status: "symlink" }
+  /** A component is gone, or stands where a directory is required. */
+  | { status: "missing" }
+  | { status: "error"; cause: unknown };
+
+/**
+ * Prove the requested directory is reachable from the collection root WITHOUT
+ * dereferencing anything on the way.
+ *
+ * `realpath` on the argument answers "where does this end up", which is the
+ * wrong question for the entry point: it silently dereferences an in-root alias
+ * (`root/alias -> root/real`), and every later check - including the read-time
+ * containment proof - then sees the TARGET, so the no-follow guarantee held for
+ * nested levels but not for the requested directory or its ancestors. That
+ * contradicts walker parity, where a symlinked directory is skipped outright
+ * (`Dirent.isDirectory()` has `lstat` semantics, `Bun.Glob.scan` runs with
+ * `followSymlinks: false`).
+ *
+ * Only components BELOW the root are checked. The collection root itself is
+ * canonicalized as before and deliberately so: it is legitimately a symlink on
+ * macOS (`/tmp -> /private/tmp`), and refusing to walk a collection for that
+ * reason would break every temp-rooted collection.
+ */
+async function checkUnresolvedEntryPath(
+  rootReal: string,
+  normalizedDir: string
+): Promise<EntryPathCheck> {
+  if (normalizedDir === "") {
+    return { status: "walkable" };
+  }
+  let current = rootReal;
+  for (const segment of normalizedDir.split("/")) {
+    current = join(current, segment);
+    let info: Stats;
+    try {
+      info = await lstat(current);
+    } catch (cause) {
+      return isMissingError(cause)
+        ? { status: "missing" }
+        : { status: "error", cause };
+    }
+    // Checked BEFORE `isDirectory()`: `lstat` reports a symlink as a symlink
+    // whatever it points at, which is the whole point of asking no-follow.
+    if (info.isSymbolicLink()) {
+      return { status: "symlink" };
+    }
+    if (!info.isDirectory()) {
+      // A file standing where a directory component is required - the same
+      // thing `realpath` reported as ENOTDIR, and the same outcome.
+      return { status: "missing" };
+    }
+  }
+  return { status: "walkable" };
+}
+
 /**
  * Read one directory and collect its eligible files, descending only when
  * `context.recursive` is set.
@@ -455,6 +519,9 @@ async function collectEligibleFiles(
  *   - symlink entries are skipped entirely (`followSymlinks: false`), including
  *     symlinks resolving to a regular file inside the collection root;
  *     `Dirent.isFile()` uses `lstat` semantics, so this is exact parity;
+ *   - the REQUESTED directory and its ancestors get the same treatment: a
+ *     symlink anywhere below the root is not walked into, so an in-root alias
+ *     reports no eligible children instead of the target's files;
  *   - dot-prefixed entries and dot-prefixed directories are skipped.
  *   Eligibility itself is never forked - it stays with `matchesWalkPath`.
  * - Containment is proven at READ time, not once before the read - see
@@ -529,11 +596,23 @@ async function enumerateEligible(
       : { status: "error", cause };
   }
 
+  const dirAbs =
+    normalizedDir === "" ? rootReal : resolve(rootReal, normalizedDir);
+
+  // The entry point and its ancestors are examined NO-FOLLOW first, so a
+  // symlink standing anywhere below the root is never dereferenced into an
+  // enumeration.
+  const entryCheck = await checkUnresolvedEntryPath(rootReal, normalizedDir);
+  if (entryCheck.status === "missing") {
+    return { status: "missing" };
+  }
+  if (entryCheck.status === "error") {
+    return { status: "error", cause: entryCheck.cause };
+  }
+
   let dirReal: string;
   try {
-    dirReal = await realpath(
-      normalizedDir === "" ? rootReal : resolve(rootReal, normalizedDir)
-    );
+    dirReal = await realpath(dirAbs);
   } catch (cause) {
     return isMissingError(cause)
       ? { status: "missing" }
@@ -546,6 +625,9 @@ async function enumerateEligible(
   // it was resolved, which is why it can report the caller's `dirRelPath`. It is
   // NOT what keeps the traversal contained; every directory actually read is
   // re-proven contained at read time by `readContainedDirectory`.
+  //
+  // On a symlinked entry point this resolution is used to CLASSIFY, never to
+  // enumerate: nothing is read through it either way (see below).
   if (escapesRoot(rootReal, dirReal)) {
     return {
       status: "error",
@@ -555,16 +637,28 @@ async function enumerateEligible(
     };
   }
 
-  // Use the realpath-derived prefix so the returned paths are the same ones
-  // FileWalker.walk would produce for these files.
-  const prefix = toPosix(relative(rootReal, dirReal));
+  if (entryCheck.status === "symlink") {
+    // An in-root alias (`root/alias -> root/real`). `FileWalker.walk` skips a
+    // symlinked directory outright, so a full sync indexes nothing under
+    // `alias/...`; reporting no eligible children converges the indexed side on
+    // exactly that, and is the same answer the dot-prefixed branch below gives
+    // for a directory the walker never enters. What is NOT allowed is what the
+    // realpath-first version did: enumerate the TARGET and report its files
+    // under the alias' collection-relative names.
+    return { status: "present", relPaths: [] };
+  }
+
+  // No component below the root is a symlink, so the unresolved path IS the
+  // canonical one - and it is the path used from here on, so nothing that
+  // appears after this point can be reached through a dereferenced entry point.
+  const prefix = toPosix(relative(rootReal, dirAbs));
   if (prefix.split("/").some(isHiddenSegment)) {
     // A dot-prefixed directory is never walked, so it has no eligible children.
     return { status: "present", relPaths: [] };
   }
 
   const relPaths: string[] = [];
-  const failure = await collectEligibleFiles(dirReal, prefix, true, {
+  const failure = await collectEligibleFiles(dirAbs, prefix, true, {
     config,
     recursive,
     rootReal,

@@ -4739,3 +4739,80 @@ describe("CollectionWatchService flush deadline", () => {
     RED_TEST_TIMEOUT_MS
   );
 });
+
+/**
+ * The ceiling is a promise about elapsed time, so it may not be measured with
+ * a clock that can move backward.
+ *
+ * `Date.now()` steps (NTP, a manual change, a resume). While churn keeps
+ * re-arming the debounce, every backward step makes `deadline - now` LARGER, so
+ * the delay stays at the full debounce and the window never reaches its
+ * deadline - the starvation the ceiling exists to prevent, reintroduced by the
+ * clock rather than by the event rate.
+ */
+describe("CollectionWatchService flush deadline uses a monotonic clock", () => {
+  test(
+    "flushes within the ceiling while the wall clock runs backward",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-clock-back-"));
+      await Bun.write(join(root, "note.md"), "# note\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+      const realDateNow = Date.now;
+      let churn: ReturnType<typeof setInterval> | null = null;
+
+      try {
+        harness.service.start();
+        // Measured monotonically: the assertion is about real elapsed time, not
+        // about the clock the test is deliberately corrupting.
+        const startedAt = performance.now();
+        harness.emit([["change", "note.md"]]);
+
+        // The wall clock walks backward faster than real time passes, for as
+        // long as the churn lasts.
+        let rewindMs = 0;
+        Date.now = () => realDateNow() - rewindMs;
+        let emitted = 0;
+        churn = setInterval(() => {
+          emitted += 1;
+          rewindMs += 500;
+          harness.emit([["rename", `note.md.tmp.${emitted}`]]);
+        }, 50);
+
+        // Waits on the batch itself; the bound only stops a hang. Pre-fix it
+        // runs to the bound and finds nothing.
+        const hangBoundMs = 6000;
+        while (
+          harness.batches.length === 0 &&
+          performance.now() - startedAt < hangBoundMs
+        ) {
+          await Bun.sleep(25);
+        }
+        const elapsedMs = performance.now() - startedAt;
+        clearInterval(churn);
+        churn = null;
+        Date.now = realDateNow;
+
+        expect(emitted).toBeGreaterThan(5);
+        // The rewind outran the 2 s ceiling itself, so a wall-clock deadline
+        // could not have been reached at any point in this window.
+        expect(rewindMs).toBeGreaterThan(2000);
+        expect(harness.batches[0] ?? []).toContain("note.md");
+        // Delayed by the debounce, bounded by the ceiling, with slack for the
+        // sync itself - the same envelope the well-behaved-clock test asserts.
+        expect(elapsedMs).toBeGreaterThanOrEqual(300);
+        expect(elapsedMs).toBeLessThan(4000);
+      } finally {
+        Date.now = realDateNow;
+        if (churn) {
+          clearInterval(churn);
+        }
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});

@@ -288,6 +288,32 @@ const FLUSH_DEBOUNCE_MS = 300;
 const MAX_FLUSH_DELAY_MS = 2000;
 
 /**
+ * Elapsed milliseconds from a source that only ever moves FORWARD.
+ *
+ * The ceiling above is a promise about how long queued work can wait, so it may
+ * not be measured with `Date.now()`: a wall clock steps (NTP correction, a
+ * manual change, a laptop resuming), and a backward step makes every event of a
+ * churning window recompute a LARGER `deadline - now` and re-arm the full
+ * debounce again - for as long as it takes the wall clock to catch up. The
+ * "hard ceiling" would then be exactly as hard as the clock is well-behaved,
+ * which is the property it exists to not depend on. Wall-clock readings stay
+ * where they belong: `Observation.atMs`, `lastEventAt`, and the suppression
+ * window ends, all of which are reported or compared against externally
+ * supplied durations.
+ *
+ * This is deliberately NOT the monotonic source `Observation.seq` draws from,
+ * even though both exist for the same class of bug. That one is a unit-less
+ * causal counter answering "which of these two calls happened first"; this one
+ * has to answer "how many milliseconds have passed", and a counter incremented
+ * per event cannot. Folding them together would mean either giving the counter
+ * a duration it does not have, or making a 2 s deadline depend on event
+ * arrival - so they stay two sources with one lesson.
+ */
+function monotonicNowMs(): number {
+  return performance.now();
+}
+
+/**
  * Observation witnesses retained per reconciliation KEY for the suppression
  * rule.
  *
@@ -770,8 +796,9 @@ export class CollectionWatchService {
   >();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
-   * Wall-clock moment the CURRENT window must flush by, per collection, set
-   * when the window's first event is queued and cleared when it flushes.
+   * MONOTONIC moment the CURRENT window must flush by, per collection, set when
+   * the window's first event is queued and cleared when it flushes. Comparable
+   * only with `monotonicNowMs()` - never with a wall-clock reading.
    *
    * Deliberately absent from `getState()`: it is a scheduling bound with no
    * observable shape of its own - every effect it has is already visible as a
@@ -1564,7 +1591,7 @@ export class CollectionWatchService {
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
-    const now = Date.now();
+    const now = monotonicNowMs();
     let deadline = this.#flushDeadlines.get(collectionName);
     if (deadline === undefined) {
       // Anchored at the FIRST queued event of this window, so the bound is on
