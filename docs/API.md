@@ -2209,6 +2209,7 @@ the `code`, and branch on `error.details.reason` rather than the message:
 | `PATH_NOT_WALKABLE`       | A component below the collection root is a symlink      |
 | `PATH_OUTSIDE_COLLECTION` | The destination resolves outside the collection root    |
 | `PATH_UNRESOLVED`         | The destination could not be resolved (permission, I/O) |
+| `NOT_DIRECTORY`           | A parent component exists but is not a directory        |
 
 `details` is present only on `VALIDATION`; the pairing is enforced by
 `spec/output-schemas/clipper-error.schema.json` for the clipper route and by the
