@@ -2170,17 +2170,49 @@ Create a new document file in a collection. Triggers background sync to index it
 
 **Errors**:
 
-| Code         | Status | Description                             |
-| :----------- | :----- | :-------------------------------------- |
-| `VALIDATION` | 400    | Missing collection, relPath, or content |
-| `NOT_FOUND`  | 404    | Collection does not exist               |
-| `CONFLICT`   | 409    | File exists and overwrite=false         |
+| Code         | Status | Description                                         |
+| :----------- | :----- | :-------------------------------------------------- |
+| `VALIDATION` | 400    | Missing collection, relPath, or content             |
+| `NOT_FOUND`  | 404    | Collection does not exist                           |
+| `CONFLICT`   | 409    | File exists and overwrite=false                     |
+| `VALIDATION` | 409    | Destination is unwalkable — see Destination refusal |
 
 **Path Validation**:
 
 - `relPath` must be relative (no leading `/`)
 - Path traversal (`..`) is rejected
 - Null bytes are rejected
+- No component of the destination below the collection root may be a symlink
+
+**Destination refusal** (409 `VALIDATION`):
+
+A write destination is proven before anything is written. `mkdir -p` follows an
+existing directory symlink, so a path such as `alias/note.md` where `alias` is a
+symlink would otherwise land outside where the indexer looks — the file would be
+written and never indexed. Such a request is refused with nothing written.
+
+Note this is a **409 that is not a collision**. Distinguish it from `CONFLICT` by
+the `code`, and branch on `error.details.reason` rather than the message:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION",
+    "message": "Destination is not reachable by the indexer",
+    "details": { "reason": "PATH_NOT_WALKABLE", "relPath": "alias/note.md" }
+  }
+}
+```
+
+| `details.reason`          | Meaning                                                 |
+| :------------------------ | :------------------------------------------------------ |
+| `PATH_NOT_WALKABLE`       | A component below the collection root is a symlink      |
+| `PATH_OUTSIDE_COLLECTION` | The destination resolves outside the collection root    |
+| `PATH_UNRESOLVED`         | The destination could not be resolved (permission, I/O) |
+
+`details` is present only on `VALIDATION`; the pairing is enforced by
+`spec/output-schemas/clipper-error.schema.json` for the clipper route and by the
+same mapper here. The same refusal applies to `POST /api/docs/:id/duplicate`.
 
 **Example**:
 
