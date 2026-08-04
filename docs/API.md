@@ -1160,9 +1160,22 @@ receipt uses — because one valid container can hold six figures of records and
 this handle is retained on the completed job and encoded into an SSE frame.
 `recordCount` is exact, so you always know how many records the container has.
 
-**The records beyond the page are not enumerable through this handle.** There is
-no API for listing one container's records; when `recordUrisTruncated > 0`,
-`reason` says so and names no continuation, because there is none to name.
+**The records beyond the page are not listed by this handle — but they are not
+out of reach.** There is no _dedicated_ per-container enumeration endpoint, so
+`reason` names no continuation offset. When `recordUrisTruncated > 0` it points
+at the two mechanisms that do reach the whole container:
+
+- **Prefix-scoped listing** — every record URI shares the container's virtual
+  record directory (`gno://<collection>/.gno/records/<id>/`, derived from the
+  container path). Any URI in `recordUris` shows you that prefix; SDK
+  `client.list({ scope })` or `gno ls <scope>` enumerates exactly that
+  container's records.
+- **Ordinary collection paging** — `GET /api/docs?collection=<name>` returns all
+  logical records, each with `relPath` projected from its container's path, so a
+  client can page and select the ones belonging to this container.
+
+`recordSourcePath` is **not** a supported query parameter on `GET /api/docs`;
+supplying it is a `400 VALIDATION`, never a wider listing.
 
 `reason` also discloses a _partial_
 record import — records the adapter rejected (and therefore did not index) or a
@@ -1284,6 +1297,13 @@ GET /api/docs?collection=notes&limit=20&offset=0&tagsAll=work&tagsAny=urgent,mee
 | `tagsAny`    | string | —        | Comma-separated tags (must have ANY) |
 | `sortField`  | string | modified | `modified` or frontmatter date key   |
 | `sortOrder`  | string | desc     | `asc` or `desc`                      |
+
+There is no per-record-container filter. `recordSourcePath` is **rejected** with
+`400 VALIDATION` rather than ignored — silently dropping it would answer a
+request for one container's records with the whole collection (or, without
+`collection`, with every collection's documents). Logical records are returned
+by ordinary paging, each with `relPath` projected from its container's path;
+select them client-side, or list the container's virtual record URI prefix.
 
 **Response**:
 
@@ -1534,8 +1554,10 @@ for a container, `recordCount`, `recordUris`, and `recordUrisTruncated` — beca
 `uri` names the container FILE and resolves to no document. `recordUris` in an
 event is the same **bounded** 1,000-entry page the job handle carries, never the
 container's full record set: this frame is encoded once per connected client on
-every write. `recordCount` is exact, but the records the page omits are not
-enumerable from the event — there is no per-container record listing API (see
+every write. `recordCount` is exact; the records the page omits are not
+carried by the event, and there is no dedicated per-container enumeration
+endpoint, but they stay reachable through prefix-scoped listing of the
+container's virtual record directory or ordinary collection paging (see
 [`result.written`](#job-status)). `kind` is
 absent from emitters that run no proof (the watcher), so treat an absent `kind`
 as unknown rather than as `document`.

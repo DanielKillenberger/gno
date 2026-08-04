@@ -506,9 +506,23 @@ how many it omits. One valid export can hold six figures of records, so the
 result object never grows with the container. `recordCount` is exact, so you
 always know how many records there are.
 
-The records past the page are **not enumerable through this result**. There is
-no API for listing one container's records, so when the page is truncated
-`reason` states the limit and names no continuation - there is none to name.
+The records past the page are **not listed by this result** - but they are not
+unreachable. There is no _dedicated_ per-container enumeration call, so when the
+page is truncated `reason` states the limit and names no continuation offset;
+it names the mechanisms that do reach the whole container instead:
+
+```ts
+// Every record URI shares the container's virtual record directory, so any URI
+// from the page yields the prefix that scopes a listing to this container.
+const sample = created.recordUris[0]!;
+const scope = sample.slice(0, sample.lastIndexOf("/") + 1);
+const page = await client.list({ scope, limit: 100, offset: 0 });
+```
+
+Or page the collection normally (`client.list({ scope: "notes" })`, REST
+`GET /api/docs`) - every logical record comes back with `source.relPath`
+projected from its container's path, so a client can select this container's
+records itself.
 
 `duplicateNote()` keeps its single `uri` field, so when the copy's destination
 is a container extension it reports the same fact through `warnings` instead -

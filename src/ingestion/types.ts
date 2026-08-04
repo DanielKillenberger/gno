@@ -272,9 +272,14 @@ export interface CollectionSyncResult {
  * on a completed job for an hour and JSON-encoded into a broadcast SSE frame -
  * so an exhaustive list would put megabytes into both. `recordCount` is exact,
  * `recordUris` carries the first {@link MAX_WRITTEN_RECORD_URIS} of them, and
- * `recordUrisTruncated` says how many are not listed. Those are NOT reachable
- * through this handle by any other means - there is no per-container record
- * enumeration API, and the handle claims none. The bound matches the
+ * `recordUrisTruncated` says how many this page does not list. There is no
+ * DEDICATED per-container enumeration endpoint, and the handle claims none -
+ * but the omitted records are not lost either: every record URI shares the
+ * container's virtual `.gno/records/<id>/` prefix, so a prefix-scoped listing
+ * enumerates exactly that container, and ordinary collection paging returns
+ * every logical record with `relPath` projected from the container's own path.
+ * The handle names those instead of overclaiming a continuation or
+ * underclaiming reachability. The bound matches the
  * record-import receipt's existing {@link MAX_RECORD_IMPORT_RECEIPT_ITEMS} cap
  * so one convention governs everything a sync hands back.
  */

@@ -278,7 +278,16 @@ export interface GnoCreatedNoteRecordContainer extends GnoCreateNoteFile {
   recordUrisTruncated: number;
   /**
    * Human-readable explanation of why there is no single document URI, and -
-   * when the page is truncated - how to reach the records it omits.
+   * when the page is truncated - where the records it omits can be reached.
+   *
+   * There is no dedicated per-container enumeration endpoint, so `reason`
+   * promises no continuation offset. It does not claim the omitted records are
+   * unreachable either, because they are not: every URI in `recordUris` shares
+   * the container's virtual `.gno/records/<id>/` prefix, so
+   * `GnoClient.list({ scope })` with that prefix enumerates exactly this
+   * container, and ordinary collection listing returns every logical record
+   * with `source.relPath` projected from the container's own path for
+   * client-side selection.
    */
   reason: string;
 }

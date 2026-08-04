@@ -110,9 +110,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record-import receipt already used — and `recordUrisTruncated`, on the REST job
   result, the SSE event, and SDK `createNote()` alike. Containers at or under
   1,000 records are unchanged apart from the two added fields. The records a
-  truncated page omits are **not** enumerable through the handle — there is no
-  per-container record listing API — and `reason` says exactly that rather than
-  implying a continuation.
+  truncated page omits are not listed by the handle: there is no _dedicated_
+  per-container enumeration endpoint, so `reason` names no continuation offset,
+  but it does name the mechanisms that reach them — a prefix-scoped listing of
+  the container's virtual record directory (`client.list({ scope })`,
+  `gno ls <scope>`) and ordinary collection paging, where every logical record
+  carries `relPath` projected from its container's path.
+
+- Rejected `recordSourcePath` on `GET /api/docs` with `400 VALIDATION`. The
+  endpoint has no per-container filter; ignoring the parameter would answer a
+  request for one container's records with the entire collection — or, with no
+  `collection`, with documents from every collection.
 
 ## [1.34.0] - 2026-08-04
 

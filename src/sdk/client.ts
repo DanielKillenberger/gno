@@ -1660,8 +1660,10 @@ class GnoClientImpl implements GnoClient {
     // export can hold six figures of records, and a result object that lists
     // every one of them is the same unbounded array the job/SSE handles refuse
     // to carry. `recordCount` is exact; the records past the page are not
-    // enumerable from this result, and the reason says so rather than implying
-    // a continuation that does not exist.
+    // LISTED here, and the reason says where they are instead of implying a
+    // continuation that does not exist or denying the mechanisms that do:
+    // `list({ scope })` on the container's shared virtual record prefix, or
+    // ordinary collection listing filtered on `source.relPath`.
     const page = captureWrittenRecordPage(indexed.records);
     const truncated = captureWrittenRecordPageReason(page);
     return {

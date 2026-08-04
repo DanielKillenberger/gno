@@ -1771,11 +1771,28 @@ export async function handleSync(
  * GET /api/docs
  * Query params: collection, limit (default 20), offset (default 0), tagsAll, tagsAny
  * Returns paginated document list.
+ *
+ * `recordSourcePath` is explicitly rejected: this endpoint has no per-container
+ * filter, and ignoring the parameter would silently widen the answer to the
+ * whole collection - or to every collection.
  */
 export async function handleDocs(
   store: SqliteAdapter,
   url: URL
 ): Promise<Response> {
+  // `recordSourcePath` is NOT a supported filter on this endpoint. Ignoring it
+  // would be the worst outcome: a caller asking for one container's records
+  // would get the whole collection - or, with no `collection`, documents from
+  // every collection - and read them as that container's records. A supplied
+  // parameter this endpoint cannot honour is rejected rather than dropped,
+  // exactly as an unusable value of a supported parameter is.
+  if (url.searchParams.has("recordSourcePath")) {
+    return errorResponse(
+      "VALIDATION",
+      "recordSourcePath is not a supported parameter on /api/docs"
+    );
+  }
+
   const collection = url.searchParams.get("collection") || undefined;
   const pathPrefix = normalizeBrowsePath(url.searchParams.get("pathPrefix"));
   const directChildrenOnlyParam = (

@@ -20,10 +20,12 @@ import type { Config } from "../../src/config/types";
 import type { CollectionSyncResult } from "../../src/ingestion";
 import type { ContextHolder } from "../../src/serve/routes/api";
 
+import { listDocuments } from "../../src/sdk/documents";
 import { getJobStatus } from "../../src/serve/jobs";
 import {
   handleCreateCapture,
   handleCreateDoc,
+  handleDocs,
 } from "../../src/serve/routes/api";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
@@ -318,5 +320,230 @@ describe("REST create hands back a resolvable handle for a container", () => {
     const emitted = events.find((event) => event.type === "document-changed");
     expect(emitted?.kind).toBe("document");
     expect(emitted?.recordUris).toBeUndefined();
+  });
+});
+
+/**
+ * `GET /api/docs` has no per-container filter. It never did on this branch
+ * except for the two commits that added one and then removed it again.
+ *
+ * The removal left `recordSourcePath` UNRECOGNISED, which is the failure mode
+ * this suite exists to forbid: an unrecognised query parameter is dropped, and
+ * a dropped filter is not "no filter I asked for" but "every document there
+ * is". A caller written against the documented container contract would read
+ * an unrelated collection's documents as one container's records. A parameter
+ * this endpoint cannot honour is rejected, exactly as an unusable value of a
+ * parameter it does honour already is.
+ */
+describe("GET /api/docs rejects the unsupported per-container filter", () => {
+  let root: string;
+  let store: SqliteAdapter;
+  let ctxHolder: ContextHolder;
+
+  const RECORDS = `${[
+    { id: "one", title: "First", text: "Zephyr ships Friday" },
+    { id: "two", title: "Second", text: "Budget capped at forty" },
+  ]
+    .map((record) => JSON.stringify(record))
+    .join("\n")}\n`;
+
+  const create = async (
+    collection: string,
+    relPath: string,
+    content: string
+  ) => {
+    const res = await handleCreateDoc(
+      ctxHolder,
+      store,
+      new Request("http://localhost/api/docs", {
+        method: "POST",
+        body: JSON.stringify({ collection, relPath, content }),
+      })
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { jobId: string };
+    return settledJob(body.jobId);
+  };
+
+  const listing = async (query: string) => {
+    const res = await handleDocs(
+      store,
+      new URL(`http://localhost/api/docs${query}`)
+    );
+    const body = (await res.json()) as {
+      documents?: Array<{ uri: string }>;
+      error?: { code: string; message: string };
+    };
+    return { status: res.status, body };
+  };
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "gno-docs-record-filter-"));
+    await mkdir(join(root, "records"), { recursive: true });
+    await mkdir(join(root, "notes"), { recursive: true });
+    store = new SqliteAdapter();
+    const opened = await store.open(join(root, "index.sqlite"), "unicode61");
+    if (!opened.ok) throw new Error(opened.error.message);
+    const config: Config = {
+      version: "1.0",
+      ftsTokenizer: "unicode61",
+      collections: [
+        {
+          name: "records",
+          path: join(root, "records"),
+          pattern: "**/*",
+          include: [],
+          exclude: [],
+          recordAdapters: {
+            jsonl: {
+              fieldMapping: { id: "/id", title: "/title", body: "/text" },
+            },
+          },
+        },
+        {
+          name: "notes",
+          path: join(root, "notes"),
+          pattern: "**/*",
+          include: [],
+          exclude: [],
+        },
+      ],
+      contexts: [],
+    };
+    const registered = await store.syncCollections(config.collections);
+    if (!registered.ok) throw new Error(registered.error.message);
+    ctxHolder = {
+      current: { config } as ContextHolder["current"],
+      config,
+      scheduler: null,
+      eventBus: { emit: () => undefined },
+      watchService: null,
+    } as unknown as ContextHolder;
+
+    await create("records", "wanted.jsonl", RECORDS);
+    await create("records", "other.jsonl", RECORDS);
+    await create("notes", "unrelated.md", "# Unrelated\n\nNot a record.\n");
+  });
+
+  afterEach(async () => {
+    await store.close();
+    await safeRm(root);
+  });
+
+  test("rejects recordSourcePath alongside a collection", async () => {
+    // DISCRIMINATING against bc44b4c6: the parameter was unrecognised there,
+    // so this call answered 200 with the WHOLE `records` collection - both
+    // containers' records - presented as the response to a request for
+    // `wanted.jsonl`. The counterfactual is asserted directly below.
+    const rejected = await listing(
+      "?collection=records&recordSourcePath=wanted.jsonl"
+    );
+
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error?.code).toBe("VALIDATION");
+    expect(rejected.body.error?.message).toContain("recordSourcePath");
+    expect(rejected.body.error?.message).toContain("not a supported parameter");
+    // A rejection, not a listing: no documents ride along with the 400.
+    expect(rejected.body.documents).toBeUndefined();
+
+    // The counterfactual the rejection prevents: dropping the parameter is not
+    // a narrower answer, it is the entire collection.
+    const dropped = await listing("?collection=records");
+    expect(dropped.status).toBe(200);
+    const relPaths = new Set(
+      (dropped.body.documents ?? []).map(
+        (doc) => (doc as unknown as { relPath: string }).relPath
+      )
+    );
+    expect(relPaths.has("wanted.jsonl")).toBe(true);
+    expect(relPaths.has("other.jsonl")).toBe(true);
+  });
+
+  test("rejects recordSourcePath with no collection at all", async () => {
+    // The worse half of the same bug: with no `collection` the dropped filter
+    // widens ACROSS collections, so a caller asking for one container's
+    // records would have been handed an unrelated collection's documents.
+    const rejected = await listing("?recordSourcePath=wanted.jsonl");
+
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error?.code).toBe("VALIDATION");
+    expect(rejected.body.documents).toBeUndefined();
+
+    // DISCRIMINATING against bc44b4c6: that is what the same call returned -
+    // documents from a collection the caller never named.
+    const dropped = await listing("");
+    expect(dropped.status).toBe(200);
+    const collections = new Set(
+      (dropped.body.documents ?? []).map(
+        (doc) => (doc as unknown as { collection: string }).collection
+      )
+    );
+    expect(collections.has("records")).toBe(true);
+    expect(collections.has("notes")).toBe(true);
+  });
+
+  test("rejects an empty or whitespace recordSourcePath on presence", async () => {
+    // Presence, not truthiness: `?recordSourcePath=` is still a caller asking
+    // for a filter this endpoint has none of. Falling through on an empty
+    // value is the same silent widening by another route.
+    for (const query of [
+      "?collection=records&recordSourcePath=",
+      "?collection=records&recordSourcePath=%20",
+      "?recordSourcePath=",
+    ]) {
+      const rejected = await listing(query);
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.error?.code).toBe("VALIDATION");
+      expect(rejected.body.documents).toBeUndefined();
+    }
+  });
+
+  test("leaves every supported parameter working", async () => {
+    // The rejection is scoped to the one unsupported name: it must not turn
+    // into a general refusal of unusual-looking queries.
+    const ok = await listing(
+      "?collection=records&limit=5&offset=0&sortField=modified&sortOrder=asc"
+    );
+    expect(ok.status).toBe(200);
+    expect((ok.body.documents ?? []).length).toBeGreaterThan(0);
+  });
+
+  test("the two mechanisms the handle names actually reach one container", async () => {
+    // NOT discriminating against bc44b4c6's CODE - both mechanisms predate
+    // this branch. It is discriminating against bc44b4c6's CLAIM, which said
+    // the omitted records "are not enumerable" and that no API lists them.
+    // The corrected wording names these two, so they are asserted rather than
+    // asserted about: an accurate claim has to stay accurate.
+    const container = "wanted.jsonl";
+
+    // 1. Prefix-scoped listing. Every record URI shares the container's
+    //    virtual record directory, so a scope taken from any URI in the page
+    //    enumerates exactly this container - and not the sibling container.
+    const all = await store.listDocuments("records");
+    if (!all.ok) throw new Error(all.error.message);
+    const wantedUris = all.value
+      .filter((doc) => doc.active && doc.recordSourcePath === container)
+      .map((doc) => doc.uri);
+    expect(wantedUris).toHaveLength(2);
+
+    const sample = wantedUris[0] ?? "";
+    const scope = sample.slice(0, sample.lastIndexOf("/") + 1);
+    expect(scope).toStartWith("gno://records/.gno/records/");
+    const scoped = await listDocuments(store, { scope, limit: 100 });
+    expect(scoped.documents.map((doc) => doc.uri).sort()).toEqual(
+      [...wantedUris].sort()
+    );
+
+    // 2. Ordinary collection paging, with `relPath` projected from the
+    //    container's own path - which is what makes client-side selection of
+    //    one container's records possible without a dedicated endpoint.
+    const paged = await listing("?collection=records&limit=100");
+    expect(paged.status).toBe(200);
+    const selected = (paged.body.documents ?? []).filter(
+      (doc) => (doc as unknown as { relPath: string }).relPath === container
+    );
+    expect(selected.map((doc) => doc.uri).sort()).toEqual(
+      [...wantedUris].sort()
+    );
   });
 });

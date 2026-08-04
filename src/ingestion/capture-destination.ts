@@ -519,12 +519,17 @@ export const captureFileSyncResult = (
  * IMPORT receipt sitting beside it has been capped at
  * {@link MAX_WRITTEN_RECORD_URIS} items all along. Same cap here.
  *
- * What the page costs is honestly stated rather than papered over: the page is
- * the first records (never empty for a proven container) and `recordCount` is
- * exact, but the records past the page are NOT reachable through this handle.
- * There is no enumeration endpoint for one container's records, so the handle
- * promises none - a caller that needs them all has to be told that plainly
- * instead of being handed a continuation that does not exist.
+ * What the page costs is stated precisely, in both directions: the page is the
+ * first records (never empty for a proven container) and `recordCount` is
+ * exact, but the records past the page are not listed HERE. There is no
+ * DEDICATED per-container enumeration endpoint - and there is also no need to
+ * claim the omitted records are unreachable, because they are not. Every
+ * record URI shares the container's virtual `.gno/records/<id>/` prefix, so a
+ * prefix-scoped listing (`GnoClient.list({ scope })`, `gno ls <scope>`)
+ * enumerates exactly that container, and ordinary collection paging returns
+ * every logical record with `relPath` projected from the container's own path
+ * for client-side selection. The handle names those mechanisms instead of
+ * either inventing a continuation or denying the ones that exist.
  */
 export const captureWrittenRecordPage = (
   records: readonly Pick<DocumentRow, "uri">[]
@@ -549,9 +554,13 @@ export const captureWrittenRecordPage = (
  * `undefined` when the page is complete, so the ordinary container - which is
  * every container under the cap - reads exactly as it did before.
  *
- * It states the limit and stops there. No continuation is named because none is
- * supported: telling a caller to resume at an offset it cannot resume at would
- * be a worse handle than one that admits its bound.
+ * It states the limit and then says where the omitted records ARE. No
+ * continuation offset is named, because this handle supports none - but the
+ * two mechanisms that do reach the whole container (a prefix-scoped listing of
+ * the container's virtual record directory, and ordinary collection paging
+ * filtered client-side on `relPath`) are named, because they exist. Claiming
+ * the records were unreachable would be as inaccurate as promising a
+ * continuation.
  */
 export const captureWrittenRecordPageReason = (page: {
   recordCount: number;
@@ -559,7 +568,7 @@ export const captureWrittenRecordPageReason = (page: {
   recordUrisTruncated: number;
 }): string | undefined => {
   if (page.recordUrisTruncated === 0) return undefined;
-  return `recordUris lists the first ${page.recordUris.length} of ${page.recordCount} records; the remaining ${page.recordUrisTruncated} are not enumerable through this handle.`;
+  return `recordUris lists the first ${page.recordUris.length} of ${page.recordCount} records; the remaining ${page.recordUrisTruncated} are not listed here. There is no dedicated per-container enumeration endpoint, but they remain reachable: list the container's virtual record URI prefix - the directory every URI in recordUris shares - or page the collection and select the records whose relPath is this container.`;
 };
 
 /**

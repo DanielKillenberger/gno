@@ -26,8 +26,12 @@ export interface DocumentChangedEvent {
    * JSON-encoded once per connected client on every write, which is the worst
    * possible place for a list whose length is the container's record count.
    * `recordCount` is exact and `recordUrisTruncated` says what this page omits.
-   * The omitted records are not reachable through the frame - there is no
-   * per-container record enumeration API, so the frame promises none.
+   * The omitted records are not carried BY the frame - there is no dedicated
+   * per-container enumeration endpoint, so the frame promises no continuation.
+   * They are still reachable: every record URI shares the container's virtual
+   * `.gno/records/<id>/` prefix, which a prefix-scoped listing enumerates, and
+   * ordinary collection paging returns every logical record with `relPath`
+   * projected from the container's own path.
    */
   recordUris?: string[];
   /** Exact number of logical records the container is indexed as. */
