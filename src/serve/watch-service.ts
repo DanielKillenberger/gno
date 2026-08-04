@@ -2638,6 +2638,25 @@ export class CollectionWatchService {
     // the per-event cost this whole discriminator exists to avoid; a store
     // that predates the batched seam simply does not get replacement
     // detection, exactly as it does not get subtree-wide hint detection.
+    /**
+     * The blocked replacement candidates of THIS flush, kept as an exact count
+     * plus a bounded sample rather than a list.
+     *
+     * The failure being described is BATCHED: one failed round trip stores the
+     * same error against every key it was asked about. Reporting it per
+     * candidate turned that single failure into one callback per candidate -
+     * and since every visible file event is a replacement candidate, a checkout
+     * or sync-client burst during a store outage emitted thousands of identical
+     * diagnostics from one failure, amplifying load and logs exactly when the
+     * store is already in trouble (R7/R9). This is the same amplification
+     * already bounded for cause STRINGS, applied to the callback COUNT.
+     *
+     * Retaining only `MAX_DESCRIBED_FAILURES` names keeps the accumulator
+     * itself constant-size, so nothing here scales with the burst either.
+     */
+    let blockedReplacementCount = 0;
+    const blockedReplacementSample: string[] = [];
+    let blockedReplacementError: unknown;
     if (descendants !== null) {
       for (const candidate of replacements.keys()) {
         if (this.#disposed) {
@@ -2649,16 +2668,16 @@ export class CollectionWatchService {
         }
         if (!beneath.ok) {
           // Same rule as a hint: an unanswered query is not "nothing is
-          // indexed here". Reported against the candidate it blocked, and
-          // nothing is inferred - the path keeps its ordinary exact-path flow.
-          this.#notifyDiagnostic(() =>
-            this.#callbacks?.onReconcileFailed?.({
-              collection: collection.name,
-              directory: candidate,
-              stage: "store",
-              cause: beneath.error,
-            })
-          );
+          // indexed here". Nothing is inferred - the path keeps its ordinary
+          // exact-path flow - and the blocked candidates are reported ONCE,
+          // after the loop, as a single bounded aggregate.
+          blockedReplacementCount += 1;
+          if (blockedReplacementSample.length < MAX_DESCRIBED_FAILURES) {
+            blockedReplacementSample.push(candidate);
+          }
+          if (blockedReplacementCount === 1) {
+            blockedReplacementError = beneath.error;
+          }
           continue;
         }
         if (beneath.value.length === 0) {
@@ -2673,6 +2692,33 @@ export class CollectionWatchService {
         subtreeIntent.add(candidate);
         await reconcile(candidate);
       }
+    }
+    if (blockedReplacementCount > 0) {
+      // ONE diagnostic per flush, whatever the burst size. A single blocked
+      // candidate keeps its exact attribution - the directory it blocked and
+      // the store's own error, unwrapped - because that is the case a reader
+      // can act on directly. Beyond one there is no honest per-key attribution
+      // to give (the batch failed as a whole), so the event carries a `null`
+      // directory and an aggregate cause naming the exact total plus a bounded
+      // sample, with the original error preserved underneath.
+      const aggregated = blockedReplacementCount > 1;
+      const cause = aggregated
+        ? new Error(
+            `store lookup failed for ${blockedReplacementCount} replacement candidate(s): ${joinBoundedSample(
+              blockedReplacementCount,
+              blockedReplacementSample.map(boundValue)
+            )}`,
+            { cause: blockedReplacementError }
+          )
+        : blockedReplacementError;
+      this.#notifyDiagnostic(() =>
+        this.#callbacks?.onReconcileFailed?.({
+          collection: collection.name,
+          directory: aggregated ? null : (blockedReplacementSample[0] ?? null),
+          stage: "store",
+          cause,
+        })
+      );
     }
 
     for (const [directory, entry] of live) {

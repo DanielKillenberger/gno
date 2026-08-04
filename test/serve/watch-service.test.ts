@@ -3465,6 +3465,125 @@ describe("CollectionWatchService removed-root and recreation reconciliation", ()
 });
 
 /**
+ * fn-114 corrective coverage — the CALLBACK-COUNT half of the same
+ * amplification the cause STRINGS were already bounded against (R7/R9).
+ *
+ * The replacement discriminator asks its question in ONE batched round trip, so
+ * a failed lookup stores the SAME error against every key. Expanding that one
+ * failure into one `onReconcileFailed` per candidate meant a checkout or
+ * sync-client burst during a store outage produced thousands of identical
+ * diagnostics from a single failure — piling load and log volume onto a store
+ * that is already in trouble. Every visible file event is a replacement
+ * candidate, so the burst size is the event count, not some rare shape.
+ */
+describe("CollectionWatchService batched replacement failure is reported once", () => {
+  test(
+    "emits ONE bounded aggregate diagnostic for a burst of blocked candidates",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-repl-burst-"));
+      // A checkout-sized burst: every one of these exists on disk, so every one
+      // is a replacement candidate riding the single batched descendant lookup.
+      const burst = Array.from({ length: 12 }, (_, index) => `f${index}.md`);
+      for (const relPath of burst) {
+        await Bun.write(join(root, relPath), `# ${relPath}\n`);
+      }
+
+      const { store } = createSubtreeStore({
+        // Indexed beneath one of the candidates: if the outage were ever read
+        // as "nothing is indexed here", this is what would deactivate.
+        descendants: { "f0.md": ["f0.md/child.md"] },
+        descendantsFail: true,
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit(burst.map((relPath) => ["change", relPath] as const));
+        expect(await harness.settle()).toBe("settled");
+
+        // THE ASSERTION THAT MATTERS: the COUNT, not the wording. Before the
+        // fix this was 12 - one per candidate - from one failed round trip.
+        const storeFailures = harness.failed.filter(
+          (event) => event.stage === "store"
+        );
+        expect(storeFailures).toHaveLength(1);
+        expect(storeFailures[0]).toMatchObject({
+          collection: "notes",
+          // The batch failed as a whole, so there is no honest per-key
+          // attribution left to publish.
+          directory: null,
+          stage: "store",
+        });
+
+        // Bounded aggregate: exact total, at most three names, explicit
+        // remainder - and the store's own error preserved underneath.
+        const cause = storeFailures[0]?.cause as Error;
+        expect(cause.message).toContain("12 replacement candidate(s)");
+        expect(cause.message).toContain("(+9 more)");
+        expect(cause.message).toContain("f0.md");
+        expect(cause.message).not.toContain("f11.md");
+        expect(cause.cause).toMatchObject({ code: "QUERY_FAILED" });
+
+        // Fail-closed is UNCHANGED: an unanswered lookup still infers nothing
+        // and deactivates nothing, and the exact paths sync exactly as before.
+        const batch = harness.batches[0] ?? [];
+        expect(batch.slice().sort()).toEqual(burst.slice().sort());
+        expect(batch).not.toContain("f0.md/child.md");
+        expect(harness.started).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "still names the blocked candidate when only ONE was blocked",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-repl-single-"));
+      await Bun.write(join(root, "archive.md"), "# archive\n");
+
+      const { store } = createSubtreeStore({
+        descendants: { "archive.md": ["archive.md/child.md"] },
+        descendantsFail: true,
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["change", "archive.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // Aggregating must not cost the ordinary single-failure case its
+        // attribution: one blocked candidate is still reported against the
+        // directory it blocked, carrying the store's own error unwrapped.
+        expect(
+          harness.failed.filter((event) => event.stage === "store")
+        ).toEqual([
+          {
+            collection: "notes",
+            directory: "archive.md",
+            stage: "store",
+            cause: { code: "QUERY_FAILED", message: "store offline" },
+          },
+        ]);
+        // Fail-closed, as ever: nothing under the blocked candidate is touched.
+        expect(harness.batches).toEqual([["archive.md"]]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
  * A `syncPaths` call that RESOLVES is not the same as one whose paths all
  * succeeded: ordinary per-file failures (EACCES, a converter error, a failed
  * `markInactive`) come back inside the result, not as a rejection. Reporting
