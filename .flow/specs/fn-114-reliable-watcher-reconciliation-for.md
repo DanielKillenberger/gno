@@ -818,10 +818,17 @@ proportional to the event.
   the collection: that enumeration is `skipped`, not `error`, so the removed
   subtree's indexed side is still consulted and deactivated — see R4.
 
-  Two documented limitations remain, neither about depth:
+  Three documented limitations remain, none about depth:
 
   - Linux subdirectories created after the watcher started emit no event at all
-    (bun#15939) and still require `gno update`;
+    on Bun 1.3.11 (bun#15939) and still require `gno update`; the same probe on
+    Bun 1.3.14 DID report them, so this is version-dependent rather than
+    universal;
+  - on Linux, writes into a pre-existing directory that was RENAMED after the
+    watcher started are reported under the stale pre-rename path (measured on
+    Bun 1.3.14). The watcher deactivates what is gone from the old path but
+    never learns the new one, so the files at their new location stay unindexed
+    until `gno update`;
   - a deleted path that is RECREATED before the flush's `stat` reads as an edit
     (R1), so a removal coalesced with a recreation inside one debounce window is
     not observed. An ancestor recreated AFTER classification but before
