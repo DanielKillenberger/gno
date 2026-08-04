@@ -23,6 +23,8 @@ import type { DocumentRow, StorePort } from "../../src/store/types";
 
 import {
   CaptureDestinationError,
+  captureProofDocid,
+  captureProofSyncReason,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
 } from "../../src/ingestion/capture-destination";
@@ -48,6 +50,18 @@ const storeStub = (
     failure
       ? { ok: false, error: { code: "QUERY_FAILED", message: failure } }
       : { ok: true, value },
+});
+
+/** Direct row present, record half answered by an explicit outcome. */
+const storeStubWithRecords = (
+  value: DocumentRow | null,
+  records: { rows: DocumentRow[] } | { failure: string }
+): Pick<StorePort, "getDocument" | "listRecordDocuments"> => ({
+  getDocument: async () => ({ ok: true, value }),
+  listRecordDocuments: async () =>
+    "failure" in records
+      ? { ok: false, error: { code: "QUERY_FAILED", message: records.failure } }
+      : { ok: true, value: records.rows },
 });
 
 describe("prepareCaptureDestination", () => {
@@ -260,6 +274,36 @@ describe("requireActiveCaptureDocument", () => {
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.message).toBe("db gone");
   });
+
+  /**
+   * DISCRIMINATING against 179e062b: there, a failed `listRecordDocuments` was
+   * propagated ONLY when the direct row was null, so an inactive direct row
+   * plus a failed record query reported "the document is inactive" - a
+   * confident claim the store could not support, with the failure concealed.
+   */
+  test("a record-query failure is reported as such, not as an inactive document", async () => {
+    const result = await requireActiveCaptureDocument(
+      storeStubWithRecords(documentStub(false), { failure: "index locked" }),
+      "notes",
+      "note.md"
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toBe("index locked");
+    expect(result.ok === false && result.message).not.toContain("inactive");
+  });
+
+  /** The failure fix must not turn an honest "inactive" into "unknown". */
+  test("an inactive document with a successful, empty record query is still inactive", async () => {
+    const result = await requireActiveCaptureDocument(
+      storeStubWithRecords(documentStub(false), { rows: [] }),
+      "notes",
+      "note.md"
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toContain("inactive");
+  });
 });
 
 /**
@@ -350,13 +394,30 @@ describe("requireActiveCaptureDocument - record containers", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.ok && result.document.recordSourcePath).toBe(relPath);
-    expect(result.ok && result.document.active).toBe(true);
+    expect(result.ok && result.kind).toBe("record-container");
+    const proven =
+      result.ok && result.kind === "record-container" ? result.records : [];
     // Multiple logical records from one written file is the normal case.
-    const records = await store.listRecordDocuments("captures", relPath);
-    expect(
-      records.ok && records.value.filter((row) => row.active)
-    ).toHaveLength(2);
+    expect(proven).toHaveLength(2);
+    expect(proven.every((row) => row.recordSourcePath === relPath)).toBe(true);
+    expect(proven.every((row) => row.active)).toBe(true);
+
+    // DISCRIMINATING against 179e062b: there the proof collapsed the container
+    // into its FIRST active record and handed that row back as `document`, so
+    // callers paired that record's docid with a receipt URI built from the
+    // PHYSICAL path - two different things. The container proof now offers no
+    // single docid at all, and every record's own URI is a virtual record path
+    // that the physical URI never equals.
+    const proof = result.ok ? result : null;
+    expect(proof && captureProofDocid(proof)).toBeUndefined();
+    expect(proof && captureProofSyncReason(proof)).toContain(
+      "2 logical record documents"
+    );
+    const physicalUri = `gno://captures/${relPath}`;
+    expect(proven.some((row) => row.uri === physicalUri)).toBe(false);
+    expect(proven.every((row) => row.relPath.startsWith(".gno/records/"))).toBe(
+      true
+    );
   });
 
   test("a captured .vtt transcript container satisfies the proof", async () => {
@@ -379,8 +440,12 @@ describe("requireActiveCaptureDocument - record containers", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.ok && result.document.recordSourcePath).toBe(relPath);
-    expect(result.ok && result.document.active).toBe(true);
+    expect(result.ok && result.kind).toBe("record-container");
+    const proven =
+      result.ok && result.kind === "record-container" ? result.records : [];
+    expect(proven.length).toBeGreaterThan(0);
+    expect(proven.every((row) => row.recordSourcePath === relPath)).toBe(true);
+    expect(proven.every((row) => row.active)).toBe(true);
   });
 
   test("an ordinary markdown capture still satisfies the proof by rel_path", async () => {
@@ -395,8 +460,16 @@ describe("requireActiveCaptureDocument - record containers", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.ok && result.document.relPath).toBe(relPath);
-    expect(result.ok && result.document.recordSourcePath).toBeFalsy();
+    expect(result.ok && result.kind).toBe("file");
+    const document =
+      result.ok && result.kind === "file" ? result.document : null;
+    expect(document?.relPath).toBe(relPath);
+    expect(document?.recordSourcePath).toBeFalsy();
+    // A plain file IS its document: docid and URI describe the same path, so
+    // the receipt may carry both.
+    const proof = result.ok ? result : null;
+    expect(proof && captureProofDocid(proof)).toBe(document?.docid ?? "");
+    expect(proof && captureProofSyncReason(proof)).toBeUndefined();
   });
 
   test("an unindexed write still FAILS the proof - the fallback is not a rubber stamp", async () => {

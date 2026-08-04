@@ -7,10 +7,13 @@
 // Destination safety for paths GNO itself writes into a collection
 export type {
   ActiveCaptureDocument,
+  ActiveCaptureProof,
   CaptureDestinationErrorCode,
 } from "./capture-destination";
 export {
   CaptureDestinationError,
+  captureProofDocid,
+  captureProofSyncReason,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
 } from "./capture-destination";

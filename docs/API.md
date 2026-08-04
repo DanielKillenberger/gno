@@ -2204,12 +2204,12 @@ the `code`, and branch on `error.details.reason` rather than the message:
 }
 ```
 
-| `details.reason`          | Meaning                                                 |
-| :------------------------ | :------------------------------------------------------ |
-| `PATH_NOT_WALKABLE`       | A component below the collection root is a symlink      |
-| `PATH_OUTSIDE_COLLECTION` | The destination resolves outside the collection root    |
-| `PATH_UNRESOLVED`         | The destination could not be resolved (permission, I/O) |
-| `NOT_DIRECTORY`           | A parent component exists but is not a directory        |
+| `details.reason`          | Meaning                                                                                                                                                                                                                                                    |
+| :------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PATH_NOT_WALKABLE`       | A component below the collection root is a symlink                                                                                                                                                                                                         |
+| `PATH_OUTSIDE_COLLECTION` | The destination resolves outside the collection root                                                                                                                                                                                                       |
+| `PATH_UNRESOLVED`         | The destination could not be resolved (permission, I/O)                                                                                                                                                                                                    |
+| `NOT_DIRECTORY`           | The destination shape is wrong: a parent component exists but is not a directory, **or** the destination leaf itself exists and is not a regular file (a directory at that path lands here too), **or** the path is the collection root rather than a file |
 
 `details` is present only on `VALIDATION`; the pairing is enforced by
 `spec/output-schemas/clipper-error.schema.json` for the clipper route and by the

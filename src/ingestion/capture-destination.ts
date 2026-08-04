@@ -351,10 +351,52 @@ export async function prepareCaptureDestination(
   return absPath;
 }
 
-/** Outcome of demanding an indexed document for a just-written path. */
+/**
+ * Outcome of demanding an indexed document for a just-written path.
+ *
+ * The success side is a UNION because the two shapes are genuinely different
+ * things, and collapsing them is what produced incoherent receipts:
+ *
+ * - `kind: "file"` - the written path IS the document. Its `docid`/`uri`
+ *   describe the same path the caller wrote, so a receipt may carry both.
+ * - `kind: "record-container"` - the written path is a container that was
+ *   imported as N logical record documents, each living at a virtual
+ *   `.gno/records/...` rel path. There is no document AT the written path, and
+ *   with N records there is no single "the" document either. A caller must not
+ *   pair one arbitrary record's `docid` with the container's physical URI: the
+ *   two would name different things, and `getDocumentByUri` (an exact lookup)
+ *   resolves the physical URI to nothing.
+ */
 export type ActiveCaptureDocument =
-  | { ok: true; document: DocumentRow }
+  | { ok: true; kind: "file"; document: DocumentRow }
+  | { ok: true; kind: "record-container"; records: DocumentRow[] }
   | { ok: false; message: string };
+
+/** The success side of {@link ActiveCaptureDocument}. */
+export type ActiveCaptureProof = Extract<ActiveCaptureDocument, { ok: true }>;
+
+/**
+ * The docid a receipt may honestly carry for a proven write.
+ *
+ * `undefined` for a record container: the container path has no document of its
+ * own, and any one of its N records would disagree with the receipt's URI.
+ */
+export const captureProofDocid = (
+  proof: ActiveCaptureProof
+): string | undefined =>
+  proof.kind === "file" ? proof.document.docid : undefined;
+
+/**
+ * The `sync.reason` that keeps a container receipt from reading as a plain
+ * document capture whose docid merely went missing.
+ */
+export const captureProofSyncReason = (
+  proof: ActiveCaptureProof
+): string | undefined => {
+  if (proof.kind !== "record-container") return undefined;
+  const count = proof.records.length;
+  return `Imported as ${count} logical record document${count === 1 ? "" : "s"}; the container path itself has no document, so this receipt carries no docid.`;
+};
 
 /**
  * The proof a capture/create caller must demand after syncing its own write.
@@ -376,6 +418,16 @@ export type ActiveCaptureDocument =
  * import, so a working capture reports FAILURE. `listRecordDocuments` is the
  * index-served (`idx_documents_record_source_path`) seam for that half, and it
  * is consulted only when the plain-path lookup did not already prove the write.
+ *
+ * The two halves are reported SEPARATELY (see {@link ActiveCaptureDocument}):
+ * proving a container write does not entitle a caller to speak of "the"
+ * document for it.
+ *
+ * A failed `listRecordDocuments` is always propagated. "The document is
+ * inactive" is a stronger, more confident claim than the store can support once
+ * the record half is unknown - active logical records can legitimately coexist
+ * with an inactive direct row across a format or config transition - so a store
+ * failure must never be reported as inactivity.
  */
 export async function requireActiveCaptureDocument(
   store: Pick<StorePort, "getDocument"> &
@@ -389,7 +441,7 @@ export async function requireActiveCaptureDocument(
   }
   const document = result.value;
   if (document?.active) {
-    return { ok: true, document };
+    return { ok: true, kind: "file", document };
   }
 
   // Record containers: one written file, N active logical documents.
@@ -397,17 +449,20 @@ export async function requireActiveCaptureDocument(
     typeof store.listRecordDocuments === "function"
       ? await store.listRecordDocuments(collectionName, relPath)
       : null;
-  if (records?.ok) {
-    const activeRecord = records.value.find((row) => row.active);
-    if (activeRecord) {
-      return { ok: true, document: activeRecord };
-    }
+  // A store failure means the record half is UNKNOWN. Report that, whether or
+  // not a direct row exists - never let a weaker, more confident-sounding
+  // answer ("inactive", "no document exists") conceal it.
+  if (records && !records.ok) {
+    return { ok: false, message: records.error.message };
+  }
+  const activeRecords = records
+    ? records.value.filter((row) => row.active)
+    : [];
+  if (activeRecords.length > 0) {
+    return { ok: true, kind: "record-container", records: activeRecords };
   }
 
   if (!document) {
-    if (records && !records.ok) {
-      return { ok: false, message: records.error.message };
-    }
     return {
       ok: false,
       message: `File written but not indexed: no document exists for ${relPath}. The path is not reachable to the indexer or is excluded from the collection.`,

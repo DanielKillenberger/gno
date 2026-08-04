@@ -56,6 +56,7 @@ import type {
 } from "./types";
 
 import {
+  buildUri,
   decorateUriForIndex,
   DEFAULT_INDEX_NAME,
   getIndexDbPath,
@@ -146,6 +147,8 @@ import { normalizeStructuredQueryInput } from "../core/structured-query";
 import { parseAndValidateTagFilter } from "../core/tags";
 import {
   CaptureDestinationError,
+  captureProofDocid,
+  captureProofSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -1609,7 +1612,14 @@ class GnoClientImpl implements GnoClient {
     }
 
     return {
-      uri: indexed.document.uri,
+      // For a record container there is no document AT the written path, and
+      // its N logical records live at virtual `.gno/records/...` paths. Naming
+      // one of them here would contradict the `path`/`relPath` this call
+      // returns alongside, so the URI names the file that was written.
+      uri:
+        indexed.kind === "file"
+          ? indexed.document.uri
+          : buildUri(collection.name, plan.relPath),
       path: fullPath,
       relPath: plan.relPath,
       created: true,
@@ -1727,11 +1737,13 @@ class GnoClientImpl implements GnoClient {
         sync: { status: "failed", error: indexed.message },
       });
     }
+    // A record container has no document at the written path, so the receipt
+    // carries no docid rather than one that disagrees with its URI.
     return buildCaptureReceipt({
       plan,
       absPath: fullPath,
-      docid: syncResult?.docid ?? indexed.document.docid,
-      sync: { status: "completed" },
+      docid: syncResult?.docid ?? captureProofDocid(indexed),
+      sync: { status: "completed", reason: captureProofSyncReason(indexed) },
     });
   }
 

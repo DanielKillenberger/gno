@@ -24,6 +24,8 @@ import { withWriteLock } from "../../core/file-lock";
 import { normalizeCollectionName } from "../../core/validation";
 import {
   CaptureDestinationError,
+  captureProofDocid,
+  captureProofSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -248,20 +250,34 @@ export function handleCapture(
             serverInstanceId: ctx.serverInstanceId,
           }) as McpCaptureResult;
         }
-        const docid = syncResult.docid ?? indexed.document.docid;
+        // `docid` is required by the gno_capture result schema, so a record
+        // container - which has no document at the written path - reports the
+        // empty string this tool already uses for "not resolved", never one of
+        // its N record docids, which would disagree with the receipt URI.
+        const docid = syncResult.docid ?? captureProofDocid(indexed) ?? "";
 
         const isMarkdown =
           plan.relPath.endsWith(".md") || plan.relPath.endsWith(".markdown");
         if (!isMarkdown && plan.tags.length > 0) {
-          const tagResult = await ctx.store.setDocTags(
-            indexed.document.id,
-            plan.tags,
-            "user"
-          );
-          if (!tagResult.ok) {
-            console.error(
-              `[MCP] Warning: Document created but tags not stored: ${tagResult.error.message}`
+          // Non-Markdown tags live in the index, not in frontmatter. For a
+          // record container the capture's tags describe the whole written
+          // file, so they go on every logical record it produced - tagging one
+          // arbitrary record would be both incomplete and unpredictable.
+          const targets =
+            indexed.kind === "file"
+              ? [indexed.document.id]
+              : indexed.records.map((row) => row.id);
+          for (const target of targets) {
+            const tagResult = await ctx.store.setDocTags(
+              target,
+              plan.tags,
+              "user"
             );
+            if (!tagResult.ok) {
+              console.error(
+                `[MCP] Warning: Document created but tags not stored: ${tagResult.error.message}`
+              );
+            }
           }
         }
 
@@ -269,7 +285,10 @@ export function handleCapture(
           plan,
           absPath,
           docid,
-          sync: { status: "completed" },
+          sync: {
+            status: "completed",
+            reason: captureProofSyncReason(indexed),
+          },
           overwritten: exists && args.overwrite === true,
           serverInstanceId: ctx.serverInstanceId,
         }) as McpCaptureResult;

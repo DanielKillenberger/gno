@@ -26,6 +26,8 @@ import { writeCapturePlanFile } from "../../core/capture-write";
 import { withWriteLock } from "../../core/file-lock";
 import {
   CaptureDestinationError,
+  captureProofDocid,
+  captureProofSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -276,11 +278,13 @@ export async function capture(
           sync: { status: "failed", error: indexed.message },
         });
       }
+      // A record container has no document at the written path, so the receipt
+      // carries no docid rather than one that disagrees with its URI.
       return buildCaptureReceipt({
         plan,
         absPath,
-        docid: syncResult?.docid ?? indexed.document.docid,
-        sync: { status: "completed" },
+        docid: syncResult?.docid ?? captureProofDocid(indexed),
+        sync: { status: "completed", reason: captureProofSyncReason(indexed) },
       });
     });
   } finally {
