@@ -508,6 +508,14 @@ result object never grows with the container. When the page is truncated,
 the container path (REST:
 `GET /api/docs?collection=<collection>&recordSourcePath=<relPath>&offset=1000`).
 
+The page and that continuation are **one sequence**: both are ordered by record
+path (ascending), so `recordUris` concatenated with the listing at
+`offset = recordUris.length` visits every record exactly once. Record path comes
+from the immutable record key, so the order survives a container rewrite. A
+`recordSourcePath` listing therefore ignores no sort silently - passing
+`sortField`/`sortOrder` with it is a validation error, as is a
+`recordSourcePath` that names no path.
+
 `duplicateNote()` keeps its single `uri` field, so when the copy's destination
 is a container extension it reports the same fact through `warnings` instead -
 the copy is indexed as N records, and `uri` resolves to no document. REST

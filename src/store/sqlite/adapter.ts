@@ -224,6 +224,26 @@ const SINGLE_LINE_QUERY_PATTERN = /[\r\n]/;
 const DOUBLE_QUOTE_PATTERN = /"/g;
 const DOC_EDGE_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const SQLITE_SAFE_PARAMETER_BATCH_SIZE = 900;
+
+/**
+ * The ONE order the logical records of a record container are listed in.
+ *
+ * Both halves of a container's pagination are cut from this order, and they are
+ * halves of one sequence: `listRecordDocuments` produces the bounded record
+ * page a write handle hands back, and `listDocumentsPaginated` filtered by
+ * `recordSourcePath` is the query that continues past it. Ordering them
+ * differently would make the continuation skip and duplicate records - a page
+ * whose continuation does not continue - so the fragment is defined once and
+ * used by both, always with `id ASC` appended as the tiebreak.
+ *
+ * `rel_path` is `.gno-records/<container-hash>/<record-key>.md`, so this is the
+ * record key order: stable, total, and unchanged by a container rewrite. Row id
+ * is not (a record added by a rewrite sorts last however its key reads), and
+ * `source_mtime` is not even a distinct value here - every record of one
+ * container carries the container's mtime.
+ */
+const RECORD_ORDER_SQL = "rel_path ASC";
+
 const FTS5_FIELD_WEIGHTS = {
   filepath: 1.5,
   title: 4.0,
@@ -1661,7 +1681,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         .query<DbDocumentRow, [string, string]>(
           `SELECT * FROM documents
            WHERE collection = ? AND record_source_path = ?
-           ORDER BY rel_path ASC, id ASC`
+           ORDER BY ${RECORD_ORDER_SQL}, id ASC`
         )
         .all(collection, sourcePath);
 
@@ -2171,6 +2191,18 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       let orderClause = `d.source_mtime ${sortOrder}`;
       if (sortField !== "modified" && isSafeDateField) {
         orderClause = `COALESCE(json_extract(d.date_fields, '$."${sortField}"'), d.source_mtime) ${sortOrder}`;
+      }
+
+      // A record-container listing is the CONTINUATION of the bounded record
+      // page a write handle already handed the caller, so it must be the same
+      // sequence: `RECORD_ORDER_SQL` is exactly `listRecordDocuments`' order,
+      // which is the order that page was cut from. `source_mtime` cannot serve
+      // here at all - every record of one container shares the container's
+      // mtime, so it is not a total order, and a rewrite moves all of them at
+      // once. `rel_path` is derived from the immutable record key, so the
+      // sequence is stable across the rewrite that pagination has to survive.
+      if (normalizedRecordSourcePath) {
+        orderClause = RECORD_ORDER_SQL;
       }
 
       // Get total count
