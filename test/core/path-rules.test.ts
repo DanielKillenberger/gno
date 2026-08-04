@@ -117,10 +117,86 @@ describe("exclusionCoversSubtree", () => {
   });
 
   test("covers the subtree for a glob that matches at every depth", () => {
-    // Asked at two depths: one level is not enough to tell `dir/*` (which
-    // leaves `dir/a/b.txt` walkable) from a doubled-star pattern.
+    // `**` matches every non-empty path, so it covers every descendant of
+    // every directory - the one glob shape that needs no prefix at all.
     expect(exclusionCoversSubtree("anything", ["**"])).toBe(true);
     expect(exclusionCoversSubtree("a/b", ["**"])).toBe(true);
+  });
+
+  test("covers the subtree for a trailing `**` over a bare prefix", () => {
+    // `P/**` matches any non-empty run of segments below `P`, so it covers
+    // every strict descendant of `P` and of anything under `P`.
+    expect(exclusionCoversSubtree("node_modules", ["node_modules/**"])).toBe(
+      true
+    );
+    expect(
+      exclusionCoversSubtree("node_modules/pkg", ["node_modules/**"])
+    ).toBe(true);
+    // Anchored, not component-matched: a glob is matched from the start of the
+    // path, so `node_modules/**` says nothing about `a/node_modules/x`.
+    expect(exclusionCoversSubtree("a/node_modules", ["node_modules/**"])).toBe(
+      false
+    );
+    // A non-bare prefix is refused rather than reasoned about.
+    expect(
+      exclusionCoversSubtree("a/node_modules", ["**/node_modules/**"])
+    ).toBe(false);
+  });
+
+  /**
+   * Finding A. The previous rule ASKED the glob about two synthetic descendant
+   * paths and inferred universal coverage from the two answers. Matching two
+   * samples is not a proof: `foo/**` + `/_[^x]*` matches a probe segment at
+   * every depth (the probe name starts with `_`), so `foo/_a` was reported as
+   * covered and pruned - while `foo/_a/x.md` does NOT match the exclusion and
+   * is indexed by the walker, so it stayed active with nothing behind it.
+   *
+   * Discriminating against b4950b13: there `exclusionCoversSubtree("foo/_a",
+   * ["foo/**\/_[^x]*"])` is `true`.
+   */
+  test("does NOT infer coverage from descendant samples", () => {
+    const exclude = ["foo/**/_[^x]*"];
+    // The directory itself matches, and so does any deeper `_`-prefixed name.
+    expect(matchesCollectionExclusion("foo/_a", exclude)).toBe(true);
+    // But this descendant does not - the walker indexes it.
+    expect(matchesCollectionExclusion("foo/_a/x.md", exclude)).toBe(false);
+    expect(exclusionCoversSubtree("foo/_a", exclude)).toBe(false);
+    // Same shape without the character class, and `dir/*`, which stops at one
+    // level and leaves `dir/a/b.txt` walkable.
+    expect(exclusionCoversSubtree("_a", ["**/_*"])).toBe(false);
+    expect(exclusionCoversSubtree("dir", ["dir/*"])).toBe(false);
+  });
+
+  /**
+   * Finding B. Strict-descendant coverage is decided on its own; it is not
+   * gated on the directory's own path matching. `node_modules/` is the
+   * directory-contents spelling: it covers everything under `node_modules`
+   * while deliberately not matching the bare path `node_modules`, which under
+   * that spelling denotes a file of that name.
+   *
+   * Discriminating against b4950b13 on both halves: there the trailing slash
+   * made the pattern match NOTHING (so the exclusion was silently dead and the
+   * coverage gate returned false), and boundary events did store work and
+   * parent enumeration instead of being pruned.
+   */
+  test("covers the subtree for an exact-root `node_modules/` exclusion", () => {
+    const exclude = ["node_modules/"];
+    // The file-level rule is what makes pruning sound: every strict descendant
+    // really is skipped by the walk.
+    expect(
+      matchesCollectionExclusion("node_modules/pkg/readme.md", exclude)
+    ).toBe(true);
+    expect(matchesCollectionExclusion("a/node_modules/pkg.md", exclude)).toBe(
+      true
+    );
+    // ...and the bare path itself is NOT matched, which is exactly why
+    // coverage may not be gated on it.
+    expect(matchesCollectionExclusion("node_modules", exclude)).toBe(false);
+
+    for (const dir of ["node_modules", "a/node_modules", "node_modules/pkg"]) {
+      expect(exclusionCoversSubtree(dir, exclude)).toBe(true);
+    }
+    expect(exclusionCoversSubtree("notes", exclude)).toBe(false);
   });
 
   test("ignores patterns that do not match the directory at all", () => {

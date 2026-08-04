@@ -1924,6 +1924,95 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
   );
 
   /**
+   * The consequence that matters when coverage is INFERRED FROM SAMPLES rather
+   * than proven: a stranded document.
+   *
+   * `foo/**` + `/_[^x]*` matches the directory `foo/_a` and matches any deeper
+   * `_`-prefixed name - including the two synthetic probe segments the previous
+   * rule asked about - yet it does NOT match `foo/_a/x.md`, which the walker
+   * indexes. Against b4950b13 the sampling answered "covers the subtree",
+   * `foo/_a` was pruned at queue time, no hint was retained, no descendant
+   * lookup happened, `harness.batches` is empty, and `x.md` stays active and
+   * searchable with nothing on disk behind it. Both assertions below fail there.
+   */
+  test(
+    "reconciles a removed directory a sampled glob only appeared to cover",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-excl-sample-"));
+      // Post-delete disk state: `foo/_a/` and its child are already gone.
+      const collection = createCollection("notes", root);
+      collection.pattern = "**/*";
+      collection.exclude = ["foo/**/_[^x]*"];
+
+      const { store, descendantCalls } = createSubtreeStore({
+        descendants: { "foo/_a": ["foo/_a/x.md"] },
+      });
+      const harness = createReconcileHarness(collection, { store });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "foo/_a"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(descendantCalls).toContain("foo/_a");
+        expect(harness.batches.flat()).toContain("foo/_a/x.md");
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
+   * The exact-root spelling of a covering exclusion. `node_modules/` covers
+   * every strict descendant of `node_modules` while deliberately not matching
+   * the bare path `node_modules`, so coverage may not be gated on the
+   * directory's own match.
+   *
+   * Against b4950b13 the trailing slash matched nothing at all: the gate
+   * returned false, the directory was reconcilable, and the boundary event did
+   * a descendant lookup and parent enumeration. `descendantCalls` contains
+   * `sub/node_modules` there, so this is discriminating - and it pins that the
+   * amplification bound covers this spelling too.
+   */
+  test(
+    "still prunes for an exact-root `node_modules/` exclusion",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-excl-root-"));
+      await mkdir(join(root, "sub"), { recursive: true });
+      const collection = createCollection("notes", root);
+      collection.exclude = ["node_modules/"];
+      const { store, directCalls, descendantCalls } = createSubtreeStore({
+        descendants: {
+          "sub/node_modules": ["sub/node_modules/pkg/readme.md"],
+        },
+      });
+      const harness = createReconcileHarness(collection, { store });
+
+      try {
+        harness.service.start();
+        harness.emit([
+          ["change", "node_modules/pkg/readme.md"],
+          ["rename", "node_modules/pkg"],
+        ]);
+        expect(harness.service.getState().queuedCollections).toEqual([]);
+
+        harness.emit([["rename", "sub/node_modules"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(descendantCalls).not.toContain("sub/node_modules");
+        expect(directCalls).not.toContain("sub/node_modules");
+        expect(harness.batches.flat()).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
    * R6 - the enumeration window. Candidates are resolved BEFORE an async
    * enumeration and handed to `syncPaths` AFTER it, so the configuration they
    * were resolved against can disappear or move in between. Checking only for

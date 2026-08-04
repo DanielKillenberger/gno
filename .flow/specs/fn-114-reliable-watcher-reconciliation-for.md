@@ -397,18 +397,48 @@ proportional to the event.
 
   Preserving `exclude` means preserving it at the level it is defined for. It is
   a FILE-level rule, and the walker applies it to files; a DIRECTORY is pruned
-  from reconciliation only by an exclusion that provably covers everything
-  beneath it — a bare component/prefix pattern (`node_modules`, `drafts`), or a
-  glob that still matches at deeper levels. An exclusion matching only the
-  directory's own name (`*.md` against a directory literally called `foo.md`)
-  does not prune it, because `FileWalker.walk` still indexes `foo.md/child.txt`.
-  Pruning there would be stricter than the walk and would lose documents rather
-  than work: a recursive delete of `foo.md/` reports the bare directory or one
-  arbitrary child, and a pruned directory cannot be queried, so the unreported
-  descendants stay active and searchable with nothing on disk behind them. What
-  is INDEXED is unchanged — final file eligibility stays with `matchesWalkPath`
-  — and covered exclusions still prune, so the bound on excluded-tree noise
-  (R11) holds.
+  from reconciliation only by an exclusion that provably covers every STRICT
+  DESCENDANT of it. That coverage question is decided on its own, per pattern,
+  and is never gated on whether the directory's own path matches — the two
+  answers legitimately differ in both directions.
+
+  Coverage is decided SYNTACTICALLY, and only two pattern shapes are accepted:
+
+  - a BARE pattern `B` (no glob metacharacters; a trailing `/` is stripped
+    first) that roots the directory — `dir` is `B`, lies under `B`, or, for a
+    single-segment `B`, has `B` as a component. Sound because every strict
+    descendant `dir/rest` inherits the property verbatim: `B` stays a
+    (non-final) component, or `dir/rest` still starts with `B/`, which is
+    exactly what the file-level rule tests. `node_modules`, `.git`, `drafts`,
+    and the directory-contents spelling `node_modules/` all take this branch;
+  - a pattern whose LAST segment is `**` over a bare prefix `P` — `P/**`, or
+    `**` alone — where `P` roots the directory in the ANCHORED sense. Sound
+    because `**` matches any non-empty run of trailing segments. Anchored only:
+    `node_modules/**` says nothing about `a/node_modules/x`.
+
+  Every other glob is treated as NON-covering, including ones that match some
+  descendants. Coverage is never inferred from sample paths: matching synthetic
+  probe descendants does not prove a pattern matches all of them —
+  `foo/**/_[^x]*` matches a `_`-prefixed probe at every depth while leaving
+  `foo/_a/x.md` indexable — and the asymmetry decides the default. Failing to
+  prune costs one bounded enumeration; wrongly pruning strands documents
+  permanently.
+
+  An exclusion matching only the directory's own name (`*.md` against a
+  directory literally called `foo.md`) does not prune it, because
+  `FileWalker.walk` still indexes `foo.md/child.txt`. Pruning there would be
+  stricter than the walk and would lose documents rather than work: a recursive
+  delete of `foo.md/` reports the bare directory or one arbitrary child, and a
+  pruned directory cannot be queried, so the unreported descendants stay active
+  and searchable with nothing on disk behind them. Conversely `node_modules/`
+  covers everything under `node_modules` while deliberately not matching the
+  bare path `node_modules` (that spelling denotes a file of that name), so it
+  prunes. Making the trailing-slash form cover its descendants at the FILE level
+  is what makes that pruning sound — previously it matched nothing at all, so
+  the exclusion was silently dead. Beyond repairing that dead spelling, what is
+  INDEXED is unchanged — final file eligibility stays with `matchesWalkPath` —
+  and covering exclusions still prune with no scan, so the bound on
+  excluded-tree noise (R11) holds.
 
   Collection-root containment is enforced at TRAVERSAL time, not once before a
   walk. Every directory the enumeration reads — the argument directory and each

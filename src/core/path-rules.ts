@@ -99,9 +99,29 @@ export function normalizeCollectionDirRelPath(
   return canonical;
 }
 
+/** Drop trailing separators from an exclusion pattern (`node_modules/` -> `node_modules`). */
+function stripTrailingSlashes(pattern: string): string {
+  let end = pattern.length;
+  while (end > 0 && pattern[end - 1] === "/") {
+    end -= 1;
+  }
+  return pattern.slice(0, end);
+}
+
 /**
  * Bare values preserve historical component/prefix semantics. Values with
  * glob metacharacters match the complete normalized relative path.
+ *
+ * A bare value written with a TRAILING SLASH (`node_modules/`) is the
+ * directory-contents form, and it matches the strict descendants of any
+ * directory named `node_modules` - not the bare path `node_modules` itself,
+ * which under this spelling denotes a FILE of that name. Before this it
+ * matched nothing at all: `parts.includes("node_modules/")` is never true, the
+ * path is never equal to it, and `startsWith("node_modules//")` never fires,
+ * so the trailing slash silently disabled the exclusion outright. That dead
+ * form is also what made `exclusionCoversSubtree` unable to answer honestly for
+ * it - pruning a directory is only sound when the walk would skip everything
+ * under it, and nothing was being skipped.
  */
 export function matchesCollectionExclusion(
   relPath: string,
@@ -116,6 +136,23 @@ export function matchesCollectionExclusion(
       if (new Bun.Glob(pattern).match(normalizedPath)) return true;
       continue;
     }
+    if (pattern.endsWith("/")) {
+      const base = stripTrailingSlashes(pattern);
+      if (base === "") {
+        continue;
+      }
+      // Every strict descendant of a directory named `base`: either `base` is
+      // an anchored prefix of the path, or (single-segment form) `base` occurs
+      // as a NON-FINAL component, which is the same "some ancestor directory is
+      // named base" statement the bare component rule makes about the path.
+      if (
+        normalizedPath.startsWith(`${base}/`) ||
+        (!base.includes("/") && parts.slice(0, -1).includes(base))
+      ) {
+        return true;
+      }
+      continue;
+    }
     if (
       parts.includes(pattern) ||
       normalizedPath === pattern ||
@@ -128,10 +165,98 @@ export function matchesCollectionExclusion(
 }
 
 /**
- * A segment no real tree contains, used to ask a glob what it says about paths
- * BELOW a directory without enumerating that directory.
+ * Is `prefix` (a bare, anchored path prefix) an ancestor of - or equal to -
+ * the directory named by `dirParts`? Anchored: `node_modules` does NOT root
+ * `a/node_modules`, because a glob is matched from the start of the path.
  */
-const SUBTREE_PROBE_SEGMENT = "__gno_exclusion_subtree_probe__";
+function prefixRootsDirectory(
+  dirParts: readonly string[],
+  prefix: string
+): boolean {
+  const prefixParts = prefix.split("/");
+  if (prefixParts.length > dirParts.length) {
+    return false;
+  }
+  return prefixParts.every((segment, index) => dirParts[index] === segment);
+}
+
+/**
+ * The bare prefix of a pattern whose LAST segment is `**`, or `null` when the
+ * pattern is not of that shape. `**` itself yields the empty prefix.
+ *
+ * Every segment before the trailing `**` must be bare: `**` /`foo`/`**` is
+ * rejected rather than reasoned about, which is the conservative side.
+ */
+function recursiveGlobPrefix(pattern: string): string | null {
+  const segments = pattern.split("/");
+  if (segments.at(-1) !== "**") {
+    return null;
+  }
+  const prefixSegments = segments.slice(0, -1);
+  if (
+    prefixSegments.some((segment) => segment === "" || hasGlobMeta(segment))
+  ) {
+    return null;
+  }
+  return prefixSegments.join("/");
+}
+
+/**
+ * Does this ONE exclusion pattern provably exclude EVERY strict descendant of
+ * the directory named by `dirParts`?
+ *
+ * Only two syntactic shapes are accepted, and both are proven, not sampled:
+ *
+ * - A BARE pattern `B` (no glob metacharacters; a trailing `/` is stripped
+ *   first and changes nothing about descendants) that roots the directory -
+ *   `dir` is `B`, lies under `B`, or, for a single-segment `B`, contains `B` as
+ *   a component. Sound because every strict descendant `dir/rest` inherits the
+ *   property verbatim: if `B` is a component of `dir` it is a NON-FINAL
+ *   component of `dir/rest`, and if `dir` is `B` or under `B` then `dir/rest`
+ *   starts with `B/`. Both are exactly what `matchesCollectionExclusion`
+ *   tests, for the bare and the `B/` spelling alike. `node_modules`, `.git`,
+ *   `drafts`, `node_modules/` take this branch, so the ordinary excluded trees
+ *   prune as before with no scan.
+ * - A pattern whose last segment is `**` over a bare prefix `P` - `P/**`, or
+ *   `**` alone - where `P` roots the directory in the ANCHORED sense. Sound
+ *   because `**` matches any non-empty run of trailing segments, so every
+ *   `dir/rest` (which has at least one segment beyond `P`) matches. Anchored
+ *   only: `node_modules/**` says nothing about `a/node_modules/x`, so
+ *   component containment is deliberately NOT applied to this shape.
+ *
+ * EVERY other glob is treated as non-covering, including ones that happen to
+ * match some descendants. Nothing is inferred from sample paths: matching two
+ * synthetic descendants does not prove the pattern matches ALL of them.
+ * `foo/**` /`_[^x]*` matches a probe segment at every depth yet leaves
+ * `foo/_a/x.md` indexable, and pruning `foo/_a` on that evidence strands
+ * `x.md` active forever. The asymmetry is the whole argument: failing to prune
+ * costs one bounded enumeration, wrongly pruning loses documents permanently.
+ */
+function patternCoversStrictDescendants(
+  dirParts: readonly string[],
+  rawPattern: string
+): boolean {
+  const pattern = rawPattern.replaceAll("\\", "/");
+  if (pattern === "") {
+    return false;
+  }
+  if (!hasGlobMeta(pattern)) {
+    const base = stripTrailingSlashes(pattern);
+    if (base === "") {
+      return false;
+    }
+    return (
+      prefixRootsDirectory(dirParts, base) ||
+      (!base.includes("/") && dirParts.includes(base))
+    );
+  }
+  const prefix = recursiveGlobPrefix(pattern);
+  if (prefix === null) {
+    return false;
+  }
+  // `**` alone: every non-empty path matches, so every descendant does.
+  return prefix === "" || prefixRootsDirectory(dirParts, prefix);
+}
 
 /**
  * Does some exclusion cover the whole SUBTREE under `dirRelPath`, and not just
@@ -146,20 +271,13 @@ const SUBTREE_PROBE_SEGMENT = "__gno_exclusion_subtree_probe__";
  * makes the removed subtree unqueryable, so a recursive delete that reports only
  * the bare directory leaves `child.txt` active and searchable forever.
  *
- * "Provably covers descendants" is decided per matching pattern:
- *
- * - A BARE pattern (no glob metacharacters) covers the subtree by construction.
- *   It matched either as a path COMPONENT - every descendant contains that same
- *   component - or as the path itself / a `pattern/` prefix - every descendant
- *   starts with `pattern/`. Either way the same rule matches every path below.
- *   `node_modules`, `.git`, `drafts` all take this branch, so directory pruning
- *   and its amplification guarantee are untouched for the ordinary case.
- * - A GLOB pattern is ASKED, on two synthetic descendants one and two levels
- *   down. `node_modules/**` and a doubled-star pattern rooted above `build`
- *   answer yes; `*.md` answers no for
- *   both, which is exactly the difference that matters. Two depths rather than
- *   one because a single-level answer does not distinguish `dir/*` (which
- *   leaves `dir/a/b.txt` walkable) from `dir/**`.
+ * Coverage of the STRICT DESCENDANTS is decided on its own, per pattern, by
+ * `patternCoversStrictDescendants` - never gated on whether the directory
+ * itself matches. The two questions are independent, and requiring the
+ * directory to match first was itself a bug: `node_modules/` covers every path
+ * under `node_modules` while deliberately not matching the bare path
+ * `node_modules`, so the gate rejected it and boundary events did store work
+ * and parent enumeration instead of being pruned.
  *
  * This never widens what is INDEXED - final file eligibility stays with
  * `matchesWalkPath`. It only stops a directory whose descendants are still
@@ -169,24 +287,12 @@ export function exclusionCoversSubtree(
   dirRelPath: string,
   excludes: readonly string[]
 ): boolean {
-  const normalizedPath = dirRelPath.replaceAll("\\", "/");
+  const normalizedPath = stripTrailingSlashes(dirRelPath.replaceAll("\\", "/"));
   if (normalizedPath === "") {
     return false;
   }
-  const childProbe = `${normalizedPath}/${SUBTREE_PROBE_SEGMENT}`;
-  const grandchildProbe = `${childProbe}/${SUBTREE_PROBE_SEGMENT}`;
-  for (const rawPattern of excludes) {
-    const pattern = rawPattern.replaceAll("\\", "/");
-    if (!matchesCollectionExclusion(normalizedPath, [pattern])) {
-      continue;
-    }
-    if (!hasGlobMeta(pattern)) {
-      return true;
-    }
-    const glob = new Bun.Glob(pattern);
-    if (glob.match(childProbe) && glob.match(grandchildProbe)) {
-      return true;
-    }
-  }
-  return false;
+  const dirParts = normalizedPath.split("/");
+  return excludes.some((pattern) =>
+    patternCoversStrictDescendants(dirParts, pattern)
+  );
 }
