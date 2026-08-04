@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +35,83 @@ describe("incremental sync orchestration", () => {
   afterEach(async () => {
     await store.close();
     await safeRm(tempDir);
+  });
+
+  /**
+   * The capture/API path, which reaches `syncPaths` through `syncFiles`.
+   *
+   * Every capture call site (`src/cli/commands/capture.ts`,
+   * `src/mcp/tools/capture.ts`, and both `src/sdk/client.ts` sites) does the
+   * same two things before syncing: `mkdir(dirname(absPath), {recursive:true})`
+   * and then writes a REGULAR file. So no component of a captured path is ever
+   * a symlink, and the no-follow policy `syncPaths` now enforces cannot touch
+   * it. This pins that, because "shared ingestion got stricter" is exactly the
+   * kind of change that silently breaks the write path.
+   *
+   * NOT discriminating against 0c517f7f - it passes there too, by construction.
+   * It is a regression guard for the shared-ingestion change, not a bug pin.
+   */
+  test("a captured file in a nested real directory still syncs", async () => {
+    const root = join(tempDir, "captures");
+    const collection: Collection = {
+      name: "captures",
+      path: root,
+      pattern: "**/*.md",
+      include: [],
+      exclude: [],
+    };
+    await mkdir(join(root, "inbox", "2026"), { recursive: true });
+    await store.syncCollections([collection]);
+    // Exactly what every capture call site does: mkdir -p, then write a file.
+    await writeFile(join(root, "inbox", "2026", "note.md"), "# captured\n");
+
+    const service = new SyncService();
+    const results = await service.syncFiles(collection, store, [
+      "inbox/2026/note.md",
+    ]);
+
+    expect(results[0]?.status).toBe("added");
+    const document = await store.getDocument(
+      collection.name,
+      "inbox/2026/note.md"
+    );
+    expect(document.ok && document.value?.active).toBe(true);
+  });
+
+  /**
+   * The other half of the same guarantee, and an intended behavior CHANGE.
+   *
+   * A file written under a symlinked directory inside the collection is one a
+   * full `gno update` never indexes, so indexing it here only produced a
+   * document that the next update deactivated. It is now refused up front, and
+   * the receipt says `skipped` rather than reporting a success that does not
+   * survive.
+   *
+   * DISCRIMINATING against 0c517f7f: there this indexes as `added` and the
+   * document is active.
+   */
+  test("a file written under a symlinked directory is not indexed", async () => {
+    const root = join(tempDir, "aliased");
+    const collection: Collection = {
+      name: "aliased",
+      path: root,
+      pattern: "**/*.md",
+      include: [],
+      exclude: [],
+    };
+    await mkdir(join(root, "real"), { recursive: true });
+    await symlink(join(root, "real"), join(root, "alias"), "dir");
+    await store.syncCollections([collection]);
+    await writeFile(join(root, "real", "note.md"), "# aliased\n");
+
+    const service = new SyncService();
+    const results = await service.syncFiles(collection, store, [
+      "alias/note.md",
+    ]);
+
+    expect(results[0]?.status).toBe("skipped");
+    const document = await store.getDocument(collection.name, "alias/note.md");
+    expect(document.ok && document.value).toBeNull();
   });
 
   test("syncAll performs one global projection after all collections", async () => {

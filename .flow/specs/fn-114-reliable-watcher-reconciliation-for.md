@@ -439,17 +439,59 @@ proportional to the event.
   still canonicalized — it is legitimately a symlink (`/tmp -> /private/tmp` on
   macOS).
 
-  Enumeration parity is not enough for such a path: it is reported as a distinct
-  SKIPPED outcome, not as an empty directory. A full `FileWalker.walk` never
-  enters a symlinked directory, so a full `gno update` deactivates everything it
-  had indexed beneath it. An empty enumeration only empties the DISK half of the
-  reconciliation union; the INDEXED half would then reach `syncPaths`, which
-  stats each candidate, FOLLOWS the alias, finds the file alive and keeps the
-  document active — so an indexed real `dir/` replaced by `dir -> real` stayed
-  active in the watcher and inactive after a full update. The skipped outcome is
-  therefore converged by DEACTIVATING the indexed side directly, over the whole
-  subtree beneath the skipped path and without ever following it, which is
-  exactly what a full walk concludes.
+  **The no-follow policy is enforced in the INGESTION path, not in the watcher.**
+  It lives in `checkWalkPathVisibility` (`src/ingestion/walker.ts`), beside the
+  filesystem-free eligibility rule `matchesWalkPath`, and it states the walker's
+  measured policy once:
+
+  > A path is walkable iff no component of it below the collection root — the
+  > leaf included, whatever it points at — is a symlink.
+
+  That is what `FileWalker.walk` actually does, verified rather than assumed:
+  it canonicalizes the ROOT and then scans with
+  `Bun.Glob.scan({ onlyFiles: true, followSymlinks: false })`, which emits
+  neither a symlink to a directory nor a symlink to a regular FILE, and never
+  descends through a symlinked directory at any depth. The root itself stays
+  exempt, since it is legitimately a symlink.
+
+  Both consumers read that one rule. The enumeration seam
+  (`directory-children.ts`) uses it for the entry-path chain, and — this is the
+  part that makes the guarantee hold — `syncPaths` uses it in place of the
+  FOLLOWING `stat` it used to open with, so a path the walker cannot reach is
+  deactivated exactly as a deleted one is.
+
+  Enforcing it anywhere narrower does not work, and the first attempt proved it.
+  Enumeration parity alone only empties the DISK half of the reconciliation
+  union; the INDEXED half then reached `syncPaths`, which statted each candidate,
+  FOLLOWED the alias, found the file alive and kept the document active — so an
+  indexed real `dir/` replaced by `dir -> real` stayed active in the watcher and
+  inactive after a full update. Converging that with a private store-mutation
+  path inside the watcher removed the symptom and lost everything the ordinary
+  batch provides: it re-implemented a subset of `syncPaths` that mutated the
+  store BEFORE the flush's generation revalidation, put a whole subtree into one
+  `markInactive` statement, reported no candidates (so no `lastEventAt`, no
+  `lastSyncAt`, no document-change events, no scheduler notification, no
+  deactivated count, and no typed-edge projection), and still could not be
+  reached at all by an eligible-NAMED alias (`archive.md -> real/`), whose event
+  takes the exact-path branch where no enumeration ever runs.
+
+  With the policy at the ingestion seam all of that follows for free. The
+  vanished-path resolver asks `walkerVisible` rather than a following `stat`, so
+  an alias reads as gone TO THE WALKER and is widened like any other removal —
+  the eligible-named case included. A directory whose entry path is aliased is
+  still reported as a distinct SKIPPED enumeration outcome, but that outcome now
+  means only "widen the indexed side to the SUBTREE" (an alias at or above the
+  entry point puts everything beneath it out of reach, not just the top level).
+  The deactivation itself goes through the ordinary batch, inheriting its
+  generation revalidation, its per-path `markInactive`, its events, its scheduler
+  notification, its counts and its projection.
+
+  The capture/API write path is unaffected: every call site (`gno capture` in the
+  CLI, the MCP capture tool, and both SDK sites) does `mkdir -p` on the parent and
+  then writes a REGULAR file, so no component of a captured path is ever a
+  symlink. A file deliberately written UNDER an aliased directory is now refused
+  rather than indexed, which is a correction — a full `gno update` never indexed
+  it, so the previous behavior produced a document the next update deactivated.
 
   Suppression is scoped to SYNCING, not to classification. Its purpose is that an
   application-originated write is not fed back into the watcher as a change, so a
@@ -741,7 +783,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path; containment enforced at traversal time over the unresolved component chain (verified before the read, re-proven after it) with every DETECTED change failing closed — explicitly NOT race-free, since a swap undone before the re-check or one preserving `(dev, ino)` cannot be excluded without dirfd-relative no-follow primitives Node/Bun does not expose; a path the walker never enters is reported SKIPPED and converged by deactivating its indexed subtree without following it | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path; containment enforced at traversal time over the unresolved component chain (verified before the read, re-proven after it) with every DETECTED change failing closed — explicitly NOT race-free, since a swap undone before the re-check or one preserving `(dev, ino)` cannot be excluded without dirfd-relative no-follow primitives Node/Bun does not expose; the walker's no-follow reachability rule (no symlink component below the root, leaf included, files as well as directories) lives in ONE place beside eligibility (`checkWalkPathVisibility`) and is enforced by `syncPaths` itself, so an unreachable indexed path deactivates through the ordinary batch — with its generation revalidation, per-path `markInactive`, events, scheduler notification, counts and typed-edge projection — rather than through a private store-mutation path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection, published from the ELIGIBLE observation rather than the latest one seen, and carried beside the capped witness set so a stream past the observation cap still publishes the latest ACCEPTED observation; per-directory sync outcomes only where the failure is owned by a batched path, with the unattributable cause summarized once per sync result, bounded, and skipped when no observer is installed | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — |

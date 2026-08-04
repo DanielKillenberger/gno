@@ -13,7 +13,10 @@ import type {
   VanishedPathOutcome,
 } from "../../src/ingestion";
 
-import { defaultSyncService } from "../../src/ingestion";
+import {
+  defaultSyncService,
+  resolveVanishedPathDirectory,
+} from "../../src/ingestion";
 import {
   CollectionWatchService,
   MAX_DESCRIBED_VALUE_LENGTH,
@@ -4931,6 +4934,497 @@ describe("symlink replacement converges the indexed side", () => {
       expect(afterFullSync.ok && afterFullSync.value?.active).toBe(false);
     } finally {
       await service?.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+/**
+ * The rest of fn-114's symlink convergence, driven end to end against a real
+ * filesystem, a real SQLite store and the REAL `syncPaths`.
+ *
+ * These pin the mechanism after it moved. The no-follow policy now lives in
+ * `checkWalkPathVisibility`, beside the eligibility rules, and is enforced by
+ * `syncPaths` itself - so the watcher deactivates an unreachable path through
+ * the ORDINARY batch rather than through a private store-mutation path of its
+ * own. Everything the ordinary batch provides therefore applies, and each test
+ * below pins one thing the private path did not have.
+ */
+function createLiveWatchHarness(
+  collection: Collection,
+  store: unknown,
+  options: {
+    eventBus?: { emit: (event: unknown) => void } | null;
+    scheduler?: { notifySyncComplete: (relPaths: string[]) => void } | null;
+    resolveVanishedPath?: (
+      relPath: string,
+      root: string
+    ) => Promise<VanishedPathOutcome>;
+    onSyncComplete?: (event: { result: CollectionSyncResult }) => void;
+  } = {}
+) {
+  let watcherCallback:
+    | ((eventType: string, filename: string | null) => void)
+    | undefined;
+  let notifySettled: (() => void) | null = null;
+
+  const service = new CollectionWatchService({
+    collections: [collection],
+    eventBus: (options.eventBus ?? null) as never,
+    scheduler: (options.scheduler ?? null) as never,
+    store: store as never,
+    callbacks: {
+      onSettled: () => {
+        const resolve = notifySettled;
+        notifySettled = null;
+        resolve?.();
+      },
+      onSyncComplete: options.onSyncComplete as never,
+    },
+    watchFactory: ((
+      _path: string,
+      _watchOptions: { recursive: boolean },
+      callback: WatchListener<string>
+    ) => {
+      watcherCallback = callback as typeof watcherCallback;
+      return { close: () => undefined };
+    }) as never,
+    resolveVanishedPath: options.resolveVanishedPath,
+  });
+
+  return {
+    service,
+    emitAndSettle: async (
+      sequence: ReadonlyArray<readonly [string, string | null]>
+    ): Promise<"settled" | "NO_SETTLE_WITHIN_TIMEOUT"> => {
+      const settled = new Promise<"settled">((resolve) => {
+        notifySettled = () => resolve("settled");
+      });
+      for (const [eventType, filename] of sequence) {
+        watcherCallback?.(eventType, filename);
+      }
+      return await Promise.race([
+        settled,
+        Bun.sleep(20_000).then(() => "NO_SETTLE_WITHIN_TIMEOUT" as const),
+      ]);
+    },
+  };
+}
+
+describe("the no-follow policy converges through the ordinary sync batch", () => {
+  /**
+   * An ELIGIBLE-NAMED directory replaced by a symlink (`archive.md -> real/`).
+   *
+   * The name matters, and it is the whole point of this case. `archive.md`
+   * matches `**\/*.md`, so its event takes the EXACT-PATH branch, never the
+   * directory-hint branch the previous test uses. That branch asked the disk
+   * "is this path still here?" with a FOLLOWING `stat`, which succeeds through
+   * the alias, so the path resolved as `present`, nothing was ever widened, and
+   * every document indexed under `archive.md/` stayed active - untouched by the
+   * enumeration-side fix, which that branch never reaches. Naming the directory
+   * `dir` (ineligible) is exactly what hid this.
+   *
+   * Now the existence question is `walkerVisible`, so the alias reads as gone to
+   * the walker, `archive.md` is retained as a hint, its indexed descendants are
+   * found, and `syncPaths` deactivates them under the same policy.
+   *
+   * DISCRIMINATING against 0c517f7f: there this fails on `afterWatch`, because
+   * the exact-path branch stats through the alias, reports `present`, and the
+   * descendant is never implicated at all.
+   */
+  test("converges an eligible-NAMED directory replaced by a symlink", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-eligible-name-"));
+    const root = join(tempDir, "collection");
+    await mkdir(join(root, "archive.md"), { recursive: true });
+    await Bun.write(join(root, "archive.md", "note.md"), "# note\n");
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    let harness: ReturnType<typeof createLiveWatchHarness> | null = null;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const indexed = await store.getDocument(
+        collection.name,
+        "archive.md/note.md"
+      );
+      expect(indexed.ok && indexed.value?.active).toBe(true);
+
+      harness = createLiveWatchHarness(collection, store);
+      harness.service.start();
+
+      await mkdir(join(root, "real"), { recursive: true });
+      await Bun.write(join(root, "real", "note.md"), "# note\n");
+      await rm(join(root, "archive.md"), { recursive: true, force: true });
+      await symlink(join(root, "real"), join(root, "archive.md"), "dir");
+
+      // The reported name is ELIGIBLE, so this is the exact-path branch.
+      expect(await harness.emitAndSettle([["rename", "archive.md"]])).toBe(
+        "settled"
+      );
+
+      const afterWatch = await store.getDocument(
+        collection.name,
+        "archive.md/note.md"
+      );
+      expect(afterWatch.ok && afterWatch.value?.active).toBe(false);
+
+      // The same conclusion a full walk reaches - the halves must agree.
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const afterFullSync = await store.getDocument(
+        collection.name,
+        "archive.md/note.md"
+      );
+      expect(afterFullSync.ok && afterFullSync.value?.active).toBe(false);
+    } finally {
+      await harness?.service.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  /**
+   * A recreated subtree whose recreation contains a NESTED symlink directory.
+   *
+   * `dir/gone/` is removed while holding an indexed `dir/gone/nested/note.md`,
+   * so the flush classifies it as a removed subtree; it is then recreated - with
+   * `nested` now an alias - before the enumeration runs. That is the window the
+   * subtree enumeration exists for, and it is driven at the one awaited point
+   * that defines it (the classification seam) rather than raced against a sleep.
+   *
+   * The recursive enumeration walks into the recreated `dir/gone`, sees
+   * `nested` as a symlink `Dirent` and omits it silently - it reports no
+   * `skipped`, and it should not have to: the indexed side still supplies
+   * `dir/gone/nested/note.md`, and `syncPaths` refuses to follow it. That is the
+   * value of putting the policy at the ingestion seam instead of at the
+   * enumeration seam: enumeration never has to enumerate what it cannot see.
+   *
+   * DISCRIMINATING against 0c517f7f: there the enumeration omits `nested` in
+   * exactly the same way, and `syncPaths` then STATS `dir/gone/nested/note.md`,
+   * follows the alias, finds the target's file and REINDEXES it - the document
+   * stays active, so the final assertion fails.
+   */
+  test("converges a recreated subtree containing a NESTED symlink directory", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-nested-symlink-"));
+    const root = join(tempDir, "collection");
+    await mkdir(join(root, "dir", "gone", "nested"), { recursive: true });
+    await Bun.write(
+      join(root, "dir", "gone", "nested", "note.md"),
+      "# nested\n"
+    );
+    await mkdir(join(root, "real"), { recursive: true });
+    await Bun.write(join(root, "real", "note.md"), "# target\n");
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    let harness: ReturnType<typeof createLiveWatchHarness> | null = null;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const indexed = await store.getDocument(
+        collection.name,
+        "dir/gone/nested/note.md"
+      );
+      expect(indexed.ok && indexed.value?.active).toBe(true);
+
+      let recreated = false;
+      harness = createLiveWatchHarness(collection, store, {
+        resolveVanishedPath: async (relPath, watchedRoot) => {
+          const outcome = await resolveVanishedPathDirectory(
+            relPath,
+            watchedRoot
+          );
+          if (!recreated) {
+            recreated = true;
+            // The removal has been classified; recreate the subtree with the
+            // alias in place before the enumeration reads it.
+            await mkdir(join(root, "dir", "gone"), { recursive: true });
+            await symlink(
+              join(root, "real"),
+              join(root, "dir", "gone", "nested"),
+              "dir"
+            );
+          }
+          return outcome;
+        },
+      });
+      harness.service.start();
+
+      await rm(join(root, "dir", "gone"), { recursive: true, force: true });
+      expect(
+        await harness.emitAndSettle([["rename", "dir/gone/nested/note.md"]])
+      ).toBe("settled");
+
+      expect(recreated).toBe(true);
+      const afterWatch = await store.getDocument(
+        collection.name,
+        "dir/gone/nested/note.md"
+      );
+      expect(afterWatch.ok && afterWatch.value?.active).toBe(false);
+    } finally {
+      await harness?.service.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  /**
+   * A large subtree, and the WIDTH of the statements that deactivate it.
+   *
+   * The private deactivation path collected the whole subtree and handed it to
+   * ONE `markInactive`, which binds one host parameter per path - so the
+   * statement grew without bound with the size of the aliased directory. Going
+   * through `syncPaths` instead means one `markInactive` PER SOURCE PATH, which
+   * is the chunking the rest of this repo already relies on.
+   *
+   * On the ceiling, measured rather than assumed: bun:sqlite here accepts 65535
+   * bound values and fails above that (`SELECT ... IN (?...)` with 65536+), NOT
+   * at the 999 of SQLite's old compile-time default. So a 1200-path statement
+   * does not actually throw on this runtime, and this test does not pretend it
+   * does. What it pins is the property that made the ceiling reachable at all:
+   * after this change the widest statement is a single source path's own
+   * documents, so no subtree size can reach any limit.
+   *
+   * DISCRIMINATING against 0c517f7f: there one `markInactive` carries all 1200
+   * paths, so `widest` is 1200 and the width assertion fails. (The convergence
+   * assertion alone would NOT discriminate on this runtime - 1200 bindings still
+   * succeed - which is exactly why the width is asserted too.)
+   */
+  test("deactivates a large subtree without an unbounded statement", async () => {
+    const documentCount = 1200;
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-large-subtree-"));
+    const root = join(tempDir, "collection");
+    await mkdir(join(root, "dir"), { recursive: true });
+    await Promise.all(
+      Array.from({ length: documentCount }, (_unused, index) =>
+        Bun.write(join(root, "dir", `note-${index}.md`), `# note ${index}\n`)
+      )
+    );
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    let harness: ReturnType<typeof createLiveWatchHarness> | null = null;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const before = await store.listDocuments(collection.name);
+      expect(before.ok).toBe(true);
+      if (!before.ok) return;
+      expect(
+        before.value.filter(
+          (document) =>
+            document.active && document.relPath.startsWith("dir/note-")
+        ).length
+      ).toBe(documentCount);
+
+      // A real store with ONE seam observed, so the statement WIDTH is a
+      // property of the run rather than something inferred from the code.
+      const widths: number[] = [];
+      const observedStore = Object.create(store) as SqliteAdapter;
+      observedStore.markInactive = (
+        collectionName: string,
+        relPaths: string[]
+      ) => {
+        widths.push(relPaths.length);
+        return store.markInactive(collectionName, relPaths);
+      };
+
+      harness = createLiveWatchHarness(collection, observedStore);
+      harness.service.start();
+
+      await mkdir(join(root, "real"), { recursive: true });
+      await rm(join(root, "dir"), { recursive: true, force: true });
+      await symlink(join(root, "real"), join(root, "dir"), "dir");
+
+      expect(await harness.emitAndSettle([["rename", "dir"]])).toBe("settled");
+
+      expect(widths.length).toBeGreaterThan(0);
+      expect(Math.max(...widths)).toBe(1);
+
+      const after = await store.listDocuments(collection.name);
+      expect(after.ok).toBe(true);
+      if (!after.ok) return;
+      expect(
+        after.value.filter(
+          (document) =>
+            document.active && document.relPath.startsWith("dir/note-")
+        )
+      ).toEqual([]);
+    } finally {
+      await harness?.service.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  /**
+   * The observable side effects of a deactivation taken by this route.
+   *
+   * The private path returned NO candidates, so the flush read the whole
+   * reconciliation as a no-op: `syncPaths` was never called, `lastSyncAt` never
+   * advanced, the scheduler was never notified, no `document-changed` event was
+   * emitted, and the sync result reported nothing marked inactive. A document
+   * silently vanished from search with no trace anywhere a consumer can see.
+   *
+   * DISCRIMINATING against 0c517f7f: every one of these assertions fails there -
+   * the events array is empty, `lastSyncAt` is null, the scheduler saw nothing,
+   * and there is no sync result to inspect at all.
+   */
+  test("emits the ordinary events, status and count for this deactivation", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-symlink-events-"));
+    const root = join(tempDir, "collection");
+    await mkdir(join(root, "dir"), { recursive: true });
+    await Bun.write(join(root, "dir", "note.md"), "# note\n");
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    const events: Array<{ type: string; relPath: string }> = [];
+    const notified: string[][] = [];
+    const results: CollectionSyncResult[] = [];
+    let harness: ReturnType<typeof createLiveWatchHarness> | null = null;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+
+      harness = createLiveWatchHarness(collection, store, {
+        eventBus: {
+          emit: (event) => {
+            events.push(event as { type: string; relPath: string });
+          },
+        },
+        scheduler: {
+          notifySyncComplete: (relPaths) => {
+            notified.push([...relPaths]);
+          },
+        },
+        onSyncComplete: (event) => {
+          results.push(event.result);
+        },
+      });
+      harness.service.start();
+      expect(harness.service.getState().lastSyncAt).toBeNull();
+
+      await mkdir(join(root, "real"), { recursive: true });
+      await rm(join(root, "dir"), { recursive: true, force: true });
+      await symlink(join(root, "real"), join(root, "dir"), "dir");
+
+      expect(await harness.emitAndSettle([["rename", "dir"]])).toBe("settled");
+
+      expect(
+        events.filter(
+          (event) =>
+            event.type === "document-changed" && event.relPath === "dir/note.md"
+        ).length
+      ).toBe(1);
+      expect(notified).toEqual([["dir/note.md"]]);
+      expect(harness.service.getState().lastSyncAt).not.toBeNull();
+      expect(
+        results.reduce((total, result) => total + result.filesMarkedInactive, 0)
+      ).toBeGreaterThan(0);
+    } finally {
+      await harness?.service.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  /**
+   * A configuration change landing DURING the indexed-side lookup.
+   *
+   * The private path mutated the store before the flush's outer
+   * `resumeAfterAwait()` generation check ever ran, so a collection removed or
+   * moved mid-flight had its documents deactivated anyway, against a
+   * configuration that no longer existed (R6). Going through the ordinary batch
+   * puts the deactivation AFTER that check, so the stale work is dropped whole.
+   *
+   * The drift is triggered from inside the awaited store seam - the same
+   * controllable point the existing mid-enumeration drift tests use - so nothing
+   * is timed against a sleep.
+   *
+   * DISCRIMINATING against 0c517f7f: there `dir/note.md` is already inactive by
+   * the time the generation check runs, so the final assertion fails.
+   */
+  test("drops the deactivation when the collection is removed during the lookup", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-symlink-drift-"));
+    const root = join(tempDir, "collection");
+    await mkdir(join(root, "dir"), { recursive: true });
+    await Bun.write(join(root, "dir", "note.md"), "# note\n");
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    let harness: ReturnType<typeof createLiveWatchHarness> | null = null;
+    let dropped = false;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+
+      // A real store, with ONE seam wrapped so the configuration can change at
+      // exactly the awaited point the indexed side is resolved.
+      const driftingStore = Object.create(store) as SqliteAdapter & {
+        listActiveDescendantSourcePathsBatch: SqliteAdapter["listActiveDescendantSourcePathsBatch"];
+      };
+      driftingStore.listActiveDescendantSourcePathsBatch = async (
+        ...args: Parameters<
+          SqliteAdapter["listActiveDescendantSourcePathsBatch"]
+        >
+      ) => {
+        const answer = await store.listActiveDescendantSourcePathsBatch(
+          ...args
+        );
+        if (!dropped) {
+          dropped = true;
+          harness?.service.updateCollections([]);
+        }
+        return answer;
+      };
+
+      harness = createLiveWatchHarness(collection, driftingStore);
+      harness.service.start();
+
+      await mkdir(join(root, "real"), { recursive: true });
+      await rm(join(root, "dir"), { recursive: true, force: true });
+      await symlink(join(root, "real"), join(root, "dir"), "dir");
+
+      expect(await harness.emitAndSettle([["rename", "dir"]])).toBe("settled");
+
+      expect(dropped).toBe(true);
+      // The collection no longer exists, so no store mutation may be made on
+      // the strength of work resolved against the configuration that did.
+      const afterDrift = await store.getDocument(
+        collection.name,
+        "dir/note.md"
+      );
+      expect(afterDrift.ok && afterDrift.value?.active).toBe(true);
+    } finally {
+      await harness?.service.dispose();
       await store.close();
       await rm(tempDir, { recursive: true, force: true });
     }

@@ -22,7 +22,12 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { WalkConfig } from "./types";
 
 import { normalizeCollectionDirRelPath } from "../core/path-rules";
-import { matchesWalkPath } from "./walker";
+import {
+  checkWalkPathVisibility,
+  isMissingPathError as isMissingError,
+  matchesWalkPath,
+  type WalkPathComponent,
+} from "./walker";
 
 /**
  * Three-state enumeration outcome.
@@ -42,26 +47,22 @@ export type DirectoryChildrenOutcome =
    * file can be reached through it and nothing was read through it either.
    *
    * This is deliberately NOT `present` with an empty list. Both say "no
-   * eligible children on disk", but they imply opposite things about the
-   * INDEXED side. `present` means the disk was read and whatever it did not
-   * list is reconciled the ordinary way, through `syncPaths`, which follows the
-   * path. `skipped` means the path must never be FOLLOWED at all: an indexed
-   * document underneath it would be found by a following `stat` and stay
-   * active, while a full `gno update` - which skips the whole area - deactivates
-   * it. Collapsing the two left exactly that divergence behind whenever an
-   * indexed real directory was replaced by an in-root symlink.
+   * eligible children on disk", but they say different things about how much of
+   * the INDEXED side is implicated. `present` means the disk WAS read, so only
+   * what that read covers is answered for. `skipped` means nothing under here is
+   * reachable AT ALL - a symlink at the entry point or above it puts the whole
+   * SUBTREE out of the walker's reach, not merely its top level - so the caller
+   * must widen its indexed side to the subtree rather than to direct children.
+   *
+   * What it does NOT mean is "deactivate this yourself". The no-follow policy
+   * lives in `checkWalkPathVisibility` and `syncPaths` enforces it too, so paths
+   * handed over from here deactivate through the ordinary batch - with its
+   * generation revalidation, its chunked `markInactive`, its document-change
+   * events, its scheduler notification and its typed-edge projection.
    */
   | { status: "skipped"; reason: "symlink" }
   /** The directory could not be read, or the argument was refused. */
   | { status: "error"; cause: unknown };
-
-/** Errno values that mean "this directory does not exist as a directory". */
-const MISSING_ERROR_CODES = new Set(["ENOENT", "ENOTDIR"]);
-
-function isMissingError(cause: unknown): boolean {
-  const code = (cause as { code?: unknown } | null)?.code;
-  return typeof code === "string" && MISSING_ERROR_CODES.has(code);
-}
 
 function toPosix(path: string): string {
   return sep === "/" ? path : path.replaceAll(sep, "/");
@@ -140,8 +141,45 @@ async function pathExists(
 }
 
 /**
+ * Does the WALKER still see `relPath` inside `rootAbs`?
+ *
+ * This is the existence question the index actually cares about, and it is not
+ * `stat`. A `stat` FOLLOWS, so a path that has become a symlink - or that sits
+ * under one - answers "still here" while `FileWalker.walk` cannot reach it and
+ * a full `gno update` deactivates everything indexed beneath it. Asking the
+ * following question is precisely what stopped a directory replaced by an alias
+ * from ever being widened: `archive.md -> real/` took the exact-path branch, the
+ * `stat` said present, and its indexed descendants were never implicated.
+ *
+ * So gone-ness here means gone TO THE WALKER: absent, or unreachable no-follow.
+ * Only genuine unreadability (`EACCES`, `EIO`, a hung mount) stays an error, and
+ * an error still infers nothing.
+ */
+async function walkerVisible(
+  rootAbs: string,
+  normalizedRelPath: string
+): Promise<boolean | { cause: unknown }> {
+  const visibility = await checkWalkPathVisibility(rootAbs, normalizedRelPath);
+  if (visibility.status === "error") {
+    return { cause: visibility.cause };
+  }
+  return visibility.status === "visible";
+}
+
+/**
  * Resolve the directory a reported event path implicates, by asking the disk
  * whether that path still exists.
+ *
+ * "Gone" here means gone TO THE WALKER, not absent from a following `stat` -
+ * see `walkerVisible`. That distinction is what lets a directory replaced by an
+ * eligible-NAMED in-root alias (`archive.md -> real/`) be widened at all: it
+ * still stats fine, so the following question answered `present`, the exact-path
+ * branch kept its narrow flow, and every document indexed under `archive.md/`
+ * stayed active while a full `gno update` deactivated them.
+ *
+ * The collection ROOT is exempt from that, as it is everywhere else: it is
+ * legitimately a symlink and `FileWalker.walk` resolves it, so the root's own
+ * existence is still a plain following question.
  *
  * This exists because a filesystem event that names an ELIGIBLE file is not
  * automatically a complete report. Measured on Bun 1.3.14 / Linux / ext4, a
@@ -190,7 +228,7 @@ export async function resolveVanishedPathDirectory(
   }
 
   const rootReal = resolve(root);
-  const reported = await pathExists(resolve(rootReal, normalized));
+  const reported = await walkerVisible(rootReal, normalized);
   if (reported === true) {
     return { status: "present" };
   }
@@ -200,7 +238,7 @@ export async function resolveVanishedPathDirectory(
 
   let directory = parentDirectoryOf(normalized);
   while (directory !== "") {
-    const exists = await pathExists(resolve(rootReal, directory));
+    const exists = await walkerVisible(rootReal, directory);
     if (exists === true) {
       break;
     }
@@ -408,13 +446,6 @@ async function readContainedDirectory(
   return { status: "read", entries };
 }
 
-/** One entry-path component, and the identity it had when it was verified. */
-interface ComponentIdentity {
-  absPath: string;
-  dev: number;
-  ino: number;
-}
-
 /** What the UNRESOLVED entry-point path turned out to be, before any deref. */
 type EntryPathCheck =
   /**
@@ -423,7 +454,7 @@ type EntryPathCheck =
    * `chain` carries the `(dev, ino)` each component had at the moment it was
    * verified, so the same chain can be re-proven after the read.
    */
-  | { status: "walkable"; chain: ComponentIdentity[] }
+  | { status: "walkable"; chain: WalkPathComponent[] }
   /**
    * A component below the root - the requested directory itself, or one of its
    * ancestors - is a symlink. `FileWalker.walk` never descends into one, so
@@ -442,76 +473,38 @@ type EntryPathCheck =
  * wrong question for the entry point: it silently dereferences an in-root alias
  * (`root/alias -> root/real`), and every later check - including the read-time
  * containment proof - then sees the TARGET, so the no-follow guarantee held for
- * nested levels but not for the requested directory or its ancestors. That
- * contradicts walker parity, where a symlinked directory is skipped outright
- * (`Dirent.isDirectory()` has `lstat` semantics, `Bun.Glob.scan` runs with
- * `followSymlinks: false`).
+ * nested levels but not for the requested directory or its ancestors.
  *
- * Only components BELOW the root are checked. The collection root itself is
- * canonicalized as before and deliberately so: it is legitimately a symlink on
- * macOS (`/tmp -> /private/tmp`), and refusing to walk a collection for that
- * reason would break every temp-rooted collection.
+ * The policy itself is NOT restated here. It is `checkWalkPathVisibility`, the
+ * single no-follow seam beside `matchesWalkPath` that `syncPaths` also consults
+ * - which is what keeps this enumeration and the sync from disagreeing about
+ * what the walker can reach. That function documents the walker's measured
+ * policy, the root exemption, and the non-atomic window this cannot close.
  *
- * ## The window this does NOT close
- *
- * The check is component-by-component on PATH STRINGS, so it is not atomic. For
- * `a/b`, `a` can be renamed away and replaced by a symlink after `a` has been
- * verified and before `a/b` is `lstat`ed; that `lstat` then traverses the
- * replacement and describes the target's `b`.
- *
- * Two things narrow it, and neither eliminates it:
- *
- * - the whole chain is re-proven by `revalidateEntryPathChain` AFTER the
- *   enumeration, comparing each component's `(dev, ino)` against what it was
- *   when it was verified, so a replacement that is still in place when the read
- *   finishes fails the enumeration closed;
- * - every directory actually read is independently re-proven contained and
- *   identical across its own `readdir` (`readContainedDirectory`).
- *
- * What remains open is a replacement that is UNDONE before the re-check (swap,
- * let the read happen, swap back) and a replacement that preserves `(dev, ino)`.
- * Closing those needs traversal relative to verified directory handles with
- * no-follow semantics - `openat(dirfd, name, O_NOFOLLOW)` and `fdopendir` - and
- * Node/Bun's `fs` API exposes no dirfd-relative operations at all, so it cannot
- * be written in this runtime. It would need either such an API or a native
- * addon. The honest claim is therefore: containment is enforced at traversal
- * time and every DETECTED change fails closed; a sufficiently precise
- * adversarial rename-plus-symlink racing the walk is not excluded.
+ * The one thing added on top of it: the last component must be a DIRECTORY,
+ * because this is a directory enumeration. Anything else standing there is the
+ * same `missing` a following resolution reports as ENOTDIR.
  */
 async function checkUnresolvedEntryPath(
   rootReal: string,
   normalizedDir: string,
   hooks: DirectoryEnumerationHooks | undefined
 ): Promise<EntryPathCheck> {
-  if (normalizedDir === "") {
-    return { status: "walkable", chain: [] };
-  }
-  const chain: ComponentIdentity[] = [];
-  let current = rootReal;
-  for (const segment of normalizedDir.split("/")) {
-    current = join(current, segment);
-    let info: Stats;
-    try {
-      await hooks?.beforeCheckComponent?.(current);
-      info = await lstat(current);
-    } catch (cause) {
-      return isMissingError(cause)
-        ? { status: "missing" }
-        : { status: "error", cause };
-    }
-    // Checked BEFORE `isDirectory()`: `lstat` reports a symlink as a symlink
-    // whatever it points at, which is the whole point of asking no-follow.
-    if (info.isSymbolicLink()) {
+  const visibility = await checkWalkPathVisibility(rootReal, normalizedDir, {
+    beforeComponent: hooks?.beforeCheckComponent,
+  });
+  switch (visibility.status) {
+    case "symlink":
       return { status: "symlink" };
-    }
-    if (!info.isDirectory()) {
-      // A file standing where a directory component is required - the same
-      // thing `realpath` reported as ENOTDIR, and the same outcome.
+    case "missing":
       return { status: "missing" };
-    }
-    chain.push({ absPath: current, dev: info.dev, ino: info.ino });
+    case "error":
+      return { status: "error", cause: visibility.cause };
+    default:
+      return visibility.leaf && !visibility.leaf.isDirectory()
+        ? { status: "missing" }
+        : { status: "walkable", chain: visibility.chain };
   }
-  return { status: "walkable", chain };
 }
 
 /**
@@ -531,7 +524,7 @@ async function checkUnresolvedEntryPath(
  * read as an authoritative file list.
  */
 async function revalidateEntryPathChain(
-  chain: ComponentIdentity[]
+  chain: WalkPathComponent[]
 ): Promise<DirectoryChildrenOutcome | null> {
   for (const component of chain) {
     let info: Stats;
@@ -767,11 +760,12 @@ async function enumerateEligible(
     // `alias/...`. What is NOT allowed is what the realpath-first version did:
     // enumerate the TARGET and report its files under the alias' names.
     //
-    // Reported as `skipped`, not as an empty `present`: converging the indexed
-    // side on what a full walk concludes needs the caller to DEACTIVATE what it
-    // has indexed under here, and it must do that WITHOUT following the path -
-    // a following `stat` succeeds through the alias and would keep those
-    // documents active forever. See `DirectoryChildrenOutcome`.
+    // Reported as `skipped`, not as an empty `present`, because the two imply
+    // different WIDTHS of indexed side: an alias at or above the entry point
+    // makes the whole subtree unreachable, so direct children are not enough.
+    // The deactivation itself is not this module's business - `syncPaths`
+    // enforces the same `checkWalkPathVisibility` policy and marks these paths
+    // inactive through the ordinary batch. See `DirectoryChildrenOutcome`.
     return { status: "skipped", reason: "symlink" };
   }
 

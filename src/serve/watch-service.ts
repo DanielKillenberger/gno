@@ -2646,17 +2646,6 @@ export class CollectionWatchService {
       };
     }
 
-    if (disk.status === "skipped") {
-      // The directory EXISTS but the walker never enters it (an in-root alias,
-      // or an alias standing at one of its ancestors). It cannot go through the
-      // ordinary union: `syncPaths` FOLLOWS every candidate, so an indexed
-      // document under the alias would be found alive and stay active, while a
-      // full `gno update` - which skips the whole area - deactivates it. That
-      // is the divergence between the watcher and a full walk this whole
-      // reconciliation exists to remove, so it deactivates directly instead.
-      return await this.#reconcileUnwalkableDirectory(collection, work);
-    }
-
     const candidates = new Set<string>(
       disk.status === "present" ? disk.relPaths : []
     );
@@ -2674,7 +2663,16 @@ export class CollectionWatchService {
     // this enumeration alone would then narrow it back to direct children and
     // strand the nested documents that really did go. The recreated files are
     // safe either way - `syncPaths` stats every candidate.
-    const removed = disk.status === "missing" || subtreeIntent;
+    //
+    // `skipped` is the THIRD way in, and it widens for a different reason. The
+    // directory exists, but a symlink stands at it or above it, so the walker
+    // reaches NOTHING under it - not one level, the whole subtree. Taking the
+    // direct-children indexed side there would leave a document one level
+    // deeper active forever. It needs no special deactivation path of its own:
+    // `syncPaths` enforces the same no-follow policy (`checkWalkPathVisibility`)
+    // and marks every one of these paths inactive through the ordinary batch.
+    const removed =
+      disk.status === "missing" || disk.status === "skipped" || subtreeIntent;
     let indexedSide = indexed;
     if (removed) {
       // The collection ROOT is the one directory with no bounded subtree. When
@@ -2727,141 +2725,6 @@ export class CollectionWatchService {
       // reconciliation was partial and must not also be claimed as complete.
       failureReported: !indexedSide.ok,
     };
-  }
-
-  /**
-   * Converge the INDEXED side of a directory the walker never enters.
-   *
-   * `FileWalker.walk` skips a symlinked directory outright, so a full
-   * `gno update` indexes nothing under an in-root alias and deactivates
-   * everything it previously had there. Enumeration parity alone does not
-   * reproduce that: reporting "no eligible children on disk" only removes the
-   * DISK half of the union, and the indexed half then reaches `syncPaths`,
-   * which stats the path, follows the alias, finds the file alive and keeps it
-   * active. So an indexed real `alias/` replaced by `alias -> real` left
-   * `alias/note.md` active in the watcher and inactive after a full update -
-   * exactly the divergence this spec exists to remove.
-   *
-   * The deactivation therefore happens HERE, without ever following the path:
-   * the indexed side is asked for the whole SUBTREE (a symlink at the entry
-   * point makes everything beneath it unreachable, not just its direct
-   * children), and those documents are marked inactive the same way a full
-   * sync's own missing-file pass marks them - by `relPath`, including the
-   * record-container documents that a container source path stands for.
-   *
-   * Nothing is enumerated, so `enumerationFailed` stays false: this directory
-   * was answered, not failed, and its parent must not be reconciled as a
-   * fallback for it.
-   */
-  async #reconcileUnwalkableDirectory(
-    collection: Collection,
-    work: ReconciliationWork
-  ): Promise<DirectoryReconciliation> {
-    const { directory, indexed, descendantsFor, observedAtMs } = work;
-    const failed = (
-      stage: "store",
-      cause: unknown
-    ): DirectoryReconciliation => {
-      this.#notifyDiagnostic(() =>
-        this.#callbacks?.onReconcileFailed?.({
-          collection: collection.name,
-          directory,
-          stage,
-          cause,
-        })
-      );
-      return {
-        directory,
-        candidates: [],
-        observedAtMs,
-        enumerationFailed: false,
-        started: true,
-        failureReported: true,
-      };
-    };
-
-    // `directory` can never be `""` here: the root is walkable by definition
-    // (it is canonicalized, so a symlinked root is legitimate), so the subtree
-    // seam - which refuses `""` - is always the right one. `indexed` is the
-    // direct-children fallback for a store that predates the seam.
-    const indexedSide = (await descendantsFor(directory)) ?? indexed;
-    if (!indexedSide.ok) {
-      return failed("store", indexedSide.error);
-    }
-
-    const deactivation = await this.#deactivateSourcePaths(
-      collection.name,
-      indexedSide.value
-    );
-    if (deactivation) {
-      return failed("store", deactivation);
-    }
-
-    return {
-      directory,
-      // Nothing may be handed to `syncPaths`: every path here is reachable only
-      // through the alias, and syncing it would immediately re-activate what
-      // was just deactivated. Suppression is irrelevant for the same reason -
-      // it exists to stop GNO's own writes being re-INDEXED, and nothing here
-      // is being indexed.
-      candidates: [],
-      observedAtMs,
-      enumerationFailed: false,
-      started: true,
-      failureReported: false,
-    };
-  }
-
-  /**
-   * Mark every active document standing for these effective SOURCE paths
-   * inactive, without consulting the disk.
-   *
-   * The indexed seams answer in effective source paths
-   * (`COALESCE(record_source_path, rel_path)`), and `markInactive` matches on
-   * `rel_path`, so a record container's source path has to be expanded into the
-   * virtual `#record/...` documents it stands for - the same expansion
-   * `syncPaths` performs in its own missing-file branch. Returns the failure
-   * cause, or `null` on success.
-   */
-  async #deactivateSourcePaths(
-    collectionName: string,
-    sourcePaths: string[]
-  ): Promise<unknown> {
-    if (sourcePaths.length === 0) {
-      return null;
-    }
-    const relPaths = new Set<string>();
-    for (const sourcePath of sourcePaths) {
-      const document = await this.#store.getDocument(
-        collectionName,
-        sourcePath
-      );
-      if (!document.ok) {
-        return document.error;
-      }
-      if (document.value?.active) {
-        relPaths.add(document.value.relPath);
-      }
-      const records = await this.#store.listRecordDocuments(
-        collectionName,
-        sourcePath
-      );
-      if (!records.ok) {
-        return records.error;
-      }
-      for (const record of records.value) {
-        if (record.active) {
-          relPaths.add(record.relPath);
-        }
-      }
-    }
-    if (relPaths.size === 0) {
-      return null;
-    }
-    const marked = await this.#store.markInactive(collectionName, [
-      ...relPaths,
-    ]);
-    return marked.ok ? null : marked.error;
   }
 
   /**
