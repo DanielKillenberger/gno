@@ -375,6 +375,29 @@ export interface DirectoryEnumerationHooks {
    * being raced against a sleep. Production callers never pass it.
    */
   beforeCheckComponent?: (absPath: string) => void | Promise<void>;
+  /**
+   * Awaited immediately after each `readdir`, with the entries it returned; the
+   * entries it returns are the ones enumerated.
+   *
+   * It exists for exactly one thing: producing a `Dirent` that exposes NO type
+   * at all - the `DT_UNKNOWN` every `readdir` on some network and FUSE mounts
+   * returns - without requiring such a mount to be available to the test. No
+   * ordinary local filesystem can be made to emit one on demand, so the
+   * fallback below would otherwise be untestable. Production callers never pass
+   * it.
+   */
+  afterReadDirectory?: (
+    absPath: string,
+    entries: Dirent[]
+  ) => Dirent[] | Promise<Dirent[]>;
+  /**
+   * Awaited immediately before the fallback `lstat` of an entry whose `Dirent`
+   * exposed no type. It is both the countable signal that the fallback ran at
+   * all - a normally typed entry must never reach it - and the seam that drives
+   * the vanish window between the `readdir` and that `lstat` deterministically.
+   * Production callers never pass it.
+   */
+  beforeStatUnknownEntry?: (absPath: string) => void | Promise<void>;
 }
 
 /** Everything the recursion carries that is the same at every level. */
@@ -460,6 +483,10 @@ async function readContainedDirectory(
   try {
     await context.hooks?.beforeReadDirectory?.(dirPath);
     entries = await readdir(dirPath, { withFileTypes: true });
+    const mapped = await context.hooks?.afterReadDirectory?.(dirPath, entries);
+    if (mapped) {
+      entries = mapped;
+    }
   } catch (cause) {
     return isMissingError(cause)
       ? { status: "missing" }
@@ -604,6 +631,109 @@ async function revalidateEntryPathChain(
 }
 
 /**
+ * What one directory entry turned out to be, for enumeration purposes.
+ *
+ * `other` covers everything that is neither an eligible file nor a directory to
+ * descend into - a symlink above all, but also a device, a socket, a FIFO. They
+ * are all skipped, which is exactly what the `Dirent` predicates already do
+ * with them.
+ */
+type EntryKind = "file" | "directory" | "other";
+
+/**
+ * Does this `Dirent` expose a type at all?
+ *
+ * `readdir(..., { withFileTypes: true })` reports the type the directory entry
+ * itself carries, and on some filesystems - notably several network and FUSE
+ * mounts, where a NAS- or sshfs-mounted collection is an ordinary GNO setup -
+ * that type is `DT_UNKNOWN`. Every `Dirent` predicate is then false at once,
+ * which is a shape no real entry has: a file is not simultaneously not-a-file,
+ * not-a-directory, not-a-symlink and not a device. That impossible combination
+ * is the only signal Node/Bun give that the type was never filled in, so it is
+ * what the fallback keys on.
+ */
+function hasKnownDirentType(entry: Dirent): boolean {
+  return (
+    entry.isFile() ||
+    entry.isDirectory() ||
+    entry.isSymbolicLink() ||
+    entry.isBlockDevice() ||
+    entry.isCharacterDevice() ||
+    entry.isFIFO() ||
+    entry.isSocket()
+  );
+}
+
+/** Classify a `Dirent` that DOES carry a type, without touching the disk. */
+function direntKind(entry: Dirent): EntryKind {
+  if (entry.isFile()) {
+    return "file";
+  }
+  if (entry.isDirectory()) {
+    return "directory";
+  }
+  return "other";
+}
+
+/**
+ * Classify an entry whose `Dirent` carried no type, by asking the disk.
+ *
+ * The fallback is `lstat`, NOT `stat`. The no-follow policy this enumeration is
+ * built on has to hold here too, or the untyped case would become the one route
+ * that dereferences: a symlink reached this way must be skipped exactly as a
+ * `Dirent`-typed symlink is, and a symlinked DIRECTORY must not be descended
+ * into - which is also what keeps the recursion loop-free. `lstat` reports the
+ * link itself, so it lands in `other` and is skipped, with no second thought
+ * about where it points.
+ *
+ * It is only ever reached for a genuinely untyped entry. A `Dirent` that
+ * reports a type is classified from that `Dirent` and costs no syscall at all,
+ * so filesystems that fill the type in - every ordinary local one - pay
+ * nothing for this.
+ *
+ * This is parity, not a new policy: `Bun.Glob.scan` - the discovery step inside
+ * `FileWalker.walk` - resolves its own `unknown` entry kind with an `lstatat`
+ * on both Bun 1.3.11 and 1.3.14 (`src/glob/GlobWalker.zig`), so a full
+ * `gno update` DOES index these files. Dropping them here is what made the two
+ * disagree. The one deliberate difference is the failure arm: the walker skips
+ * an entry it cannot stat for any reason, while this seam only skips a VANISHED
+ * one and fails closed otherwise - the same asymmetry it already has for an
+ * unreadable directory, and for the same reason (a full sync that misses files
+ * indexes nothing wrong, whereas a reconciliation that misses files
+ * DEACTIVATES them).
+ *
+ * Failures are handled the way the enclosing enumeration already handles them:
+ * an `ENOENT`/`ENOTDIR` between the `readdir` and this `lstat` means the entry
+ * vanished in that window, which contributes nothing and is not a failure - the
+ * same answer a nested directory that vanishes mid-walk gets. Anything else
+ * (`EACCES`, `EIO`, a hung mount) fails the whole enumeration closed, because a
+ * partially classified directory must never be read as an authoritative file
+ * list.
+ */
+async function classifyUnknownEntry(
+  absPath: string,
+  context: EnumerationContext
+): Promise<
+  | { status: "typed"; kind: EntryKind }
+  | { status: "vanished" }
+  | { status: "error"; cause: unknown }
+> {
+  let info: Stats;
+  try {
+    await context.hooks?.beforeStatUnknownEntry?.(absPath);
+    info = await lstat(absPath);
+  } catch (cause) {
+    return isMissingError(cause)
+      ? { status: "vanished" }
+      : { status: "error", cause };
+  }
+  if (info.isDirectory()) {
+    return { status: "typed", kind: "directory" };
+  }
+  return { status: "typed", kind: info.isFile() ? "file" : "other" };
+}
+
+/**
  * Read one directory and collect its eligible files, descending only when
  * `context.recursive` is set.
  *
@@ -617,6 +747,9 @@ async function revalidateEntryPathChain(
  * a symlinked directory is neither descended into nor listed, and
  * `readContainedDirectory` re-proves that at the moment of the read. That is
  * both parity with `FileWalker.walk` and what makes the recursion loop-free.
+ * An entry that carries NO type (`DT_UNKNOWN`, ordinary on several network and
+ * FUSE mounts) is classified by a no-follow `lstat` rather than dropped - see
+ * `classifyUnknownEntry`, which keeps the same policy for the fallback.
  */
 async function collectEligibleFiles(
   dirPath: string,
@@ -638,17 +771,35 @@ async function collectEligibleFiles(
       continue;
     }
     const childRelPath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-    if (entry.isFile()) {
+    const childPath = join(dirPath, entry.name);
+
+    let kind: EntryKind;
+    if (hasKnownDirentType(entry)) {
+      kind = direntKind(entry);
+    } else {
+      // `DT_UNKNOWN` - the entry has no type, so ask the disk no-follow rather
+      // than dropping it. Dropping it silently omitted the replacement file an
+      // atomic save leaves behind, and skipped whole untyped subdirectories in
+      // the recursive path, leaving their content unindexed until a full
+      // `gno update`.
+      const resolved = await classifyUnknownEntry(childPath, context);
+      if (resolved.status === "error") {
+        return { status: "error", cause: resolved.cause };
+      }
+      if (resolved.status === "vanished") {
+        continue;
+      }
+      kind = resolved.kind;
+    }
+
+    if (kind === "file") {
       if (matchesWalkPath(childRelPath, context.config)) {
         context.out.push(childRelPath);
       }
       continue;
     }
-    if (context.recursive && entry.isDirectory()) {
-      subdirectories.push({
-        path: join(dirPath, entry.name),
-        prefix: childRelPath,
-      });
+    if (context.recursive && kind === "directory") {
+      subdirectories.push({ path: childPath, prefix: childRelPath });
     }
   }
 
@@ -674,7 +825,11 @@ async function collectEligibleFiles(
  * - Discovery parity with `FileWalker.walk`'s `Bun.Glob.scan` step:
  *   - symlink entries are skipped entirely (`followSymlinks: false`), including
  *     symlinks resolving to a regular file inside the collection root;
- *     `Dirent.isFile()` uses `lstat` semantics, so this is exact parity;
+ *     `Dirent.isFile()` uses `lstat` semantics, so this is exact parity - and
+ *     an entry whose `Dirent` carries no type at all (`DT_UNKNOWN`, which some
+ *     network and FUSE mounts return for every entry) is resolved by a
+ *     no-follow `lstat` rather than silently omitted, so the same parity holds
+ *     there;
  *   - the REQUESTED directory and its ancestors get the same treatment: a
  *     symlink anywhere below the root is not walked into, so an in-root alias
  *     reports `skipped` rather than the target's files;

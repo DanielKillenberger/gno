@@ -1,3 +1,5 @@
+import type { Dirent } from "node:fs";
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   chmod,
@@ -10,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { DirectoryEnumerationHooks } from "../../src/ingestion/directory-children";
 import type { WalkConfig } from "../../src/ingestion/types";
 
 import {
@@ -620,6 +623,204 @@ describe("listEligibleSubtreeFiles", () => {
         walkConfig(root, { pattern: "**/*.md" })
       )
     ).toEqual({ status: "present", relPaths: ["dir1/sub/kept.md"] });
+  });
+});
+
+/**
+ * `readdir(..., { withFileTypes: true })` does not always know what an entry
+ * is. Several network and FUSE mounts - a NAS- or sshfs-mounted collection is
+ * an ordinary GNO setup, not an exotic one - return `DT_UNKNOWN` for every
+ * entry, and a `Dirent` carrying that type answers `false` to `isFile()` AND
+ * `isDirectory()` at once.
+ *
+ * Against 433e7d4b such an entry matched neither branch of the collect loop and
+ * was silently omitted: direct reconciliation missed the replacement file an
+ * atomic save leaves behind, and the recursive path skipped whole
+ * subdirectories, leaving their content unindexed until a full `gno update`.
+ *
+ * No local filesystem can be made to emit `DT_UNKNOWN` on demand, so the type
+ * is blanked through the `afterReadDirectory` seam rather than by requiring a
+ * FUSE mount; the DISK below the blanked entry is real, which is what the
+ * fallback `lstat` reads.
+ */
+describe("entries whose Dirent carries no type (DT_UNKNOWN)", () => {
+  let base = "";
+  let root = "";
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), "gno-dir-unknown-"));
+    root = join(base, "root");
+    await mkdir(root);
+  });
+
+  afterEach(async () => {
+    await safeRm(base);
+  });
+
+  /** The same entry, with every type predicate answering false. */
+  function untyped(entry: Dirent): Dirent {
+    const no = () => false;
+    return {
+      name: entry.name,
+      parentPath: entry.parentPath,
+      path: entry.parentPath,
+      isFile: no,
+      isDirectory: no,
+      isSymbolicLink: no,
+      isBlockDevice: no,
+      isCharacterDevice: no,
+      isFIFO: no,
+      isSocket: no,
+    } as unknown as Dirent;
+  }
+
+  /** Blank the type of the named entries, wherever they are read. */
+  function blankTypes(names: string[]): DirectoryEnumerationHooks {
+    return {
+      afterReadDirectory: (_absPath, entries) =>
+        entries.map((entry) =>
+          names.includes(entry.name) ? untyped(entry) : entry
+        ),
+    };
+  }
+
+  /**
+   * Discriminating against 433e7d4b: there the untyped `note.md` matched
+   * neither branch and the result was `{present, []}`.
+   */
+  test("includes an untyped entry that is an eligible file", async () => {
+    await writeFile(join(root, "note.md"), "a");
+    await writeFile(join(root, "image.png"), "b");
+
+    expect(
+      await listEligibleDirectChildren(
+        "",
+        walkConfig(root, { pattern: "**/*.md" }),
+        blankTypes(["note.md", "image.png"])
+      )
+    ).toEqual({ status: "present", relPaths: ["note.md"] });
+  });
+
+  /**
+   * Discriminating against 433e7d4b: the untyped `sub` was not pushed onto the
+   * descent list, so `dir1/sub/inner.md` never appeared and the recursive
+   * enumeration returned `["dir1/top.md"]` alone.
+   */
+  test("descends into an untyped entry that is a directory", async () => {
+    await mkdir(join(root, "dir1", "sub"), { recursive: true });
+    await writeFile(join(root, "dir1", "top.md"), "a");
+    await writeFile(join(root, "dir1", "sub", "inner.md"), "b");
+
+    expect(
+      await listEligibleSubtreeFiles(
+        "dir1",
+        walkConfig(root),
+        blankTypes(["sub"])
+      )
+    ).toEqual({
+      status: "present",
+      relPaths: ["dir1/sub/inner.md", "dir1/top.md"],
+    });
+  });
+
+  /**
+   * The no-follow policy holds for the fallback too. A following `stat` would
+   * classify these as a plain file and a plain directory and index content the
+   * walker never reaches - which is the whole reason the fallback is `lstat`.
+   *
+   * Not a direction pin: against a `stat`-based fallback the first assertion
+   * gains `link.md` and the second gains `linkdir/far.md`. Against 433e7d4b it
+   * passes for the wrong reason (everything untyped was dropped), so the
+   * file/directory tests above are what discriminate there.
+   */
+  test("still skips an untyped entry that is really a symlink", async () => {
+    const outside = join(base, "outside");
+    await mkdir(join(outside, "deep"), { recursive: true });
+    await writeFile(join(outside, "target.md"), "x");
+    await writeFile(join(outside, "deep", "far.md"), "y");
+
+    await writeFile(join(root, "real.md"), "a");
+    await symlink(join(outside, "target.md"), join(root, "link.md"));
+    await symlink(join(outside, "deep"), join(root, "linkdir"), "dir");
+
+    const hooks = blankTypes(["link.md", "linkdir"]);
+
+    expect(
+      await listEligibleDirectChildren("", walkConfig(root), hooks)
+    ).toEqual({ status: "present", relPaths: ["real.md"] });
+    // The recursive path does not descend through it either.
+    expect(await listEligibleSubtreeFiles("", walkConfig(root), hooks)).toEqual(
+      {
+        status: "present",
+        relPaths: ["real.md"],
+      }
+    );
+    // ...and the walker agrees: a full sync indexes neither.
+    expect(
+      (await new FileWalker().walk(walkConfig(root))).entries
+        .map((entry) => entry.relPath)
+        .sort()
+    ).toEqual(["real.md"]);
+  });
+
+  /**
+   * The fallback is a second syscall, so the entry can be gone by the time it
+   * runs - exactly the atomic-save window this seam exists for. That is not a
+   * failure: the entry contributes nothing and its siblings are still an
+   * authoritative list, the same answer a nested directory that vanishes
+   * mid-walk already gets.
+   *
+   * Discriminating on the status against a fallback that let ENOENT reach the
+   * generic error path: that returns `{status: "error"}` and the whole
+   * reconciliation produces no candidates at all.
+   */
+  test("an entry that vanishes before the fallback stat contributes nothing", async () => {
+    await writeFile(join(root, "gone.md"), "a");
+    await writeFile(join(root, "stays.md"), "b");
+
+    const rootReal = await realpath(root);
+    let statted = "";
+    const outcome = await listEligibleDirectChildren("", walkConfig(root), {
+      ...blankTypes(["gone.md"]),
+      beforeStatUnknownEntry: async (absPath) => {
+        statted = absPath;
+        await safeRm(absPath);
+      },
+    });
+
+    expect(statted).toBe(join(rootReal, "gone.md"));
+    expect(outcome).toEqual({ status: "present", relPaths: ["stays.md"] });
+  });
+
+  /**
+   * The fallback is paid for ONLY when the type is genuinely unknown. Every
+   * ordinary local filesystem fills the type in, so this asserts the normal
+   * path costs no extra syscall at all - including for the entries that are
+   * skipped anyway (a symlink, a directory in the non-recursive case).
+   */
+  test("a normally typed Dirent costs no fallback stat", async () => {
+    await mkdir(join(root, "dir1", "sub"), { recursive: true });
+    await writeFile(join(root, "dir1", "top.md"), "a");
+    await writeFile(join(root, "dir1", "sub", "inner.md"), "b");
+    await symlink(join(root, "dir1", "top.md"), join(root, "dir1", "link.md"));
+
+    const statted: string[] = [];
+    const hooks: DirectoryEnumerationHooks = {
+      beforeStatUnknownEntry: (absPath) => {
+        statted.push(absPath);
+      },
+    };
+
+    expect(
+      await listEligibleDirectChildren("dir1", walkConfig(root), hooks)
+    ).toEqual({ status: "present", relPaths: ["dir1/top.md"] });
+    expect(
+      await listEligibleSubtreeFiles("dir1", walkConfig(root), hooks)
+    ).toEqual({
+      status: "present",
+      relPaths: ["dir1/sub/inner.md", "dir1/top.md"],
+    });
+    expect(statted).toEqual([]);
   });
 });
 

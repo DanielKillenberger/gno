@@ -395,6 +395,25 @@ proportional to the event.
   known application-originated writes. Ineligible files remain unindexed even when
   their event causes directory reconciliation.
 
+  Discovery parity with the walker holds for entries the filesystem refuses to
+  TYPE, too. `readdir(..., { withFileTypes: true })` returns `DT_UNKNOWN` for
+  every entry on several network and FUSE mounts — a NAS- or sshfs-mounted
+  collection is an ordinary GNO setup — and such a `Dirent` answers `false` to
+  `isFile()` and `isDirectory()` at once. Reconciliation resolves that entry
+  with a NO-FOLLOW `lstat` instead of omitting it, so an eligible file is still
+  reported and an untyped subdirectory is still descended in the recursive
+  case. This is parity, not a new rule: `Bun.Glob.scan` resolves its own
+  `unknown` entry kind with an `lstatat` on both measured Bun versions, so a
+  full `gno update` indexes these files and dropping them here made the two
+  disagree — an atomic save whose only event named an ineligible temporary name
+  lost the replacement file, and content written into an untyped subdirectory
+  stayed unindexed until a full update. The no-follow policy is unchanged by
+  the fallback: a symlink discovered this way is skipped exactly as a
+  `Dirent`-typed symlink is, and a typed `Dirent` costs no stat at all. The
+  fallback's own failures split the way the surrounding enumeration already
+  splits them: an entry that vanished between the `readdir` and the `lstat`
+  contributes nothing, anything else fails closed (R9).
+
   Preserving `exclude` means preserving it at the level it is defined for. It is
   a FILE-level rule, and the walker applies it to files; a DIRECTORY is pruned
   from reconciliation only by an exclusion that provably covers every STRICT
@@ -814,6 +833,11 @@ proportional to the event.
   pruned, so `child.txt` deactivates. Directory pruning is limited to exclusions
   that provably cover descendants — see R4.
 
+  The bounded recursive read that covers the recreated case reaches untyped
+  subdirectories as well: a `DT_UNKNOWN` `Dirent` is resolved no-follow rather
+  than skipped, so a recreated subtree on a network or FUSE mount is
+  reconciled at depth like any other — see R4.
+
   It also holds when the directory was replaced by a symlink pointing OUTSIDE
   the collection: that enumeration is `skipped`, not `error`, so the removed
   subtree's indexed side is still consulted and deactivated — see R4.
@@ -881,7 +905,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path; containment enforced at traversal time over the unresolved component chain (verified before the read, re-proven after it) with every DETECTED change failing closed — explicitly NOT race-free, since a swap undone before the re-check or one preserving `(dev, ino)` cannot be excluded without dirfd-relative no-follow primitives Node/Bun does not expose; the walker's no-follow reachability rule (no symlink component below the root, leaf included, files as well as directories) lives in ONE place beside eligibility (`checkWalkPathVisibility`) and is enforced by `syncPaths` itself, so an unreachable indexed path deactivates through the ordinary batch — with its generation revalidation, per-path `markInactive`, events, scheduler notification, counts and typed-edge projection — rather than through a private store-mutation path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path; containment enforced at traversal time over the unresolved component chain (verified before the read, re-proven after it) with every DETECTED change failing closed — explicitly NOT race-free, since a swap undone before the re-check or one preserving `(dev, ino)` cannot be excluded without dirfd-relative no-follow primitives Node/Bun does not expose; entries whose `Dirent` carries no type (`DT_UNKNOWN`, ordinary on network/FUSE mounts) resolved by a no-follow `lstat` rather than dropped, matching `Bun.Glob.scan`'s own `unknown` arm, with a vanished entry contributing nothing and any other stat failure failing closed, and no stat at all for a typed `Dirent`; the walker's no-follow reachability rule (no symlink component below the root, leaf included, files as well as directories) lives in ONE place beside eligibility (`checkWalkPathVisibility`) and is enforced by `syncPaths` itself, so an unreachable indexed path deactivates through the ordinary batch — with its generation revalidation, per-path `markInactive`, events, scheduler notification, counts and typed-edge projection — rather than through a private store-mutation path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection, published from the ELIGIBLE observation rather than the latest one seen, and carried beside the capped witness set so a stream past the observation cap still publishes the latest ACCEPTED observation; per-directory sync outcomes only where the failure is owned by a batched path, with the unattributable cause summarized once per sync result, bounded, and skipped when no observer is installed | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — |
