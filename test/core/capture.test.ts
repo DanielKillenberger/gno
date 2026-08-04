@@ -3,12 +3,16 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { CaptureSource } from "../../src/core/capture";
+
 import {
   buildCaptureReceipt,
   extractCaptureSourceFromFrontmatter,
+  hasDeclaredCaptureSource,
   hashCaptureContent,
   mergeCaptureFrontmatter,
   planCapture,
+  validateDeclaredCaptureProvenance,
 } from "../../src/core/capture";
 import { writeCapturePlanFile } from "../../src/core/capture-write";
 
@@ -297,6 +301,145 @@ describe("capture core", () => {
     expect(source.docid).toBe("#abc");
     expect(source.kind).toBe("file");
     expect(source.uri).toBe("gno://notes/source.pdf");
+  });
+
+  test("retains invalid browser clip declarations for provenance audits", () => {
+    for (const declaration of ['{"sourceUrl":"not-a-url"}', "{bad-json}"]) {
+      const source = extractCaptureSourceFromFrontmatter(
+        [
+          "---",
+          "source:",
+          '  kind: "web"',
+          '  capturedAt: "2026-06-04T12:34:56.000Z"',
+          `  browserClip: ${declaration}`,
+          "---",
+          "",
+        ].join("\n")
+      );
+      expect(validateDeclaredCaptureProvenance(source)).toContainEqual({
+        field: "source.browserClip",
+        reason: "invalid",
+      });
+    }
+  });
+
+  test("extracts valid source mappings at their declared YAML indentation", () => {
+    const source = extractCaptureSourceFromFrontmatter(
+      [
+        "---",
+        "source:",
+        " kind: web",
+        ' capturedAt: "2026-06-04T12:34:56.000Z"',
+        "---",
+        "",
+      ].join("\n")
+    );
+
+    expect(source).toMatchObject({
+      kind: "web",
+      capturedAt: "2026-06-04T12:34:56.000Z",
+    });
+    expect(validateDeclaredCaptureProvenance(source)).toEqual([]);
+  });
+
+  test("retains block browser clip mappings for provenance validation", () => {
+    const source = extractCaptureSourceFromFrontmatter(
+      [
+        "---",
+        "source:",
+        "  kind: web",
+        '  capturedAt: "2026-06-04T12:34:56.000Z"',
+        "  browserClip:",
+        '    schemaVersion: "0.9"',
+        "---",
+        "",
+      ].join("\n")
+    );
+
+    expect(source.browserClip as unknown).toEqual({ schemaVersion: "0.9" });
+    expect(validateDeclaredCaptureProvenance(source)).toContainEqual({
+      field: "source.browserClip",
+      reason: "invalid",
+    });
+  });
+
+  test("extracts and recognizes inline capture source mappings", () => {
+    for (const content of [
+      "---\nsource: { kind: web }\n---\n",
+      "---\nsource: { kind: web } # imported\n---\n",
+    ]) {
+      const source = extractCaptureSourceFromFrontmatter(content);
+      expect(hasDeclaredCaptureSource(content)).toBe(true);
+      expect(source.kind).toBe("web");
+      expect(validateDeclaredCaptureProvenance(source)).toContainEqual({
+        field: "source.capturedAt",
+        reason: "missing",
+      });
+    }
+  });
+
+  test("validates optional declared provenance timestamps", () => {
+    expect(
+      validateDeclaredCaptureProvenance({
+        kind: "web",
+        capturedAt: "2026-06-04T12:34:56.000Z",
+        observedAt: "not-a-date",
+        publishedAt: "also-not-a-date",
+      })
+    ).toEqual([
+      { field: "source.observedAt", reason: "invalid" },
+      { field: "source.publishedAt", reason: "invalid" },
+    ]);
+  });
+
+  test("rejects non-string optional capture source fields", () => {
+    for (const field of [
+      "title",
+      "docid",
+      "mime",
+      "ext",
+      "author",
+      "site",
+      "externalId",
+    ] as const) {
+      const source = {
+        kind: "web",
+        capturedAt: "2026-06-04T12:34:56.000Z",
+        [field]: 123,
+      } as unknown as Partial<CaptureSource>;
+      expect(validateDeclaredCaptureProvenance(source)).toContainEqual({
+        field: `source.${field}`,
+        reason: "invalid",
+      });
+    }
+  });
+
+  test("preserves and rejects non-string capturedAt scalars", () => {
+    for (const content of [
+      "---\nsource:\n  kind: web\n  capturedAt: 123\n---\n",
+      "---\nsource: { kind: web, capturedAt: 123 }\n---\n",
+    ]) {
+      const source = extractCaptureSourceFromFrontmatter(content);
+      expect(source.capturedAt as unknown).toBe(123);
+      expect(validateDeclaredCaptureProvenance(source)).toContainEqual({
+        field: "source.capturedAt",
+        reason: "invalid",
+      });
+    }
+  });
+
+  test("distinguishes capture provenance from ordinary source lists", () => {
+    expect(
+      hasDeclaredCaptureSource(
+        "---\nsource:\n  - https://example.com/one\n  - https://example.com/two\n---\n"
+      )
+    ).toBe(false);
+    expect(
+      hasDeclaredCaptureSource(
+        '---\nsource:\n  kind: "web"\n  capturedAt: "2026-06-04T12:34:56.000Z"\n---\n'
+      )
+    ).toBe(true);
+    expect(hasDeclaredCaptureSource("---\nsource: {}\n---\n")).toBe(true);
   });
 
   test("builds receipt with explicit sync and embed statuses", () => {

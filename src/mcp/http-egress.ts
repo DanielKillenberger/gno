@@ -17,6 +17,7 @@ import { evaluateEgressPolicy } from "../core/egress-policy";
 export const MCP_HTTP_EGRESS_TOOLS = {
   gno_add_collection: "metadata",
   gno_ask: "capsule",
+  gno_audit: "metadata",
   gno_backlinks: "metadata",
   gno_capture: "metadata",
   gno_changes: "metadata",
@@ -125,6 +126,13 @@ const requestedCollections = (
   const names = new Set<string>();
   const direct = args.collection;
   if (typeof direct === "string") names.add(direct.trim().toLowerCase());
+  if (record?.name === "gno_audit" && Array.isArray(args.collections)) {
+    for (const value of args.collections) {
+      if (typeof value !== "string") continue;
+      const normalized = value.trim().toLowerCase();
+      if (normalized) names.add(normalized);
+    }
+  }
   for (const key of ["ref", "target", "from", "to", "root", "uri"]) {
     const collection = collectionFromRef(args[key]);
     if (collection) names.add(collection);

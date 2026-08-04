@@ -515,6 +515,28 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     }
   }
 
+  /** Open an existing index with SQLite enforced query-only semantics. */
+  openReadOnly(dbPath: string): StoreResult<void> {
+    try {
+      this.db = new Database(dbPath, { readonly: true, strict: true });
+      this.dbPath = dbPath;
+      this.db.exec("PRAGMA query_only = ON");
+      this.db.exec("PRAGMA busy_timeout = 5000");
+      this.contextGeneration += 1;
+      return ok(undefined);
+    } catch (cause) {
+      this.db?.close();
+      this.db = null;
+      return err(
+        "CONNECTION_FAILED",
+        cause instanceof Error
+          ? cause.message
+          : "Failed to open database read-only",
+        cause
+      );
+    }
+  }
+
   async close(): Promise<void> {
     if (this.db) {
       this.db.close();
@@ -1554,6 +1576,66 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       return err(
         "QUERY_FAILED",
         cause instanceof Error ? cause.message : "Failed to list documents",
+        cause
+      );
+    }
+  }
+
+  async listDocumentsForAudit(options: {
+    collections: readonly string[];
+    pathPrefixes: readonly string[];
+    tags: readonly string[];
+    limit: number;
+  }): Promise<StoreResult<{ documents: DocumentRow[]; total: number }>> {
+    try {
+      const db = this.ensureOpen();
+      const conditions = ["d.active = 1"];
+      const params: (string | number)[] = [];
+      if (options.collections.length > 0) {
+        conditions.push("d.collection IN (SELECT value FROM json_each(?))");
+        params.push(JSON.stringify(options.collections));
+      }
+      if (options.pathPrefixes.length > 0) {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM json_each(?) prefix
+          WHERE COALESCE(NULLIF(d.record_source_path, ''), d.rel_path) = prefix.value
+             OR (substr(COALESCE(NULLIF(d.record_source_path, ''), d.rel_path), 1, length(prefix.value)) = prefix.value
+               AND substr(COALESCE(NULLIF(d.record_source_path, ''), d.rel_path), length(prefix.value) + 1, 1) = '/')
+        )`);
+        params.push(JSON.stringify(options.pathPrefixes));
+      }
+      if (options.tags.length > 0) {
+        conditions.push(`NOT EXISTS (
+          SELECT 1 FROM json_each(?) requested_tag
+          WHERE NOT EXISTS (
+            SELECT 1 FROM doc_tags dt
+            WHERE dt.document_id = d.id AND dt.tag = requested_tag.value
+          )
+        )`);
+        params.push(JSON.stringify(options.tags));
+      }
+      const where = conditions.join(" AND ");
+      const total =
+        db
+          .query<{ count: number }, (string | number)[]>(
+            `SELECT COUNT(*) AS count FROM documents d WHERE ${where}`
+          )
+          .get(...params)?.count ?? 0;
+      const rows = db
+        .query<DbDocumentRow, (string | number)[]>(
+          `SELECT d.* FROM documents d
+           WHERE ${where}
+           ORDER BY d.id
+           LIMIT ?`
+        )
+        .all(...params, options.limit);
+      return ok({ documents: rows.map(mapDocumentRow), total });
+    } catch (cause) {
+      return err(
+        "QUERY_FAILED",
+        cause instanceof Error
+          ? cause.message
+          : "Failed to select bounded audit documents",
         cause
       );
     }

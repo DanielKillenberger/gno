@@ -176,6 +176,70 @@ const CAPTURE_SOURCE_STRING_KEYS = new Set([
   "externalId",
 ]);
 
+export const CAPTURE_PROVENANCE_REQUIRED_FIELDS = [
+  "kind",
+  "capturedAt",
+] as const;
+
+export interface CaptureProvenanceIssue {
+  field: string;
+  reason: "missing" | "invalid";
+}
+
+/** Validate only fields declared by the CaptureSource contract. */
+export const validateDeclaredCaptureProvenance = (
+  source: Partial<CaptureSource>
+): CaptureProvenanceIssue[] => {
+  const issues: CaptureProvenanceIssue[] = [];
+  if (!source.kind) issues.push({ field: "source.kind", reason: "missing" });
+  else if (!VALID_SOURCE_KINDS.has(source.kind))
+    issues.push({ field: "source.kind", reason: "invalid" });
+  const capturedAt = source.capturedAt as unknown;
+  if (capturedAt === undefined || capturedAt === null || capturedAt === "")
+    issues.push({ field: "source.capturedAt", reason: "missing" });
+  else if (
+    typeof capturedAt !== "string" ||
+    Number.isNaN(new Date(capturedAt).getTime())
+  )
+    issues.push({ field: "source.capturedAt", reason: "invalid" });
+  for (const field of ["observedAt", "publishedAt"] as const) {
+    const value = source[field];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || Number.isNaN(new Date(value).getTime())) {
+      issues.push({ field: `source.${field}`, reason: "invalid" });
+    }
+  }
+  for (const field of URL_SOURCE_FIELDS) {
+    const value = source[field as keyof CaptureSource];
+    if (value === undefined) continue;
+    if (typeof value !== "string") {
+      issues.push({ field: `source.${field}`, reason: "invalid" });
+      continue;
+    }
+    try {
+      new URL(value);
+    } catch {
+      issues.push({ field: `source.${field}`, reason: "invalid" });
+    }
+  }
+  for (const field of CAPTURE_SOURCE_STRING_KEYS) {
+    if (URL_SOURCE_FIELDS.has(field) || field === "publishedAt") continue;
+    const value = source[field as keyof CaptureSource];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      issues.push({ field: `source.${field}`, reason: "invalid" });
+    }
+  }
+  if (
+    source.browserClip !== undefined &&
+    !browserClipProvenanceSchema.safeParse(source.browserClip).success
+  ) {
+    issues.push({ field: "source.browserClip", reason: "invalid" });
+  }
+  return issues.sort((left, right) =>
+    left.field < right.field ? -1 : left.field > right.field ? 1 : 0
+  );
+};
+
 function normalizeContentForHash(content: string): string {
   return content.replace(/\r\n/g, "\n").trim();
 }
@@ -468,11 +532,35 @@ function shouldSkipNestedFrontmatterLine(line: string): boolean {
   return line.startsWith("  ") || line.trim() === "";
 }
 
+const parseFrontmatterScalar = (rawValue: string): unknown => {
+  try {
+    return (Bun.YAML.parse(`value: ${rawValue}`) as { value?: unknown }).value;
+  } catch {
+    return stripYamlString(rawValue);
+  }
+};
+
 export function extractCaptureSourceFromFrontmatter(
   content: string
 ): Partial<CaptureSource> {
   const { lines } = splitFrontmatter(content);
   const source: Partial<CaptureSource> = {};
+  let parsedSourceMapping = false;
+  try {
+    const parsed = Bun.YAML.parse(lines.join("\n")) as { source?: unknown };
+    if (
+      parsed.source !== null &&
+      typeof parsed.source === "object" &&
+      !Array.isArray(parsed.source)
+    ) {
+      parsedSourceMapping = true;
+      for (const [key, value] of Object.entries(parsed.source)) {
+        source[key as keyof CaptureSource] = value as never;
+      }
+    }
+  } catch {
+    // Invalid YAML falls through to the declaration-preserving parser below.
+  }
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (line === undefined) {
@@ -505,6 +593,30 @@ export function extractCaptureSourceFromFrontmatter(
     if (key !== "source") {
       continue;
     }
+    if (parsedSourceMapping) {
+      continue;
+    }
+    if (rawValue) {
+      try {
+        const parsed = Bun.YAML.parse(`source: ${rawValue}`) as {
+          source?: unknown;
+        };
+        if (
+          parsed.source !== null &&
+          typeof parsed.source === "object" &&
+          !Array.isArray(parsed.source)
+        ) {
+          for (const [nestedKey, nestedValue] of Object.entries(
+            parsed.source
+          )) {
+            source[nestedKey as keyof CaptureSource] = nestedValue as never;
+          }
+        }
+      } catch {
+        // Invalid inline YAML remains declaration-visible to the audit.
+      }
+      continue;
+    }
     for (
       let nestedIndex = index + 1;
       nestedIndex < lines.length;
@@ -527,18 +639,99 @@ export function extractCaptureSourceFromFrontmatter(
           try {
             const parsed = JSON.parse(nestedValue) as unknown;
             const provenance = browserClipProvenanceSchema.safeParse(parsed);
-            if (provenance.success) source.browserClip = provenance.data;
+            // Retain invalid declarations so provenance audits can report them.
+            // Runtime consumers only inspect known fields via optional chaining.
+            source.browserClip = provenance.success
+              ? provenance.data
+              : (parsed as BrowserClipProvenance);
           } catch {
-            // Ignore malformed optional browser provenance.
+            source.browserClip = {} as BrowserClipProvenance;
           }
           continue;
         }
-        source[nestedKey] = stripYamlString(nestedValue) as never;
+        source[nestedKey] = parseFrontmatterScalar(nestedValue) as never;
       }
     }
   }
   return source;
 }
+
+/** Whether a note explicitly declares the CaptureSource frontmatter contract. */
+export const hasDeclaredCaptureSource = (content: string): boolean => {
+  const { lines } = splitFrontmatter(content);
+  const captureKeys = new Set<string>([
+    "kind",
+    "capturedAt",
+    "url",
+    "docid",
+    "uri",
+    "mime",
+    "ext",
+    "title",
+    "author",
+    "canonicalUrl",
+    "site",
+    "publishedAt",
+    "observedAt",
+    "externalId",
+    "browserClip",
+  ]);
+  try {
+    const parsed = Bun.YAML.parse(lines.join("\n")) as { source?: unknown };
+    if (
+      parsed.source !== null &&
+      typeof parsed.source === "object" &&
+      !Array.isArray(parsed.source)
+    ) {
+      const keys = Object.keys(parsed.source);
+      if (keys.length === 0 || keys.some((key) => captureKeys.has(key))) {
+        return true;
+      }
+    }
+  } catch {
+    // Fall through to the declaration-preserving line parser below.
+  }
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined) continue;
+    const inlineSource = /^source\s*:\s*(\{.*\})\s*$/u.exec(line)?.[1];
+    if (inlineSource !== undefined) {
+      if (/^\{\s*\}$/u.test(inlineSource)) return true;
+      try {
+        const parsed = Bun.YAML.parse(`source: ${inlineSource}`) as {
+          source?: unknown;
+        };
+        if (
+          parsed.source !== null &&
+          typeof parsed.source === "object" &&
+          !Array.isArray(parsed.source) &&
+          Object.keys(parsed.source).some((key) => captureKeys.has(key))
+        ) {
+          return true;
+        }
+      } catch {
+        return true;
+      }
+      continue;
+    }
+    if (!/^source\s*:\s*$/u.test(line)) continue;
+    for (
+      let nestedIndex = index + 1;
+      nestedIndex < lines.length;
+      nestedIndex += 1
+    ) {
+      const nested = lines[nestedIndex];
+      if (!nested?.startsWith("  ")) break;
+      const colonIndex = nested.indexOf(":");
+      if (colonIndex <= 0) continue;
+      const nestedKey = nested
+        .slice(0, colonIndex)
+        .trim() as keyof CaptureSource;
+      if (captureKeys.has(nestedKey)) return true;
+    }
+  }
+  return false;
+};
 
 function sourceFrontmatterLines(source: CaptureSource): string[] {
   const lines = ["source:"];
