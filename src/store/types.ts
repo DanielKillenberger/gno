@@ -1824,21 +1824,6 @@ export interface StorePort {
     collection?: string;
     limit: number;
     offset: number;
-    /**
-     * Filter to the logical records imported from ONE record container, by the
-     * container's own rel path. This is how a caller pages past the bounded
-     * `recordUris` page a write handle carries; served by
-     * `idx_documents_record_source_path`.
-     *
-     * ORDERING GUARANTEE: with this filter set, the listing is ordered by
-     * record path (`rel_path ASC, id ASC`) - the same order
-     * {@link StorePort.listRecordDocuments} returns, which is the order the
-     * handle's page was cut from - and `sortField`/`sortOrder` do not apply.
-     * The page and its continuation are one sequence, so
-     * `recordUris` concatenated with this listing at `offset = recordUris.length`
-     * visits every record exactly once.
-     */
-    recordSourcePath?: string;
     /** Filter to docs having ALL these tags (AND) */
     tagsAll?: string[];
     /** Filter to docs having ANY of these tags (OR) */

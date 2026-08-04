@@ -503,18 +503,12 @@ resolve is not something the API hands back.
 `recordUris` is a **bounded page**, not the container's contents: it lists at
 most the first 1,000 of `recordCount` records, and `recordUrisTruncated` says
 how many it omits. One valid export can hold six figures of records, so the
-result object never grows with the container. When the page is truncated,
-`reason` names the query that reaches the rest - list the collection filtered to
-the container path (REST:
-`GET /api/docs?collection=<collection>&recordSourcePath=<relPath>&offset=1000`).
+result object never grows with the container. `recordCount` is exact, so you
+always know how many records there are.
 
-The page and that continuation are **one sequence**: both are ordered by record
-path (ascending), so `recordUris` concatenated with the listing at
-`offset = recordUris.length` visits every record exactly once. Record path comes
-from the immutable record key, so the order survives a container rewrite. A
-`recordSourcePath` listing therefore ignores no sort silently - passing
-`sortField`/`sortOrder` with it is a validation error, as is a
-`recordSourcePath` that names no path.
+The records past the page are **not enumerable through this result**. There is
+no API for listing one container's records, so when the page is truncated
+`reason` states the limit and names no continuation - there is none to name.
 
 `duplicateNote()` keeps its single `uri` field, so when the copy's destination
 is a container extension it reports the same fact through `warnings` instead -

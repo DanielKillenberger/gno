@@ -25,9 +25,9 @@ export interface DocumentChangedEvent {
    * BOUNDED (`MAX_WRITTEN_RECORD_URIS`), and deliberately so: this frame is
    * JSON-encoded once per connected client on every write, which is the worst
    * possible place for a list whose length is the container's record count.
-   * `recordCount` is exact and `recordUrisTruncated` says what this page omits;
-   * a consumer that needs them all lists the collection filtered to
-   * `relPath` (`GET /api/docs?collection=…&recordSourcePath=…`).
+   * `recordCount` is exact and `recordUrisTruncated` says what this page omits.
+   * The omitted records are not reachable through the frame - there is no
+   * per-container record enumeration API, so the frame promises none.
    */
   recordUris?: string[];
   /** Exact number of logical records the container is indexed as. */

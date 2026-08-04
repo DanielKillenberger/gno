@@ -108,11 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `document-changed` frame for every connected SSE client. The handle now
   carries an exact `recordCount`, the first 1,000 record URIs — the same cap the
   record-import receipt already used — and `recordUrisTruncated`, on the REST job
-  result, the SSE event, and SDK `createNote()` alike. `GET /api/docs` gained a
-  `recordSourcePath` filter so the records a page omits stay reachable: it lists
-  one container's records with ordinary `limit`/`offset` paging, and a truncated
-  handle's `reason` names that exact query. Containers at or under 1,000 records
-  are unchanged apart from the two added fields.
+  result, the SSE event, and SDK `createNote()` alike. Containers at or under
+  1,000 records are unchanged apart from the two added fields. The records a
+  truncated page omits are **not** enumerable through the handle — there is no
+  per-container record listing API — and `reason` says exactly that rather than
+  implying a continuation.
 
 ## [1.34.0] - 2026-08-04
 

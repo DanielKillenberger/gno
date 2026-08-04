@@ -1659,13 +1659,11 @@ class GnoClientImpl implements GnoClient {
     // `recordUris` is a BOUNDED page, not the container's contents: a valid
     // export can hold six figures of records, and a result object that lists
     // every one of them is the same unbounded array the job/SSE handles refuse
-    // to carry. `recordCount` is exact and the rest are paged by the query the
-    // reason names.
+    // to carry. `recordCount` is exact; the records past the page are not
+    // enumerable from this result, and the reason says so rather than implying
+    // a continuation that does not exist.
     const page = captureWrittenRecordPage(indexed.records);
-    const truncated = captureWrittenRecordPageReason(page, {
-      collection: collection.name,
-      relPath: plan.relPath,
-    });
+    const truncated = captureWrittenRecordPageReason(page);
     return {
       kind: "record-container",
       ...page,

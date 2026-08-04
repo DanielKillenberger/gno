@@ -1150,24 +1150,21 @@ completed job settles it:
 | `kind`                | always                                 | `document` or `record-container`                                  |
 | `uri`                 | `kind: "document"`                     | Fetchable URI for the written path                                |
 | `recordCount`         | `kind:"record-container"`              | Exact number of logical records the container is indexed as       |
-| `recordUris`          | `kind:"record-container"`              | Fetchable URIs — the **first 1,000** records in record-path order |
+| `recordUris`          | `kind:"record-container"`              | Fetchable URIs — up to the **first 1,000** records                |
 | `recordUrisTruncated` | `kind:"record-container"`              | `recordCount - recordUris.length`: records this page omits        |
 | `reason`              | when there is something unusual to say | Container shape, a partial record import, and/or a truncated page |
 
 A `record-container` handle carries **no** `uri` field. `recordUris` is a
 **bounded page**, capped at 1,000 entries — the same cap the record-import
 receipt uses — because one valid container can hold six figures of records and
-this handle is retained on the completed job and encoded into an SSE frame. When
-`recordUrisTruncated > 0`, `reason` names the query that reaches the rest:
-`GET /api/docs?collection=<collection>&recordSourcePath=<relPath>&offset=1000`
-(see [List Documents](#list-documents)).
+this handle is retained on the completed job and encoded into an SSE frame.
+`recordCount` is exact, so you always know how many records the container has.
 
-**Ordering guarantee.** `recordUris` and that continuation query are one
-sequence, both ordered by **record path** (ascending, `id` breaking ties).
-Concatenating `recordUris` with the listing at `offset = recordUris.length`
-visits every record of the container exactly once — no skips, no duplicates.
-Record path is derived from the immutable record key, so the sequence is stable
-across a container rewrite; you may rely on it when paging. `reason` also discloses a _partial_
+**The records beyond the page are not enumerable through this handle.** There is
+no API for listing one container's records; when `recordUrisTruncated > 0`,
+`reason` says so and names no continuation, because there is none to name.
+
+`reason` also discloses a _partial_
 record import — records the adapter rejected (and therefore did not index) or a
 partial snapshot — which the container's own file status reports as an ordinary
 non-error. Broad sync jobs (`POST /api/sync`) write nothing of their own and
@@ -1278,16 +1275,15 @@ GET /api/docs?collection=notes&limit=20&offset=0&tagsAll=work&tagsAny=urgent,mee
 
 **Query Parameters**:
 
-| Param              | Type   | Default  | Description                                                                                                        |
-| :----------------- | :----- | :------- | :----------------------------------------------------------------------------------------------------------------- |
-| `collection`       | string | —        | Filter by collection name                                                                                          |
-| `recordSourcePath` | string | —        | Only the logical records imported from this record container (its rel path). Requires `collection`; fixes the sort |
-| `limit`            | number | 20       | Results per page (max 100)                                                                                         |
-| `offset`           | number | 0        | Pagination offset                                                                                                  |
-| `tagsAll`          | string | —        | Comma-separated tags (must have ALL)                                                                               |
-| `tagsAny`          | string | —        | Comma-separated tags (must have ANY)                                                                               |
-| `sortField`        | string | modified | `modified` or frontmatter date key                                                                                 |
-| `sortOrder`        | string | desc     | `asc` or `desc`                                                                                                    |
+| Param        | Type   | Default  | Description                          |
+| :----------- | :----- | :------- | :----------------------------------- |
+| `collection` | string | —        | Filter by collection name            |
+| `limit`      | number | 20       | Results per page (max 100)           |
+| `offset`     | number | 0        | Pagination offset                    |
+| `tagsAll`    | string | —        | Comma-separated tags (must have ALL) |
+| `tagsAny`    | string | —        | Comma-separated tags (must have ANY) |
+| `sortField`  | string | modified | `modified` or frontmatter date key   |
+| `sortOrder`  | string | desc     | `asc` or `desc`                      |
 
 **Response**:
 
@@ -1314,33 +1310,10 @@ GET /api/docs?collection=notes&limit=20&offset=0&tagsAll=work&tagsAny=urgent,mee
 }
 ```
 
-`recordSourcePath` is how you page a record container. A container (a `.jsonl`
-export, a `.vtt` transcript) is indexed as N logical records; a write handle
-hands back only the first 1,000 of their URIs (see
-[`result.written`](#job-status)), and this filter returns them all, `limit`/
-`offset` pages like any other listing, with `total` equal to the container's
-exact record count. Each returned `uri` is a fetchable record; `relPath` is the
-container's path, which is shared by every record.
-
-Because this listing is the **continuation** of the handle's page, it is ordered
-by **record path** (ascending, `id` breaking ties) — the same order the handle's
-`recordUris` is cut in, not the default `source_mtime` order. The response
-echoes that as `"sortField": "recordPath", "sortOrder": "asc"`. Supplying
-`sortField` or `sortOrder` alongside `recordSourcePath` is a `VALIDATION` error
-rather than a silently ignored parameter: any other order would break the
-`offset` the handle names.
-
-A supplied `recordSourcePath` that names no path — `""`, `/`, `///`, `\` — is
-also a `VALIDATION` error. It is never treated as "no filter", so this endpoint
-cannot answer a request for one container with a broader listing.
-
 **Example**:
 
 ```bash
 curl "http://localhost:3000/api/docs?collection=notes&limit=10" | jq
-
-# Records 1000-1099 of a large container
-curl "http://localhost:3000/api/docs?collection=records&recordSourcePath=export.jsonl&offset=1000&limit=100" | jq
 ```
 
 ---
@@ -1561,9 +1534,8 @@ for a container, `recordCount`, `recordUris`, and `recordUrisTruncated` — beca
 `uri` names the container FILE and resolves to no document. `recordUris` in an
 event is the same **bounded** 1,000-entry page the job handle carries, never the
 container's full record set: this frame is encoded once per connected client on
-every write. A consumer that needs every record lists them with
-`GET /api/docs?collection=<collection>&recordSourcePath=<relPath>`, which
-continues the event's page in the same record-path order (see
+every write. `recordCount` is exact, but the records the page omits are not
+enumerable from the event — there is no per-container record listing API (see
 [`result.written`](#job-status)). `kind` is
 absent from emitters that run no proof (the watcher), so treat an absent `kind`
 as unknown rather than as `document`.

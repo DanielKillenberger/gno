@@ -272,11 +272,11 @@ export interface CollectionSyncResult {
  * on a completed job for an hour and JSON-encoded into a broadcast SSE frame -
  * so an exhaustive list would put megabytes into both. `recordCount` is exact,
  * `recordUris` carries the first {@link MAX_WRITTEN_RECORD_URIS} of them, and
- * `recordUrisTruncated` says how many are not listed; the rest are paged by
- * listing the collection filtered to this container path (REST:
- * `GET /api/docs?collection=…&recordSourcePath=…&offset=…`). The bound matches
- * the record-import receipt's existing {@link MAX_RECORD_IMPORT_RECEIPT_ITEMS}
- * cap so one convention governs everything a sync hands back.
+ * `recordUrisTruncated` says how many are not listed. Those are NOT reachable
+ * through this handle by any other means - there is no per-container record
+ * enumeration API, and the handle claims none. The bound matches the
+ * record-import receipt's existing {@link MAX_RECORD_IMPORT_RECEIPT_ITEMS} cap
+ * so one convention governs everything a sync hands back.
  */
 export type WrittenPathHandle =
   | {

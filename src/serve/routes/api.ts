@@ -1778,18 +1778,6 @@ export async function handleDocs(
 ): Promise<Response> {
   const collection = url.searchParams.get("collection") || undefined;
   const pathPrefix = normalizeBrowsePath(url.searchParams.get("pathPrefix"));
-  // The records of one record container, by the container's own rel path. A
-  // write handle hands back a BOUNDED page of record URIs; this is the query
-  // that reaches the rest, so it pages with the same limit/offset as any other
-  // listing - and, because it is that page's continuation, in the page's own
-  // record-path order rather than the default mtime order.
-  //
-  // Kept as the RAW parameter beside the normalized one: `/`, `///`, `\` and
-  // `` all normalize to the empty string, and validating the normalized value
-  // would let every one of them through as "no filter supplied" and answer a
-  // request for one container with the whole collection.
-  const recordSourcePathParam = url.searchParams.get("recordSourcePath");
-  const recordSourcePath = normalizeBrowsePath(recordSourcePathParam);
   const directChildrenOnlyParam = (
     url.searchParams.get("directChildrenOnly") ?? ""
   )
@@ -1843,36 +1831,6 @@ export async function handleDocs(
     );
   }
 
-  // Presence, not the normalized result: a supplied-but-unusable
-  // recordSourcePath must never widen the listing.
-  if (recordSourcePathParam !== null) {
-    if (!collection) {
-      return errorResponse(
-        "VALIDATION",
-        "recordSourcePath requires a collection filter"
-      );
-    }
-    if (!recordSourcePath) {
-      return errorResponse(
-        "VALIDATION",
-        "recordSourcePath must name a record container path"
-      );
-    }
-    // This listing IS the continuation of the handle's record page, so its
-    // order is fixed to that page's order. Honouring a caller's sort would
-    // break the continuation; ignoring it silently is the same failure this
-    // block exists to prevent, so say so instead.
-    if (
-      url.searchParams.has("sortField") ||
-      url.searchParams.has("sortOrder")
-    ) {
-      return errorResponse(
-        "VALIDATION",
-        "recordSourcePath listings are ordered by record path; sortField and sortOrder do not apply"
-      );
-    }
-  }
-
   // Parse tag filters
   let tagsAll: string[] | undefined;
   let tagsAny: string[] | undefined;
@@ -1922,7 +1880,6 @@ export async function handleDocs(
     limit,
     offset,
     pathPrefix: pathPrefix || undefined,
-    recordSourcePath: recordSourcePath || undefined,
     directChildrenOnly,
     tagsAll,
     tagsAny,
@@ -1951,13 +1908,10 @@ export async function handleDocs(
     limit,
     offset,
     pathPrefix,
-    recordSourcePath,
     directChildrenOnly,
     availableDateFields,
-    // The order the caller actually got, so a record listing cannot be read as
-    // mtime-sorted: with `recordSourcePath` the store orders by record path.
-    sortField: recordSourcePath ? "recordPath" : sortFieldRaw,
-    sortOrder: recordSourcePath ? "asc" : sortOrder,
+    sortField: sortFieldRaw,
+    sortOrder,
   });
 }
 

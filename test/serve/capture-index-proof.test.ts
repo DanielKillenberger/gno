@@ -24,7 +24,6 @@ import { getJobStatus } from "../../src/serve/jobs";
 import {
   handleCreateCapture,
   handleCreateDoc,
-  handleDocs,
 } from "../../src/serve/routes/api";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
@@ -168,22 +167,13 @@ describe("REST create hands back a resolvable handle for a container", () => {
     .map((record) => JSON.stringify(record))
     .join("\n")}\n`;
 
-  const create = async (
-    relPath: string,
-    content: string,
-    overwrite = false
-  ) => {
+  const create = async (relPath: string, content: string) => {
     const res = await handleCreateDoc(
       ctxHolder,
       store,
       new Request("http://localhost/api/docs", {
         method: "POST",
-        body: JSON.stringify({
-          collection: "records",
-          relPath,
-          content,
-          ...(overwrite ? { overwrite: true } : {}),
-        }),
+        body: JSON.stringify({ collection: "records", relPath, content }),
       })
     );
     expect(res.status).toBe(202);
@@ -288,185 +278,6 @@ describe("REST create hands back a resolvable handle for a container", () => {
     expect(emitted?.recordCount).toBe(2);
     expect(emitted?.recordUrisTruncated).toBe(0);
     expect(emitted?.recordUris).toHaveLength(2);
-  });
-
-  test("the container's records are listable by the query the handle names", async () => {
-    // The bound must not reintroduce an unreachable record: whatever a
-    // truncated page omits has to be fetchable by a query that exists.
-    // DISCRIMINATING against fbbfdcaa: `recordSourcePath` was not a parameter
-    // there, so this returned the whole collection (and a caller past the page
-    // had nothing to page WITH).
-    const { job } = await create("listable.jsonl", RECORDS);
-    const written = job.result?.written;
-    const recordUris =
-      written?.kind === "record-container" ? written.recordUris : [];
-
-    const res = await handleDocs(
-      store,
-      new URL(
-        "http://localhost/api/docs?collection=records&recordSourcePath=listable.jsonl"
-      )
-    );
-    expect(res.status).toBe(200);
-    const listed = (await res.json()) as {
-      documents: Array<{ uri: string }>;
-      total: number;
-    };
-
-    expect(listed.total).toBe(2);
-    expect(listed.documents.map((doc) => doc.uri).sort()).toEqual(
-      [...recordUris].sort()
-    );
-
-    // Scoped to THIS container, not to every record in the collection: a
-    // second container's records must not leak into the page.
-    await create(
-      "other.jsonl",
-      `${JSON.stringify({ id: "three", title: "Third", text: "Elsewhere" })}\n`
-    );
-    const rescoped = await handleDocs(
-      store,
-      new URL(
-        "http://localhost/api/docs?collection=records&recordSourcePath=listable.jsonl"
-      )
-    );
-    const rescopedListed = (await rescoped.json()) as { total: number };
-    expect(rescopedListed.total).toBe(2);
-    const other = await handleDocs(
-      store,
-      new URL(
-        "http://localhost/api/docs?collection=records&recordSourcePath=other.jsonl"
-      )
-    );
-    const otherListed = (await other.json()) as { total: number };
-    expect(otherListed.total).toBe(1);
-
-    // And it is a filter, not a free-for-all: without a collection it refuses.
-    const unscoped = await handleDocs(
-      store,
-      new URL("http://localhost/api/docs?recordSourcePath=listable.jsonl")
-    );
-    expect(unscoped.status).toBe(400);
-  });
-
-  test("the handle's page and its continuation are one sequence", async () => {
-    // Overwriting a container and adding a record whose key sorts among the
-    // existing ones makes row id and record path interleave: the new record
-    // takes the highest id while its record path sorts FIRST. Every record of
-    // the container still carries the container's own mtime, so mtime cannot
-    // break the tie either way.
-    //
-    // DISCRIMINATING against 2f5a0b8d: the query ordered by
-    // `source_mtime DESC, id ASC` - here that is row id - while the handle's
-    // page was cut in record-path order. Splitting at offset 1 gave page [a]
-    // plus continuation [c, a]: `a` twice and `b` never.
-    const records = (keys: readonly string[]) =>
-      `${keys
-        .map((key) =>
-          JSON.stringify({ id: key, title: key, text: `Record ${key}` })
-        )
-        .join("\n")}\n`;
-    await create("interleaved.jsonl", records(["b", "c"]));
-    const { job } = await create(
-      "interleaved.jsonl",
-      records(["a", "b", "c"]),
-      true
-    );
-    const written = job.result?.written;
-    const recordUris =
-      written?.kind === "record-container" ? written.recordUris : [];
-    expect(recordUris).toHaveLength(3);
-
-    // The premise of the test, asserted rather than assumed: the two candidate
-    // orders really do disagree for this container.
-    const rows = await store.listRecordDocuments(
-      "records",
-      "interleaved.jsonl"
-    );
-    if (!rows.ok) throw new Error(rows.error.message);
-    const byRecordPath = rows.value.map((row) => row.uri);
-    const byId = [...rows.value]
-      .sort((left, right) => left.id - right.id)
-      .map((row) => row.uri);
-    expect(byRecordPath).not.toEqual(byId);
-    expect(recordUris).toEqual(byRecordPath);
-
-    // Page-then-continue, with the page cut one record in - the same split the
-    // 1,000-item cap makes on a real container, at a size a test can build.
-    const PAGE = 1;
-    const page = recordUris.slice(0, PAGE);
-    const res = await handleDocs(
-      store,
-      new URL(
-        `http://localhost/api/docs?collection=records&recordSourcePath=interleaved.jsonl&offset=${PAGE}&limit=100`
-      )
-    );
-    expect(res.status).toBe(200);
-    const listed = (await res.json()) as {
-      documents: Array<{ uri: string }>;
-      total: number;
-      sortField: string;
-      sortOrder: string;
-    };
-
-    const continuation = listed.documents.map((doc) => doc.uri);
-    const combined = [...page, ...continuation];
-    expect(combined).toEqual(recordUris);
-    expect(new Set(combined).size).toBe(listed.total);
-
-    // And the response says which order it served, so a caller need not guess.
-    expect(listed.sortField).toBe("recordPath");
-    expect(listed.sortOrder).toBe("asc");
-  });
-
-  test("a supplied-but-unusable recordSourcePath never widens the listing", async () => {
-    // DISCRIMINATING against 2f5a0b8d: the guard tested the NORMALIZED value,
-    // and `/`, `///`, `\` and `` all normalize to "", so each one fell through
-    // as "no filter supplied" and returned the whole collection.
-    await create("widened.jsonl", RECORDS);
-    await create("plain.md", "# Not a record container\n");
-
-    for (const supplied of ["/", "///", "\\", ""]) {
-      const res = await handleDocs(
-        store,
-        new URL(
-          `http://localhost/api/docs?collection=records&recordSourcePath=${encodeURIComponent(supplied)}`
-        )
-      );
-      expect(res.status).toBe(400);
-
-      // Without a collection either, it must still refuse rather than list the
-      // whole index.
-      const unscoped = await handleDocs(
-        store,
-        new URL(
-          `http://localhost/api/docs?recordSourcePath=${encodeURIComponent(supplied)}`
-        )
-      );
-      expect(unscoped.status).toBe(400);
-    }
-  });
-
-  test("a record listing refuses a sort it cannot honour", async () => {
-    // The continuation's order is fixed by the handle's page. Accepting
-    // sortField/sortOrder and ignoring them would be the same silent
-    // degradation, one level up.
-    await create("sorted.jsonl", RECORDS);
-
-    const res = await handleDocs(
-      store,
-      new URL(
-        "http://localhost/api/docs?collection=records&recordSourcePath=sorted.jsonl&sortOrder=desc"
-      )
-    );
-    expect(res.status).toBe(400);
-
-    // An unfiltered listing still sorts as it always did.
-    const ordinary = await handleDocs(
-      store,
-      new URL("http://localhost/api/docs?collection=records&sortOrder=desc")
-    );
-    expect(ordinary.status).toBe(200);
   });
 
   test("a clean container import says only that it is a container", async () => {

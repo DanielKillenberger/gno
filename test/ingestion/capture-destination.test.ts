@@ -767,13 +767,15 @@ describe("captureWrittenHandle - the record page is bounded", () => {
       "gno://records/.gno/records/export.jsonl/0"
     );
     expect(handle.recordUris).not.toContain("gno://records/export.jsonl");
-    // The omitted records are reachable, not merely absent.
+    // The bound is stated, and stated honestly: what the page omits is named
+    // as UNREACHABLE through this handle, not dressed up as a continuation.
+    // There is no per-container record listing API, so a `reason` that pointed
+    // at one would be a promise the API cannot keep.
     expect(handle.reason).toContain(
       `recordUris lists the first ${MAX_WRITTEN_RECORD_URIS} of ${MAX_WRITTEN_RECORD_URIS + 1} records`
     );
-    expect(handle.reason).toContain(
-      `GET /api/docs?collection=records&recordSourcePath=export.jsonl&offset=${MAX_WRITTEN_RECORD_URIS}`
-    );
+    expect(handle.reason).toContain("not enumerable through this handle");
+    expect(handle.reason).not.toContain("/api/docs");
     // The container fact is still stated first, unchanged.
     expect(handle.reason).toStartWith("Written as a record container:");
   });

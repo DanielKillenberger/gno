@@ -519,19 +519,12 @@ export const captureFileSyncResult = (
  * IMPORT receipt sitting beside it has been capped at
  * {@link MAX_WRITTEN_RECORD_URIS} items all along. Same cap here.
  *
- * Bounding must not cost the caller reachability, which is the whole point of
- * the handle: the page is the FIRST records (never empty for a proven
- * container), `recordCount` is exact, and the remainder is reachable by listing
- * the collection filtered to this container path.
- *
- * "First" is meant in ONE order, and it is the order the continuation query
- * uses: `records` arrives from `listRecordDocuments` in record-path order, and
- * `GET /api/docs?...&recordSourcePath=…` orders a record listing the same way
- * (see `RECORD_ORDER_SQL` in the sqlite adapter). Page and continuation are
- * therefore one sequence - concatenating this page with that query at
- * `offset = recordUris.length` visits every record exactly once. A page cut in
- * a different order from its continuation would skip and duplicate records,
- * which is worse than carrying no page at all.
+ * What the page costs is honestly stated rather than papered over: the page is
+ * the first records (never empty for a proven container) and `recordCount` is
+ * exact, but the records past the page are NOT reachable through this handle.
+ * There is no enumeration endpoint for one container's records, so the handle
+ * promises none - a caller that needs them all has to be told that plainly
+ * instead of being handed a continuation that does not exist.
  */
 export const captureWrittenRecordPage = (
   records: readonly Pick<DocumentRow, "uri">[]
@@ -555,21 +548,18 @@ export const captureWrittenRecordPage = (
  *
  * `undefined` when the page is complete, so the ordinary container - which is
  * every container under the cap - reads exactly as it did before.
+ *
+ * It states the limit and stops there. No continuation is named because none is
+ * supported: telling a caller to resume at an offset it cannot resume at would
+ * be a worse handle than one that admits its bound.
  */
-export const captureWrittenRecordPageReason = (
-  page: {
-    recordCount: number;
-    recordUris: string[];
-    recordUrisTruncated: number;
-  },
-  location: { collection: string; relPath: string }
-): string | undefined => {
+export const captureWrittenRecordPageReason = (page: {
+  recordCount: number;
+  recordUris: string[];
+  recordUrisTruncated: number;
+}): string | undefined => {
   if (page.recordUrisTruncated === 0) return undefined;
-  const query = `GET /api/docs?collection=${encodeURIComponent(location.collection)}&recordSourcePath=${encodeURIComponent(location.relPath)}&offset=${page.recordUris.length}`;
-  // The order is part of the promise, not colour: the caller is being told to
-  // resume at an OFFSET, which only continues the page if the query returns the
-  // same sequence the page was cut from.
-  return `recordUris lists the first ${page.recordUris.length} of ${page.recordCount} records, in record-path order; the remaining ${page.recordUrisTruncated} continue in that same order from the offset shown, by listing the collection filtered to this container path (${query}).`;
+  return `recordUris lists the first ${page.recordUris.length} of ${page.recordCount} records; the remaining ${page.recordUrisTruncated} are not enumerable through this handle.`;
 };
 
 /**
@@ -595,7 +585,7 @@ export const captureWrittenHandle = (
     };
   }
   const page = captureWrittenRecordPage(proof.records);
-  const fullReason = [reason, captureWrittenRecordPageReason(page, location)]
+  const fullReason = [reason, captureWrittenRecordPageReason(page)]
     .filter((part): part is string => part !== undefined)
     .join(" ");
   return {
