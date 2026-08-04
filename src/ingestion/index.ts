@@ -20,6 +20,8 @@ export {
   captureRecordImportReason,
   captureSyncReason,
   captureWrittenHandle,
+  captureWrittenRecordPage,
+  captureWrittenRecordPageReason,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
 } from "./capture-destination";
@@ -59,6 +61,10 @@ export type {
   WalkerPort,
   WrittenPathHandle,
 } from "./types";
-export { collectionToWalkConfig, DEFAULT_CHUNK_PARAMS } from "./types";
+export {
+  collectionToWalkConfig,
+  DEFAULT_CHUNK_PARAMS,
+  MAX_WRITTEN_RECORD_URIS,
+} from "./types";
 // Walker
 export { defaultWalker, FileWalker, matchesWalkPath } from "./walker";

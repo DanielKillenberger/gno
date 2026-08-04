@@ -24,6 +24,7 @@ import { getJobStatus } from "../../src/serve/jobs";
 import {
   handleCreateCapture,
   handleCreateDoc,
+  handleDocs,
 } from "../../src/serve/routes/api";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
@@ -256,6 +257,87 @@ describe("REST create hands back a resolvable handle for a container", () => {
     expect(emitted?.kind).toBe("record-container");
     expect(emitted?.recordUris).toEqual(recordUris);
     expect(emitted?.uri).toBe(body.uri);
+  });
+
+  test("the handle and the event carry bounded metadata, not the container", async () => {
+    // DISCRIMINATING against fbbfdcaa: neither the job handle nor the event
+    // frame carried a count or a truncation marker at all - `recordUris` WAS
+    // the container, one entry per record, retained on the job for an hour and
+    // re-encoded into the frame for every connected client.
+    const { job } = await create("bounded.jsonl", RECORDS);
+    const written = job.result?.written;
+
+    expect(written?.kind === "record-container" && written.recordCount).toBe(2);
+    expect(
+      written?.kind === "record-container" && written.recordUrisTruncated
+    ).toBe(0);
+
+    const emitted = events.find(
+      (event) =>
+        event.type === "document-changed" && event.relPath === "bounded.jsonl"
+    );
+    expect(emitted?.recordCount).toBe(2);
+    expect(emitted?.recordUrisTruncated).toBe(0);
+    expect(emitted?.recordUris).toHaveLength(2);
+  });
+
+  test("the container's records are listable by the query the handle names", async () => {
+    // The bound must not reintroduce an unreachable record: whatever a
+    // truncated page omits has to be fetchable by a query that exists.
+    // DISCRIMINATING against fbbfdcaa: `recordSourcePath` was not a parameter
+    // there, so this returned the whole collection (and a caller past the page
+    // had nothing to page WITH).
+    const { job } = await create("listable.jsonl", RECORDS);
+    const written = job.result?.written;
+    const recordUris =
+      written?.kind === "record-container" ? written.recordUris : [];
+
+    const res = await handleDocs(
+      store,
+      new URL(
+        "http://localhost/api/docs?collection=records&recordSourcePath=listable.jsonl"
+      )
+    );
+    expect(res.status).toBe(200);
+    const listed = (await res.json()) as {
+      documents: Array<{ uri: string }>;
+      total: number;
+    };
+
+    expect(listed.total).toBe(2);
+    expect(listed.documents.map((doc) => doc.uri).sort()).toEqual(
+      [...recordUris].sort()
+    );
+
+    // Scoped to THIS container, not to every record in the collection: a
+    // second container's records must not leak into the page.
+    await create(
+      "other.jsonl",
+      `${JSON.stringify({ id: "three", title: "Third", text: "Elsewhere" })}\n`
+    );
+    const rescoped = await handleDocs(
+      store,
+      new URL(
+        "http://localhost/api/docs?collection=records&recordSourcePath=listable.jsonl"
+      )
+    );
+    const rescopedListed = (await rescoped.json()) as { total: number };
+    expect(rescopedListed.total).toBe(2);
+    const other = await handleDocs(
+      store,
+      new URL(
+        "http://localhost/api/docs?collection=records&recordSourcePath=other.jsonl"
+      )
+    );
+    const otherListed = (await other.json()) as { total: number };
+    expect(otherListed.total).toBe(1);
+
+    // And it is a filter, not a free-for-all: without a collection it refuses.
+    const unscoped = await handleDocs(
+      store,
+      new URL("http://localhost/api/docs?recordSourcePath=listable.jsonl")
+    );
+    expect(unscoped.status).toBe(400);
   });
 
   test("a clean container import says only that it is a container", async () => {

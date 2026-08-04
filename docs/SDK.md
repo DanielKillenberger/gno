@@ -500,6 +500,14 @@ The written file is identified by `path`/`relPath` in both cases. The
 type-check until you narrow on `kind` - a URI that `client.get()` cannot
 resolve is not something the API hands back.
 
+`recordUris` is a **bounded page**, not the container's contents: it lists at
+most the first 1,000 of `recordCount` records, and `recordUrisTruncated` says
+how many it omits. One valid export can hold six figures of records, so the
+result object never grows with the container. When the page is truncated,
+`reason` names the query that reaches the rest - list the collection filtered to
+the container path (REST:
+`GET /api/docs?collection=<collection>&recordSourcePath=<relPath>&offset=1000`).
+
 `duplicateNote()` keeps its single `uri` field, so when the copy's destination
 is a container extension it reports the same fact through `warnings` instead -
 the copy is indexed as N records, and `uri` resolves to no document. REST

@@ -101,6 +101,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kind: "record-container"` with the records' `recordUris` and no `uri` field.
   The emitted `document-changed` event carries the same `kind`/`recordUris`.
 
+- Bounded the record-container write handle. `recordUris` listed every record a
+  container produced, and a valid container can hold six figures of them — so a
+  single write added a multi-megabyte array to a job the manager retains for an
+  hour (up to 100 of them) and JSON-encoded the same array into a
+  `document-changed` frame for every connected SSE client. The handle now
+  carries an exact `recordCount`, the first 1,000 record URIs — the same cap the
+  record-import receipt already used — and `recordUrisTruncated`, on the REST job
+  result, the SSE event, and SDK `createNote()` alike. `GET /api/docs` gained a
+  `recordSourcePath` filter so the records a page omits stay reachable: it lists
+  one container's records with ordinary `limit`/`offset` paging, and a truncated
+  handle's `reason` names that exact query. Containers at or under 1,000 records
+  are unchanged apart from the two added fields.
+
 ## [1.34.0] - 2026-08-04
 
 ### Added

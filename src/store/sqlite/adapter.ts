@@ -2061,6 +2061,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     limit: number;
     offset: number;
     pathPrefix?: string;
+    recordSourcePath?: string;
     directChildrenOnly?: boolean;
     tagsAll?: string[];
     tagsAny?: string[];
@@ -2096,6 +2097,17 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         ?.replaceAll("\\", "/")
         .replace(/^\/+|\/+$/g, "");
       const browsePathSql = "COALESCE(d.record_source_path, d.rel_path)";
+
+      // The records of ONE container, addressed by the container's own path.
+      // Compared against `record_source_path` rather than the browse path so it
+      // can never also match a plain document that happens to sit there.
+      const normalizedRecordSourcePath = options.recordSourcePath
+        ?.replaceAll("\\", "/")
+        .replace(/^\/+|\/+$/g, "");
+      if (normalizedRecordSourcePath) {
+        conditions.push("d.record_source_path = ?");
+        params.push(normalizedRecordSourcePath);
+      }
 
       if (normalizedPathPrefix) {
         conditions.push(`${browsePathSql} LIKE ?`);

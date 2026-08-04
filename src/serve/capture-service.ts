@@ -280,8 +280,14 @@ export const executeResidentCapturePlan = async (
         origin: "create",
         changedAt: new Date().toISOString(),
         kind: written.kind,
+        // Bounded metadata, never the container's contents: this frame is
+        // encoded once per connected client.
         ...(written.kind === "record-container"
-          ? { recordUris: written.recordUris }
+          ? {
+              recordUris: written.recordUris,
+              recordCount: written.recordCount,
+              recordUrisTruncated: written.recordUrisTruncated,
+            }
           : {}),
       });
       return {

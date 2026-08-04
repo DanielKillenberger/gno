@@ -266,9 +266,20 @@ export interface GnoCreatedNoteDocument extends GnoCreateNoteFile {
  */
 export interface GnoCreatedNoteRecordContainer extends GnoCreateNoteFile {
   kind: "record-container";
-  /** URIs of the logical records the container produced. Each is fetchable. */
+  /** Exact number of logical records the container produced. */
+  recordCount: number;
+  /**
+   * URIs of the logical records the container produced. Each is fetchable, and
+   * this is a BOUNDED page - the first `MAX_WRITTEN_RECORD_URIS` of
+   * `recordCount` - because a valid export can hold six figures of records.
+   */
   recordUris: string[];
-  /** Human-readable explanation of why there is no single document URI. */
+  /** `recordCount - recordUris.length`: records this page does not list. */
+  recordUrisTruncated: number;
+  /**
+   * Human-readable explanation of why there is no single document URI, and -
+   * when the page is truncated - how to reach the records it omits.
+   */
   reason: string;
 }
 

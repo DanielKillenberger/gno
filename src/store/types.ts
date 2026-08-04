@@ -1824,6 +1824,13 @@ export interface StorePort {
     collection?: string;
     limit: number;
     offset: number;
+    /**
+     * Filter to the logical records imported from ONE record container, by the
+     * container's own rel path. This is how a caller pages past the bounded
+     * `recordUris` page a write handle carries; served by
+     * `idx_documents_record_source_path`.
+     */
+    recordSourcePath?: string;
     /** Filter to docs having ALL these tags (AND) */
     tagsAll?: string[];
     /** Filter to docs having ANY of these tags (OR) */

@@ -34,6 +34,7 @@ import {
   requireActiveCaptureDocument,
 } from "../../src/ingestion/capture-destination";
 import { SyncService } from "../../src/ingestion/sync";
+import { MAX_WRITTEN_RECORD_URIS } from "../../src/ingestion/types";
 import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
 
@@ -691,5 +692,103 @@ describe("captureSyncReason - container shape and import completeness", () => {
       "gno://notes/note.md"
     );
     expect(document.reason).toBeUndefined();
+  });
+});
+
+/**
+ * A container is not a small thing, and the handle for one is retained and
+ * copied long past the write: the job manager keeps up to 100 completed jobs
+ * for an hour, and the `document-changed` frame is JSON-encoded once per
+ * connected SSE client. A handle that listed every record URI therefore turned
+ * one valid 100k-record export into megabytes of retained strings and a
+ * multi-megabyte event frame - while the record IMPORT receipt sitting beside
+ * it has been capped at 1,000 items all along.
+ *
+ * The cap must not cost reachability, which is the whole reason the handle
+ * exists: the page is non-empty, `recordCount` is exact, and the reason names
+ * the query that reaches the records the page omits.
+ */
+describe("captureWrittenHandle - the record page is bounded", () => {
+  const containerOf = (count: number): ActiveCaptureProof => ({
+    ok: true,
+    kind: "record-container",
+    records: Array.from(
+      { length: count },
+      (_, index) =>
+        ({
+          id: index + 1,
+          collection: "records",
+          relPath: `.gno/records/export.jsonl/${index}`,
+          docid: `doc-${index}`,
+          uri: `gno://records/.gno/records/export.jsonl/${index}`,
+          active: true,
+        }) as unknown as DocumentRow
+    ),
+  });
+
+  const handleFor = (count: number) =>
+    captureWrittenHandle(containerOf(count), {
+      collection: "records",
+      relPath: "export.jsonl",
+    });
+
+  test("exactly at the cap the page is complete and says nothing extra", () => {
+    // DISCRIMINATING against fbbfdcaa only for `recordCount`/
+    // `recordUrisTruncated`, which did not exist: the URI list itself is
+    // unchanged at the boundary, which is the point - the cap must not start
+    // truncating one record early.
+    const handle = handleFor(MAX_WRITTEN_RECORD_URIS);
+    if (handle.kind !== "record-container") {
+      throw new Error("expected a record-container handle");
+    }
+
+    expect(handle.recordUris).toHaveLength(MAX_WRITTEN_RECORD_URIS);
+    expect(handle.recordCount).toBe(MAX_WRITTEN_RECORD_URIS);
+    expect(handle.recordUrisTruncated).toBe(0);
+    expect(handle.reason).not.toContain("recordUris lists the first");
+  });
+
+  test("one past the cap pages, keeps the count exact, and says how to get the rest", () => {
+    // DISCRIMINATING against fbbfdcaa: `recordUris` there was
+    // `proof.records.map(...)`, so this was a 1,001-entry array - and at a
+    // realistic container size a six-figure one, in the job result AND in the
+    // SSE frame.
+    const handle = handleFor(MAX_WRITTEN_RECORD_URIS + 1);
+    if (handle.kind !== "record-container") {
+      throw new Error("expected a record-container handle");
+    }
+
+    expect(handle.recordUris).toHaveLength(MAX_WRITTEN_RECORD_URIS);
+    expect(handle.recordCount).toBe(MAX_WRITTEN_RECORD_URIS + 1);
+    expect(handle.recordUrisTruncated).toBe(1);
+    // Still fetchable handles, still never the container path.
+    expect(handle).not.toHaveProperty("uri");
+    expect(handle.recordUris[0]).toBe(
+      "gno://records/.gno/records/export.jsonl/0"
+    );
+    expect(handle.recordUris).not.toContain("gno://records/export.jsonl");
+    // The omitted records are reachable, not merely absent.
+    expect(handle.reason).toContain(
+      `recordUris lists the first ${MAX_WRITTEN_RECORD_URIS} of ${MAX_WRITTEN_RECORD_URIS + 1} records`
+    );
+    expect(handle.reason).toContain(
+      `GET /api/docs?collection=records&recordSourcePath=export.jsonl&offset=${MAX_WRITTEN_RECORD_URIS}`
+    );
+    // The container fact is still stated first, unchanged.
+    expect(handle.reason).toStartWith("Written as a record container:");
+  });
+
+  test("a huge container costs a bounded handle, not a proportional one", () => {
+    // The heap-pressure claim itself: at fbbfdcaa this handle held 100,000 URI
+    // strings, retained for an hour and re-encoded per SSE client.
+    const handle = handleFor(100_000);
+    if (handle.kind !== "record-container") {
+      throw new Error("expected a record-container handle");
+    }
+
+    expect(handle.recordUris).toHaveLength(MAX_WRITTEN_RECORD_URIS);
+    expect(handle.recordCount).toBe(100_000);
+    expect(handle.recordUrisTruncated).toBe(99_000);
+    expect(JSON.stringify(handle).length).toBeLessThan(100_000);
   });
 });

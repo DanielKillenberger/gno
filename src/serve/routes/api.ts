@@ -1778,6 +1778,13 @@ export async function handleDocs(
 ): Promise<Response> {
   const collection = url.searchParams.get("collection") || undefined;
   const pathPrefix = normalizeBrowsePath(url.searchParams.get("pathPrefix"));
+  // The records of one record container, by the container's own rel path. A
+  // write handle hands back a BOUNDED page of record URIs; this is the query
+  // that reaches the rest, so it pages with the same limit/offset as any other
+  // listing.
+  const recordSourcePath = normalizeBrowsePath(
+    url.searchParams.get("recordSourcePath")
+  );
   const directChildrenOnlyParam = (
     url.searchParams.get("directChildrenOnly") ?? ""
   )
@@ -1831,6 +1838,13 @@ export async function handleDocs(
     );
   }
 
+  if (recordSourcePath && !collection) {
+    return errorResponse(
+      "VALIDATION",
+      "recordSourcePath requires a collection filter"
+    );
+  }
+
   // Parse tag filters
   let tagsAll: string[] | undefined;
   let tagsAny: string[] | undefined;
@@ -1880,6 +1894,7 @@ export async function handleDocs(
     limit,
     offset,
     pathPrefix: pathPrefix || undefined,
+    recordSourcePath: recordSourcePath || undefined,
     directChildrenOnly,
     tagsAll,
     tagsAny,
@@ -1908,6 +1923,7 @@ export async function handleDocs(
     limit,
     offset,
     pathPrefix,
+    recordSourcePath,
     directChildrenOnly,
     availableDateFields,
     sortField: sortFieldRaw,
@@ -3880,8 +3896,14 @@ export async function handleCreateDoc(
           origin: "create",
           changedAt: new Date().toISOString(),
           kind: written.kind,
+          // Bounded metadata, never the container's contents: this frame is
+          // encoded once per connected client.
           ...(written.kind === "record-container"
-            ? { recordUris: written.recordUris }
+            ? {
+                recordUris: written.recordUris,
+                recordCount: written.recordCount,
+                recordUrisTruncated: written.recordUrisTruncated,
+              }
             : {}),
         });
         return {

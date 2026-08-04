@@ -9,8 +9,15 @@ export interface DocumentEvent {
   changedAt: string;
   /** Absent when the emitter did not prove what `uri` is. */
   kind?: "document" | "record-container";
-  /** Fetchable record URIs when `uri` names a record container. */
+  /**
+   * Fetchable record URIs when `uri` names a record container - a bounded page,
+   * not the whole container (see `recordCount`/`recordUrisTruncated`).
+   */
   recordUris?: string[];
+  /** Exact number of logical records the container is indexed as. */
+  recordCount?: number;
+  /** How many records `recordUris` does not list. */
+  recordUrisTruncated?: number;
 }
 
 export function getEventStreamRetryDelay(attempt: number): number {

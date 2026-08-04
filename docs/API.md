@@ -1137,24 +1137,34 @@ completed job settles it:
     "kind": "record-container",
     "collection": "records",
     "relPath": "export.jsonl",
+    "recordCount": 2,
     "recordUris": ["gno://records/...", "gno://records/..."],
+    "recordUrisTruncated": 0,
     "reason": "Written as a record container: imported as 2 logical record documents at virtual paths; ..."
   }
 }
 ```
 
-| Field        | Present when                           | Description                                       |
-| :----------- | :------------------------------------- | :------------------------------------------------ |
-| `kind`       | always                                 | `document` or `record-container`                  |
-| `uri`        | `kind: "document"`                     | Fetchable URI for the written path                |
-| `recordUris` | `kind:"record-container"`              | Fetchable URIs of the container's logical records |
-| `reason`     | when there is something unusual to say | Container shape and/or a partial record import    |
+| Field                 | Present when                           | Description                                                       |
+| :-------------------- | :------------------------------------- | :---------------------------------------------------------------- |
+| `kind`                | always                                 | `document` or `record-container`                                  |
+| `uri`                 | `kind: "document"`                     | Fetchable URI for the written path                                |
+| `recordCount`         | `kind:"record-container"`              | Exact number of logical records the container is indexed as       |
+| `recordUris`          | `kind:"record-container"`              | Fetchable URIs — the **first 1,000** records, not all of them     |
+| `recordUrisTruncated` | `kind:"record-container"`              | `recordCount - recordUris.length`: records this page omits        |
+| `reason`              | when there is something unusual to say | Container shape, a partial record import, and/or a truncated page |
 
-A `record-container` handle carries **no** `uri` field. `reason` also discloses
-a _partial_ record import — records the adapter rejected (and therefore did not
-index) or a partial snapshot — which the container's own file status reports as
-an ordinary non-error. Broad sync jobs (`POST /api/sync`) write nothing of their
-own and omit `written` entirely.
+A `record-container` handle carries **no** `uri` field. `recordUris` is a
+**bounded page**, capped at 1,000 entries — the same cap the record-import
+receipt uses — because one valid container can hold six figures of records and
+this handle is retained on the completed job and encoded into an SSE frame. When
+`recordUrisTruncated > 0`, `reason` names the query that reaches the rest:
+`GET /api/docs?collection=<collection>&recordSourcePath=<relPath>&offset=1000`
+(see [List Documents](#list-documents)). `reason` also discloses a _partial_
+record import — records the adapter rejected (and therefore did not index) or a
+partial snapshot — which the container's own file status reports as an ordinary
+non-error. Broad sync jobs (`POST /api/sync`) write nothing of their own and
+omit `written` entirely.
 
 **Example**:
 
@@ -1261,15 +1271,16 @@ GET /api/docs?collection=notes&limit=20&offset=0&tagsAll=work&tagsAny=urgent,mee
 
 **Query Parameters**:
 
-| Param        | Type   | Default  | Description                          |
-| :----------- | :----- | :------- | :----------------------------------- |
-| `collection` | string | —        | Filter by collection name            |
-| `limit`      | number | 20       | Results per page (max 100)           |
-| `offset`     | number | 0        | Pagination offset                    |
-| `tagsAll`    | string | —        | Comma-separated tags (must have ALL) |
-| `tagsAny`    | string | —        | Comma-separated tags (must have ANY) |
-| `sortField`  | string | modified | `modified` or frontmatter date key   |
-| `sortOrder`  | string | desc     | `asc` or `desc`                      |
+| Param              | Type   | Default  | Description                                                                                        |
+| :----------------- | :----- | :------- | :------------------------------------------------------------------------------------------------- |
+| `collection`       | string | —        | Filter by collection name                                                                          |
+| `recordSourcePath` | string | —        | Only the logical records imported from this record container (its rel path). Requires `collection` |
+| `limit`            | number | 20       | Results per page (max 100)                                                                         |
+| `offset`           | number | 0        | Pagination offset                                                                                  |
+| `tagsAll`          | string | —        | Comma-separated tags (must have ALL)                                                               |
+| `tagsAny`          | string | —        | Comma-separated tags (must have ANY)                                                               |
+| `sortField`        | string | modified | `modified` or frontmatter date key                                                                 |
+| `sortOrder`        | string | desc     | `asc` or `desc`                                                                                    |
 
 **Response**:
 
@@ -1296,10 +1307,21 @@ GET /api/docs?collection=notes&limit=20&offset=0&tagsAll=work&tagsAny=urgent,mee
 }
 ```
 
+`recordSourcePath` is how you page a record container. A container (a `.jsonl`
+export, a `.vtt` transcript) is indexed as N logical records; a write handle
+hands back only the first 1,000 of their URIs (see
+[`result.written`](#job-status)), and this filter returns them all, `limit`/
+`offset` pages like any other listing, with `total` equal to the container's
+exact record count. Each returned `uri` is a fetchable record; `relPath` is the
+container's path, which is shared by every record.
+
 **Example**:
 
 ```bash
 curl "http://localhost:3000/api/docs?collection=notes&limit=10" | jq
+
+# Records 1000-1099 of a large container
+curl "http://localhost:3000/api/docs?collection=records&recordSourcePath=export.jsonl&offset=1000&limit=100" | jq
 ```
 
 ---
@@ -1516,9 +1538,14 @@ data: {"type":"capsule-reverified","registrationId":"capsule-aaaaaaaaaaaaaaaaaaa
 `document-changed` events carry `uri`, `collection`, `relPath`, `origin`, and
 `changedAt`. Emitters that proved what they wrote (the REST create and resident
 capture paths) additionally send `kind` (`document` or `record-container`) and,
-for a container, `recordUris` — because `uri` names the container FILE and
-resolves to no document. `kind` is absent from emitters that run no proof (the
-watcher), so treat an absent `kind` as unknown rather than as `document`.
+for a container, `recordCount`, `recordUris`, and `recordUrisTruncated` — because
+`uri` names the container FILE and resolves to no document. `recordUris` in an
+event is the same **bounded** 1,000-entry page the job handle carries, never the
+container's full record set: this frame is encoded once per connected client on
+every write. A consumer that needs every record lists them with
+`GET /api/docs?collection=<collection>&recordSourcePath=<relPath>`. `kind` is
+absent from emitters that run no proof (the watcher), so treat an absent `kind`
+as unknown rather than as `document`.
 
 The capsule event is emitted only after the canonical verification receipt or
 separate operation failure has committed. It never includes a question, file path, URI,
@@ -2212,7 +2239,8 @@ Create a new document file in a collection. Triggers background sync to index it
 
 `uri` here names the path that was written. It is fetchable as a document only
 once the job completes with `result.written.kind === "document"`; for a record
-container the fetchable handles are `result.written.recordUris`. See
+container the fetchable handles are `result.written.recordUris` (a bounded page
+of `result.written.recordCount` records). See
 [Job Status](#job-status).
 
 **Errors**:

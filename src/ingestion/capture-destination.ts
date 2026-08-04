@@ -50,6 +50,7 @@ import type { DocumentRow, StorePort } from "../store/types";
 import type { FileSyncResult, WrittenPathHandle } from "./types";
 
 import { normalizeCollectionDirRelPath } from "../core/path-rules";
+import { MAX_WRITTEN_RECORD_URIS } from "./types";
 import { checkWalkPathVisibility } from "./walker";
 
 /**
@@ -507,10 +508,64 @@ export const captureFileSyncResult = (
 };
 
 /**
+ * The bounded URI page a container handle may carry, plus the exact count.
+ *
+ * A container is not a small thing. One valid `.jsonl` export can hold six
+ * figures of records, and every consumer of this page keeps or copies it far
+ * past the write: the job manager retains up to 100 completed jobs for an hour,
+ * and the `document-changed` frame is JSON-encoded once per connected SSE
+ * client. Listing every URI therefore turned one ordinary write into megabytes
+ * of retained strings and a multi-megabyte event frame - while the record
+ * IMPORT receipt sitting beside it has been capped at
+ * {@link MAX_WRITTEN_RECORD_URIS} items all along. Same cap here.
+ *
+ * Bounding must not cost the caller reachability, which is the whole point of
+ * the handle: the page is the FIRST records (never empty for a proven
+ * container), `recordCount` is exact, and the remainder is reachable by listing
+ * the collection filtered to this container path.
+ */
+export const captureWrittenRecordPage = (
+  records: readonly Pick<DocumentRow, "uri">[]
+): {
+  recordCount: number;
+  recordUris: string[];
+  recordUrisTruncated: number;
+} => {
+  const recordUris = records
+    .slice(0, MAX_WRITTEN_RECORD_URIS)
+    .map((record) => record.uri);
+  return {
+    recordCount: records.length,
+    recordUris,
+    recordUrisTruncated: records.length - recordUris.length,
+  };
+};
+
+/**
+ * The sentence a truncated page owes its caller.
+ *
+ * `undefined` when the page is complete, so the ordinary container - which is
+ * every container under the cap - reads exactly as it did before.
+ */
+export const captureWrittenRecordPageReason = (
+  page: {
+    recordCount: number;
+    recordUris: string[];
+    recordUrisTruncated: number;
+  },
+  location: { collection: string; relPath: string }
+): string | undefined => {
+  if (page.recordUrisTruncated === 0) return undefined;
+  const query = `GET /api/docs?collection=${encodeURIComponent(location.collection)}&recordSourcePath=${encodeURIComponent(location.relPath)}&offset=${page.recordUris.length}`;
+  return `recordUris lists the first ${page.recordUris.length} of ${page.recordCount} records; the remaining ${page.recordUrisTruncated} are paged by listing the collection filtered to this container path (${query}).`;
+};
+
+/**
  * The proven write, in the shape a job result and a change event can state.
  *
  * Same facts as {@link captureSyncReason}, addressed to a caller that gets a
- * HANDLE rather than a rendered receipt: which URIs it can actually fetch.
+ * HANDLE rather than a rendered receipt: which URIs it can actually fetch - and
+ * a BOUNDED page of them (see {@link captureWrittenRecordPage}).
  */
 export const captureWrittenHandle = (
   proof: ActiveCaptureProof,
@@ -518,22 +573,25 @@ export const captureWrittenHandle = (
   recordImport?: FileSyncResult["recordImport"]
 ): WrittenPathHandle => {
   const reason = captureSyncReason(proof, recordImport);
-  const stated = reason === undefined ? {} : { reason };
   if (proof.kind === "file") {
     return {
       kind: "document",
       collection: location.collection,
       relPath: location.relPath,
       uri: proof.document.uri,
-      ...stated,
+      ...(reason === undefined ? {} : { reason }),
     };
   }
+  const page = captureWrittenRecordPage(proof.records);
+  const fullReason = [reason, captureWrittenRecordPageReason(page, location)]
+    .filter((part): part is string => part !== undefined)
+    .join(" ");
   return {
     kind: "record-container",
     collection: location.collection,
     relPath: location.relPath,
-    recordUris: proof.records.map((record) => record.uri),
-    ...stated,
+    ...page,
+    ...(fullReason === "" ? {} : { reason: fullReason }),
   };
 };
 

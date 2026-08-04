@@ -598,6 +598,11 @@ describe("SDK client", () => {
     expect(created.reason).toContain("2 logical record documents");
 
     expect(created.recordUris).toHaveLength(2);
+    // DISCRIMINATING against fbbfdcaa: `recordUris` was the container's whole
+    // record set with no count beside it, so a caller could not tell a
+    // complete list from a page - and a large export handed back every URI.
+    expect(created.recordCount).toBe(2);
+    expect(created.recordUrisTruncated).toBe(0);
     for (const uri of created.recordUris) {
       expect(uri).not.toBe(`gno://fixtures/${relPath}`);
       const fetched = await client.get(uri);

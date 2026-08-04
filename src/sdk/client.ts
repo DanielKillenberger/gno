@@ -150,6 +150,8 @@ import {
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
   captureSyncReason,
+  captureWrittenRecordPage,
+  captureWrittenRecordPageReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -1654,10 +1656,20 @@ class GnoClientImpl implements GnoClient {
     // resolve, so this shape carries no `uri` at all - the file stays
     // identified by `path`/`relPath`, and the fetchable handles are the
     // records' own URIs.
+    // `recordUris` is a BOUNDED page, not the container's contents: a valid
+    // export can hold six figures of records, and a result object that lists
+    // every one of them is the same unbounded array the job/SSE handles refuse
+    // to carry. `recordCount` is exact and the rest are paged by the query the
+    // reason names.
+    const page = captureWrittenRecordPage(indexed.records);
+    const truncated = captureWrittenRecordPageReason(page, {
+      collection: collection.name,
+      relPath: plan.relPath,
+    });
     return {
       kind: "record-container",
-      recordUris: indexed.records.map((row) => row.uri),
-      reason: `Written as a record container: ${captureProofContainerSummary(indexed)}, so there is no single fetchable URI for it - fetch the records in recordUris instead.`,
+      ...page,
+      reason: `Written as a record container: ${captureProofContainerSummary(indexed)}, so there is no single fetchable URI for it - fetch the records in recordUris instead.${truncated === undefined ? "" : ` ${truncated}`}`,
       ...writtenFile,
     };
   }

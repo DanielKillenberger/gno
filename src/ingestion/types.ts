@@ -157,6 +157,15 @@ export type ContentTypeSource =
 /** Maximum per-record actions retained in one sync receipt. */
 export const MAX_RECORD_IMPORT_RECEIPT_ITEMS = 1_000;
 
+/**
+ * Maximum record URIs listed on one {@link WrittenPathHandle}.
+ *
+ * Same bound as {@link MAX_RECORD_IMPORT_RECEIPT_ITEMS}, deliberately: both are
+ * "how much of an arbitrarily large container may one receipt carry", and a
+ * second, different number would only invite the two to drift.
+ */
+export const MAX_WRITTEN_RECORD_URIS = MAX_RECORD_IMPORT_RECEIPT_ITEMS;
+
 export type RecordImportOutcome =
   | "added"
   | "updated"
@@ -257,6 +266,17 @@ export interface CollectionSyncResult {
  * to nothing. The `record-container` shape therefore carries no `uri` at all -
  * the file stays identified by `relPath`, and the fetchable handles are
  * `recordUris`.
+ *
+ * The URI list is a BOUNDED PAGE, not the container's contents. One valid
+ * `.jsonl` export can hold six figures of records, and this handle is retained
+ * on a completed job for an hour and JSON-encoded into a broadcast SSE frame -
+ * so an exhaustive list would put megabytes into both. `recordCount` is exact,
+ * `recordUris` carries the first {@link MAX_WRITTEN_RECORD_URIS} of them, and
+ * `recordUrisTruncated` says how many are not listed; the rest are paged by
+ * listing the collection filtered to this container path (REST:
+ * `GET /api/docs?collection=…&recordSourcePath=…&offset=…`). The bound matches
+ * the record-import receipt's existing {@link MAX_RECORD_IMPORT_RECEIPT_ITEMS}
+ * cap so one convention governs everything a sync hands back.
  */
 export type WrittenPathHandle =
   | {
@@ -271,8 +291,15 @@ export type WrittenPathHandle =
       kind: "record-container";
       collection: string;
       relPath: string;
-      /** Fetchable: the virtual URIs of the container's logical records. */
+      /** Exact number of active logical records the container is indexed as. */
+      recordCount: number;
+      /**
+       * Fetchable: the virtual URIs of the container's logical records, capped
+       * at {@link MAX_WRITTEN_RECORD_URIS}. Never the whole container.
+       */
       recordUris: string[];
+      /** `recordCount - recordUris.length`: records this page does not list. */
+      recordUrisTruncated: number;
       reason?: string;
     };
 

@@ -21,8 +21,19 @@ export interface DocumentChangedEvent {
   /**
    * The fetchable URIs of a record container's logical records - the handles a
    * consumer can use in place of the unresolvable `uri`.
+   *
+   * BOUNDED (`MAX_WRITTEN_RECORD_URIS`), and deliberately so: this frame is
+   * JSON-encoded once per connected client on every write, which is the worst
+   * possible place for a list whose length is the container's record count.
+   * `recordCount` is exact and `recordUrisTruncated` says what this page omits;
+   * a consumer that needs them all lists the collection filtered to
+   * `relPath` (`GET /api/docs?collection=…&recordSourcePath=…`).
    */
   recordUris?: string[];
+  /** Exact number of logical records the container is indexed as. */
+  recordCount?: number;
+  /** `recordCount - recordUris.length`: records this frame does not list. */
+  recordUrisTruncated?: number;
 }
 
 export interface CapsuleReverifiedEvent {
