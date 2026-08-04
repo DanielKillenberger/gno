@@ -4415,6 +4415,103 @@ describe("CollectionWatchService bounds every value it names in a cause", () => 
     },
     RED_TEST_TIMEOUT_MS
   );
+
+  /**
+   * The reconciled DIRECTORY is an untrusted path field like the others, and
+   * both cause branches name it. Bounding only the failed paths left it
+   * interpolated whole, so a legitimately deep directory - or a pathological
+   * watcher-supplied name - rebuilt the unbounded intermediate the per-field
+   * bound exists to remove, on the one field still missing it (R7/R9).
+   *
+   * The earlier coverage used the collection ROOT as the reconciliation
+   * directory, so it only ever exercised the unowned failure's `relPath` and
+   * `message` and never reached this field at all.
+   */
+  async function runDeepDirectoryFailure(attributable: boolean) {
+    const root = await mkdtemp(join(tmpdir(), "gno-watch-deep-dir-"));
+    // Comfortably past the per-field budget while every segment stays a legal
+    // filename, so this is a directory a real collection could hold.
+    const deepDirectory = Array.from(
+      { length: 40 },
+      (_, index) => `deep-${index}`
+    ).join("/");
+    expect(deepDirectory.length).toBeGreaterThan(MAX_DESCRIBED_VALUE_LENGTH);
+    const relPath = `${deepDirectory}/note.md`;
+    await mkdir(join(root, deepDirectory), { recursive: true });
+    await Bun.write(join(root, relPath), "# note\n");
+
+    const harness = createReconcileHarness(createCollection("notes", root), {
+      store: createSubtreeStore({ direct: { [deepDirectory]: [relPath] } })
+        .store,
+      syncResult: (batchedPaths) =>
+        createSyncResult({
+          filesProcessed: batchedPaths.length,
+          files: batchedPaths.map((batchedPath) => ({
+            relPath: batchedPath,
+            status: "skipped",
+          })),
+          // Attributable: every error is owned by a batched path. Otherwise a
+          // single collection-level failure no batched path owns.
+          errors: attributable
+            ? batchedPaths.map((batchedPath) => ({
+                relPath: batchedPath,
+                code: "WRITE_FAILED",
+                message: "disk full",
+              }))
+            : [
+                {
+                  relPath: "(typed edge backfill)",
+                  code: "QUERY_FAILED",
+                  message: "backfillDocEdges failed",
+                },
+              ],
+        }),
+    });
+
+    try {
+      harness.service.start();
+      harness.emit([["rename", `${deepDirectory}/note.md.tmp`]]);
+      expect(await harness.settle()).toBe("settled");
+      const causes = harness.failed.map((event) =>
+        String((event.cause as Error | undefined)?.message)
+      );
+      expect(causes).toHaveLength(1);
+      return { cause: causes[0] ?? "", deepDirectory };
+    } finally {
+      await harness.service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  test(
+    "bounds the reconciled directory in an attributable cause",
+    async () => {
+      const { cause, deepDirectory } = await runDeepDirectoryFailure(true);
+
+      expect(cause).toContain("sync reported");
+      expect(cause).toContain(
+        `${deepDirectory.slice(0, MAX_DESCRIBED_VALUE_LENGTH)}...`
+      );
+      expect(cause).not.toContain(`"${deepDirectory}"`);
+      expect(cause.length).toBeLessThan(BOUNDED_CAUSE_LIMIT);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "bounds the reconciled directory in an unattributable cause",
+    async () => {
+      const { cause, deepDirectory } = await runDeepDirectoryFailure(false);
+
+      expect(cause).toContain("attribution was impossible");
+      expect(cause).toContain(
+        `${deepDirectory.slice(0, MAX_DESCRIBED_VALUE_LENGTH)}...`
+      );
+      expect(cause).not.toContain(`"${deepDirectory}"`);
+      expect(cause.length).toBeLessThan(BOUNDED_CAUSE_LIMIT);
+    },
+    RED_TEST_TIMEOUT_MS
+  );
 });
 
 /**

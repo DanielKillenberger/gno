@@ -1971,10 +1971,16 @@ export class CollectionWatchService {
         failedPaths.length > 0
           ? `${failedPaths.length} contributed path(s) also reported failed (${describeBoundedPaths(failedPaths)}); `
           : "";
+      // The directory is an untrusted path field like any other, so it gets its
+      // own budget BEFORE composition - once, shared by both branches. A
+      // legitimately deep directory, or a pathological watcher-supplied name,
+      // would otherwise be interpolated whole and rebuild the very unbounded
+      // intermediate the per-field bound exists to stop (R7/R9).
+      const boundedDirectory = boundValue(entry.directory);
       const cause = new Error(
         attribution.attributable
-          ? `sync reported ${failedPaths.length} failed path(s) for directory "${entry.directory}": ${describeBoundedPaths(failedPaths)}`
-          : `sync failed at the collection level, so per-directory attribution was impossible; directory "${entry.directory}" fails closed over ${contributed.length} contributed path(s): ${alsoFailed}${unattributableDetail}`
+          ? `sync reported ${failedPaths.length} failed path(s) for directory "${boundedDirectory}": ${describeBoundedPaths(failedPaths)}`
+          : `sync failed at the collection level, so per-directory attribution was impossible; directory "${boundedDirectory}" fails closed over ${contributed.length} contributed path(s): ${alsoFailed}${unattributableDetail}`
       );
       this.#notifyDiagnostic(() =>
         this.#callbacks?.onReconcileFailed?.({
