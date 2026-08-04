@@ -37,6 +37,21 @@ export type DirectoryChildrenOutcome =
   | { status: "present"; relPaths: string[] }
   /** The directory is genuinely gone (ENOENT / ENOTDIR). */
   | { status: "missing" }
+  /**
+   * The directory EXISTS but `FileWalker.walk` never enters it, so no eligible
+   * file can be reached through it and nothing was read through it either.
+   *
+   * This is deliberately NOT `present` with an empty list. Both say "no
+   * eligible children on disk", but they imply opposite things about the
+   * INDEXED side. `present` means the disk was read and whatever it did not
+   * list is reconciled the ordinary way, through `syncPaths`, which follows the
+   * path. `skipped` means the path must never be FOLLOWED at all: an indexed
+   * document underneath it would be found by a following `stat` and stay
+   * active, while a full `gno update` - which skips the whole area - deactivates
+   * it. Collapsing the two left exactly that divergence behind whenever an
+   * indexed real directory was replaced by an in-root symlink.
+   */
+  | { status: "skipped"; reason: "symlink" }
   /** The directory could not be read, or the argument was refused. */
   | { status: "error"; cause: unknown };
 
@@ -260,7 +275,7 @@ function shallowestRemovedChild(
  *
  * `beforeReadDirectory` is awaited immediately before each `readdir`, once that
  * directory has been proven contained. It exists so the swap race the
- * traversal-time containment check closes can be driven DETERMINISTICALLY in a
+ * traversal-time containment check DETECTS can be driven deterministically in a
  * test - replacing a directory with a symlink exactly inside the window - rather
  * than raced against a sleep. Production callers never pass it, and a hook that
  * throws is folded into the ordinary `error` outcome like any other failure, so
@@ -268,6 +283,14 @@ function shallowestRemovedChild(
  */
 export interface DirectoryEnumerationHooks {
   beforeReadDirectory?: (absPath: string) => void | Promise<void>;
+  /**
+   * Awaited immediately before each unresolved ENTRY-PATH component is
+   * `lstat`ed. It exists so the ancestor-replacement window described on
+   * `checkUnresolvedEntryPath` can be driven deterministically - replacing an
+   * already-verified ancestor exactly between two component checks - instead of
+   * being raced against a sleep. Production callers never pass it.
+   */
+  beforeCheckComponent?: (absPath: string) => void | Promise<void>;
 }
 
 /** Everything the recursion carries that is the same at every level. */
@@ -299,7 +322,9 @@ type ContainedRead =
  * "directory" is evidence about the instant the parent was listed and nothing
  * more, so descending on the strength of it has the same window.
  *
- * Three checks, in order, close it:
+ * Three checks, in order, narrow it to what can be DETECTED - and every
+ * detection fails closed. They are not a proof of atomicity: see the residual
+ * window documented on `checkUnresolvedEntryPath`.
  *
  * 1. `lstat` - no-follow, so a symlink standing where a directory was is simply
  *    not a directory here. That is the SAME policy `Dirent.isDirectory()`
@@ -383,10 +408,22 @@ async function readContainedDirectory(
   return { status: "read", entries };
 }
 
+/** One entry-path component, and the identity it had when it was verified. */
+interface ComponentIdentity {
+  absPath: string;
+  dev: number;
+  ino: number;
+}
+
 /** What the UNRESOLVED entry-point path turned out to be, before any deref. */
 type EntryPathCheck =
-  /** Every component below the root is a real directory. Enumerate it. */
-  | { status: "walkable" }
+  /**
+   * Every component below the root is a real directory. Enumerate it.
+   *
+   * `chain` carries the `(dev, ino)` each component had at the moment it was
+   * verified, so the same chain can be re-proven after the read.
+   */
+  | { status: "walkable"; chain: ComponentIdentity[] }
   /**
    * A component below the root - the requested directory itself, or one of its
    * ancestors - is a symlink. `FileWalker.walk` never descends into one, so
@@ -414,19 +451,48 @@ type EntryPathCheck =
  * canonicalized as before and deliberately so: it is legitimately a symlink on
  * macOS (`/tmp -> /private/tmp`), and refusing to walk a collection for that
  * reason would break every temp-rooted collection.
+ *
+ * ## The window this does NOT close
+ *
+ * The check is component-by-component on PATH STRINGS, so it is not atomic. For
+ * `a/b`, `a` can be renamed away and replaced by a symlink after `a` has been
+ * verified and before `a/b` is `lstat`ed; that `lstat` then traverses the
+ * replacement and describes the target's `b`.
+ *
+ * Two things narrow it, and neither eliminates it:
+ *
+ * - the whole chain is re-proven by `revalidateEntryPathChain` AFTER the
+ *   enumeration, comparing each component's `(dev, ino)` against what it was
+ *   when it was verified, so a replacement that is still in place when the read
+ *   finishes fails the enumeration closed;
+ * - every directory actually read is independently re-proven contained and
+ *   identical across its own `readdir` (`readContainedDirectory`).
+ *
+ * What remains open is a replacement that is UNDONE before the re-check (swap,
+ * let the read happen, swap back) and a replacement that preserves `(dev, ino)`.
+ * Closing those needs traversal relative to verified directory handles with
+ * no-follow semantics - `openat(dirfd, name, O_NOFOLLOW)` and `fdopendir` - and
+ * Node/Bun's `fs` API exposes no dirfd-relative operations at all, so it cannot
+ * be written in this runtime. It would need either such an API or a native
+ * addon. The honest claim is therefore: containment is enforced at traversal
+ * time and every DETECTED change fails closed; a sufficiently precise
+ * adversarial rename-plus-symlink racing the walk is not excluded.
  */
 async function checkUnresolvedEntryPath(
   rootReal: string,
-  normalizedDir: string
+  normalizedDir: string,
+  hooks: DirectoryEnumerationHooks | undefined
 ): Promise<EntryPathCheck> {
   if (normalizedDir === "") {
-    return { status: "walkable" };
+    return { status: "walkable", chain: [] };
   }
+  const chain: ComponentIdentity[] = [];
   let current = rootReal;
   for (const segment of normalizedDir.split("/")) {
     current = join(current, segment);
     let info: Stats;
     try {
+      await hooks?.beforeCheckComponent?.(current);
       info = await lstat(current);
     } catch (cause) {
       return isMissingError(cause)
@@ -443,8 +509,59 @@ async function checkUnresolvedEntryPath(
       // thing `realpath` reported as ENOTDIR, and the same outcome.
       return { status: "missing" };
     }
+    chain.push({ absPath: current, dev: info.dev, ino: info.ino });
   }
-  return { status: "walkable" };
+  return { status: "walkable", chain };
+}
+
+/**
+ * Re-prove the whole unresolved component chain after the enumeration read.
+ *
+ * `readContainedDirectory` re-proves the directory it READ; this re-proves how
+ * that directory was REACHED. An ancestor that was swapped for a symlink after
+ * its own check - the window `checkUnresolvedEntryPath` documents - is still a
+ * symlink here unless the swap was undone, so the enumeration fails closed
+ * instead of reporting the replacement target's files under the caller's
+ * collection-relative names.
+ *
+ * Returns `null` when the chain is unchanged, and the terminal outcome
+ * otherwise. Every failure mode is a refusal: a component that is now missing,
+ * now a symlink, now a non-directory, or now a different `(dev, ino)` are all
+ * "the path we walked is not the path we verified", and none of them may be
+ * read as an authoritative file list.
+ */
+async function revalidateEntryPathChain(
+  chain: ComponentIdentity[]
+): Promise<DirectoryChildrenOutcome | null> {
+  for (const component of chain) {
+    let info: Stats;
+    try {
+      info = await lstat(component.absPath);
+    } catch (cause) {
+      return {
+        status: "error",
+        cause: isMissingError(cause)
+          ? new Error(
+              `Directory path component vanished while it was being enumerated: ${component.absPath}`
+            )
+          : cause,
+      };
+    }
+    if (
+      info.isSymbolicLink() ||
+      !info.isDirectory() ||
+      info.dev !== component.dev ||
+      info.ino !== component.ino
+    ) {
+      return {
+        status: "error",
+        cause: new Error(
+          `Directory path component was replaced while it was being enumerated: ${component.absPath}`
+        ),
+      };
+    }
+  }
+  return null;
 }
 
 /**
@@ -521,11 +638,14 @@ async function collectEligibleFiles(
  *     `Dirent.isFile()` uses `lstat` semantics, so this is exact parity;
  *   - the REQUESTED directory and its ancestors get the same treatment: a
  *     symlink anywhere below the root is not walked into, so an in-root alias
- *     reports no eligible children instead of the target's files;
+ *     reports `skipped` rather than the target's files;
  *   - dot-prefixed entries and dot-prefixed directories are skipped.
  *   Eligibility itself is never forked - it stays with `matchesWalkPath`.
  * - Containment is proven at READ time, not once before the read - see
- *   `readContainedDirectory`.
+ *   `readContainedDirectory` - and the unresolved component chain is re-proven
+ *   after the read (`revalidateEntryPathChain`). Every DETECTED change fails
+ *   closed; the residual window, and why it cannot be closed on this runtime,
+ *   are documented on `checkUnresolvedEntryPath`.
  * - `maxBytes` is deliberately NOT enforced here. `matchesWalkPath` is
  *   filesystem-free and the watcher's existing exact-path filter is equally
  *   size-blind; `syncPaths` owns size enforcement, and statting every candidate
@@ -602,7 +722,11 @@ async function enumerateEligible(
   // The entry point and its ancestors are examined NO-FOLLOW first, so a
   // symlink standing anywhere below the root is never dereferenced into an
   // enumeration.
-  const entryCheck = await checkUnresolvedEntryPath(rootReal, normalizedDir);
+  const entryCheck = await checkUnresolvedEntryPath(
+    rootReal,
+    normalizedDir,
+    hooks
+  );
   if (entryCheck.status === "missing") {
     return { status: "missing" };
   }
@@ -640,12 +764,15 @@ async function enumerateEligible(
   if (entryCheck.status === "symlink") {
     // An in-root alias (`root/alias -> root/real`). `FileWalker.walk` skips a
     // symlinked directory outright, so a full sync indexes nothing under
-    // `alias/...`; reporting no eligible children converges the indexed side on
-    // exactly that, and is the same answer the dot-prefixed branch below gives
-    // for a directory the walker never enters. What is NOT allowed is what the
-    // realpath-first version did: enumerate the TARGET and report its files
-    // under the alias' collection-relative names.
-    return { status: "present", relPaths: [] };
+    // `alias/...`. What is NOT allowed is what the realpath-first version did:
+    // enumerate the TARGET and report its files under the alias' names.
+    //
+    // Reported as `skipped`, not as an empty `present`: converging the indexed
+    // side on what a full walk concludes needs the caller to DEACTIVATE what it
+    // has indexed under here, and it must do that WITHOUT following the path -
+    // a following `stat` succeeds through the alias and would keep those
+    // documents active forever. See `DirectoryChildrenOutcome`.
+    return { status: "skipped", reason: "symlink" };
   }
 
   // No component below the root is a symlink, so the unresolved path IS the
@@ -667,6 +794,14 @@ async function enumerateEligible(
   });
   if (failure) {
     return failure;
+  }
+
+  // The chain that was verified BEFORE the read is re-proven AFTER it, so an
+  // ancestor swapped for a symlink mid-traversal cannot pass its files off as
+  // this directory's. Bounded by path depth and run once per enumeration.
+  const changed = await revalidateEntryPathChain(entryCheck.chain);
+  if (changed) {
+    return changed;
   }
 
   relPaths.sort((a, b) => a.localeCompare(b));

@@ -3,7 +3,7 @@ import type { WatchListener } from "node:fs";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 // node:fs/promises is used for mkdtemp/mkdir/rm: Bun has no native equivalents
 // for temp-directory creation or filesystem structure operations.
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,6 +18,7 @@ import {
   CollectionWatchService,
   MAX_DESCRIBED_VALUE_LENGTH,
 } from "../../src/serve/watch-service";
+import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 
 function createCollection(name: string, path: string): Collection {
   return {
@@ -4815,4 +4816,123 @@ describe("CollectionWatchService flush deadline uses a monotonic clock", () => {
     },
     RED_TEST_TIMEOUT_MS
   );
+});
+
+/**
+ * An indexed real directory replaced by an IN-ROOT SYMLINK, end to end against
+ * a real filesystem, a real SQLite store and the real `syncPaths`.
+ *
+ * `FileWalker.walk` never descends into a symlinked directory, so a full
+ * `gno update` deactivates everything it had indexed under `dir/` the moment
+ * `dir` becomes `dir -> real`. The watcher has to reach the SAME conclusion,
+ * and enumeration parity alone does not get it there: reporting "no eligible
+ * children on disk" only empties the DISK half of the union, and the indexed
+ * half then reaches `syncPaths`, which stats `dir/note.md`, FOLLOWS the alias,
+ * finds a live file and keeps the document active. A full update and the
+ * watcher then disagree about what is indexed - the exact divergence fn-114
+ * exists to remove.
+ *
+ * The watcher is driven through a fake `watchFactory` so the replacement is
+ * fully in place before the event is delivered: with the real watcher the
+ * transient "directory is momentarily gone" state can converge the same
+ * outcome by a different route, which would make the test's discrimination a
+ * matter of interleaving. Nothing else is faked - the store, the filesystem,
+ * the enumeration and the sync are all real.
+ *
+ * Against a2f75504 this fails on the first assertion (`dir/note.md` is still
+ * active, because `syncPaths` followed the alias). Discriminating, not a
+ * direction pin.
+ */
+describe("symlink replacement converges the indexed side", () => {
+  test("deactivates indexed children of a directory replaced by an in-root symlink", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-symlink-"));
+    const root = join(tempDir, "collection");
+    await mkdir(join(root, "dir"), { recursive: true });
+    await Bun.write(join(root, "dir", "note.md"), "# note\n");
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    let service: CollectionWatchService | null = null;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      // A real initial sync, exactly as a `gno update` before the daemon starts.
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const indexed = await store.getDocument(collection.name, "dir/note.md");
+      expect(indexed.ok && indexed.value?.active).toBe(true);
+
+      let watcherCallback:
+        | ((eventType: string, filename: string | null) => void)
+        | undefined;
+      let notifySettled: (() => void) | null = null;
+      service = new CollectionWatchService({
+        collections: [collection],
+        eventBus: null as never,
+        scheduler: null as never,
+        store: store as never,
+        callbacks: {
+          onSettled: () => {
+            const resolve = notifySettled;
+            notifySettled = null;
+            resolve?.();
+          },
+        },
+        watchFactory: ((
+          _path: string,
+          _options: { recursive: boolean },
+          callback: WatchListener<string>
+        ) => {
+          watcherCallback = callback as typeof watcherCallback;
+          return { close: () => undefined };
+        }) as never,
+      });
+      service.start();
+
+      // Replace the indexed real directory with an in-root alias to an
+      // identical tree. `dir/note.md` still STATS fine through the alias; only
+      // a no-follow traversal can tell the difference.
+      await mkdir(join(root, "real"), { recursive: true });
+      await Bun.write(join(root, "real", "note.md"), "# note\n");
+      await rm(join(root, "dir"), { recursive: true, force: true });
+      await symlink(join(root, "real"), join(root, "dir"), "dir");
+
+      const settled = new Promise<"settled">((resolve) => {
+        notifySettled = () => resolve("settled");
+      });
+      // `dir` is ineligible against `**/*.md`, so it arrives as a directory
+      // HINT - the ordinary route for a renamed directory.
+      watcherCallback?.("rename", "dir");
+      expect(
+        await Promise.race([
+          settled,
+          Bun.sleep(15_000).then(() => "NO_SETTLE_WITHIN_TIMEOUT" as const),
+        ])
+      ).toBe("settled");
+
+      const afterWatch = await store.getDocument(
+        collection.name,
+        "dir/note.md"
+      );
+      expect(afterWatch.ok && afterWatch.value?.active).toBe(false);
+
+      // ...and that is the same conclusion a full walk reaches, which is the
+      // whole point: the two halves of the product must not disagree.
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const afterFullSync = await store.getDocument(
+        collection.name,
+        "dir/note.md"
+      );
+      expect(afterFullSync.ok && afterFullSync.value?.active).toBe(false);
+    } finally {
+      await service?.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

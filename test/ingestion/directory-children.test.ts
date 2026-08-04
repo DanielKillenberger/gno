@@ -286,7 +286,38 @@ describe("listEligibleDirectChildren", () => {
     // indexed under `alias/` by a full sync...
     expect(walked).toEqual(["real/note.md"]);
     // ...and this seam reports the same, having read nothing through it.
-    expect(outcome).toEqual({ status: "present", relPaths: [] });
+    // `skipped`, not an empty `present`: the caller must DEACTIVATE what it has
+    // indexed under here rather than reconcile it by following the path.
+    expect(outcome).toEqual({ status: "skipped", reason: "symlink" });
+    expect(reads).toEqual([]);
+  });
+
+  /**
+   * The entry point is not the only thing that can be aliased. `alias/sub` has
+   * a real directory at its last component and a symlink ABOVE it, and the
+   * walker never reaches it either, so the same no-follow answer is owed.
+   *
+   * Against the pre-fix code this returned `{present, []}`, which is what let
+   * an indexed `alias/sub/note.md` reach `syncPaths`, be followed and stay
+   * active. Discriminating on the status, not a direction pin.
+   */
+  test("reports a directory reached through a symlinked ANCESTOR as skipped", async () => {
+    await mkdir(join(root, "real", "sub"), { recursive: true });
+    await writeFile(join(root, "real", "sub", "note.md"), "a");
+    await symlink(join(root, "real"), join(root, "alias"), "dir");
+
+    const reads: string[] = [];
+    const outcome = await listEligibleDirectChildren(
+      "alias/sub",
+      walkConfig(root),
+      {
+        beforeReadDirectory: (absPath) => {
+          reads.push(absPath);
+        },
+      }
+    );
+
+    expect(outcome).toEqual({ status: "skipped", reason: "symlink" });
     expect(reads).toEqual([]);
   });
 
@@ -398,7 +429,7 @@ describe("listEligibleSubtreeFiles", () => {
       }
     );
 
-    expect(outcome).toEqual({ status: "present", relPaths: [] });
+    expect(outcome).toEqual({ status: "skipped", reason: "symlink" });
     expect(reads).toEqual([]);
   });
 
@@ -475,6 +506,53 @@ describe("listEligibleSubtreeFiles", () => {
 
     expect(outcome.status).toBe("error");
     expect(JSON.stringify(outcome)).not.toContain("secret.md");
+  });
+
+  /**
+   * The ENTRY-PATH component chain is checked one `lstat` at a time, so it is
+   * not atomic: `a` can be renamed away and replaced by a symlink after `a` has
+   * been verified and before `a/b` is checked, and that later `lstat` then
+   * traverses the replacement. This drives exactly that window through the
+   * `beforeCheckComponent` seam - no sleeps, no racing.
+   *
+   * The replacement points INSIDE the collection root on purpose, so the
+   * containment check cannot be what refuses it: what refuses it is the
+   * post-read re-proof of the component chain's `(dev, ino)`.
+   *
+   * This pins CURRENT behavior after the tightening (fail closed), and it is
+   * discriminating: without the chain re-proof the enumeration returns
+   * `present` with the replacement target's file under `a/b/...`. It is NOT a
+   * claim of atomicity - a swap that is UNDONE before the re-check, or one that
+   * preserves `(dev, ino)`, is still not detected, and cannot be on this
+   * runtime (see `checkUnresolvedEntryPath`).
+   */
+  test("refuses when an ancestor is replaced between component checks", async () => {
+    await mkdir(join(root, "a", "b"), { recursive: true });
+    await writeFile(join(root, "a", "b", "own.md"), "a");
+    await mkdir(join(root, "impostor", "b"), { recursive: true });
+    await writeFile(join(root, "impostor", "b", "planted.md"), "b");
+
+    const rootReal = await realpath(root);
+    const ancestor = join(rootReal, "a");
+    let replaced = false;
+    const outcome = await listEligibleSubtreeFiles("a/b", walkConfig(root), {
+      beforeCheckComponent: async (absPath) => {
+        // `a` has been verified; the NEXT component check is about to run.
+        if (absPath === join(rootReal, "a", "b") && !replaced) {
+          replaced = true;
+          await safeRm(ancestor);
+          await symlink(join(rootReal, "impostor"), ancestor, "dir");
+        }
+      },
+    });
+
+    expect(replaced).toBe(true);
+    expect(outcome.status).toBe("error");
+    expect(String((outcome as { cause: unknown }).cause)).toContain(
+      "was replaced while it was being enumerated"
+    );
+    // The impostor's file is never reported under `a/b/...`.
+    expect(JSON.stringify(outcome)).not.toContain("planted.md");
   });
 
   test("applies the collection's eligibility rules to nested candidates", async () => {

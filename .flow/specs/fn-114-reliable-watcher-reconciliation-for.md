@@ -400,23 +400,56 @@ proportional to the event.
   nested directory it descends into — is proven, immediately before it is read,
   to be a real directory (`lstat`, no-follow) whose resolved path lies inside the
   collection root, and is proven afterwards to still be the same `(dev, ino)`.
-  A single up-front check is not sufficient: a directory replaced by a symlink
-  after the check but before its `readdir` (a checkout, a sync client, any tree
-  rewrite racing reconciliation) would be followed, and files from outside the
-  collection would be returned under collection-relative names and indexed by
-  `syncPaths`. Any such swap fails the whole enumeration closed. This changes
-  nothing about what is ELIGIBLE — a symlinked directory is still simply skipped,
-  exactly as `FileWalker.walk` and `Dirent.isDirectory()` skip it.
+  The unresolved ENTRY-PATH component chain is proven the same way: each
+  component is verified no-follow before the read, and the whole chain's
+  `(dev, ino)` is re-proven after it. A single up-front check is not sufficient:
+  a directory replaced by a symlink after the check but before its `readdir` (a
+  checkout, a sync client, any tree rewrite racing reconciliation) would be
+  followed, and files from outside the collection would be returned under
+  collection-relative names and indexed by `syncPaths`. Any DETECTED swap fails
+  the whole enumeration closed. This changes nothing about what is ELIGIBLE — a
+  symlinked directory is still simply skipped, exactly as `FileWalker.walk` and
+  `Dirent.isDirectory()` skip it.
+
+  **This is not a claim of race-freedom, and must not be read as one.** The
+  traversal walks PATH STRINGS, one `lstat` at a time, so it is not atomic: for
+  `a/b`, `a` can be renamed away and replaced by a symlink after `a` has been
+  verified and before `a/b` is examined. The post-read re-proof of the component
+  chain catches that replacement while it is still in place, and every directory
+  actually read is independently re-proven identical across its own `readdir`,
+  so the detectable window is narrow and every detection fails closed. What is
+  NOT excluded is a replacement that is undone before the re-check (swap, let
+  the read happen, swap back) or one that preserves `(dev, ino)`. Closing those
+  requires traversal relative to verified directory handles with no-follow
+  semantics — `openat(dirfd, name, O_NOFOLLOW)` plus `fdopendir` — and
+  Node/Bun's `fs` API exposes no dirfd-relative operations at all, so it cannot
+  be written in this runtime; it would need such an API or a native addon. The
+  honest guarantee is therefore: containment is enforced at traversal time and
+  any detected change fails closed; a sufficiently precise adversarial
+  rename-plus-symlink racing the walk is not fully excluded. This is the same
+  documented-boundary discipline applied to the delete/recreate window (R12),
+  not an overclaim.
 
   That no-follow rule covers the ENTRY POINT too. The requested directory and
   every component between it and the collection root are examined unresolved
   (`lstat`, no-follow) BEFORE anything is canonicalized, so an in-root alias
   (`root/alias -> root/real`) is not silently dereferenced into an enumeration
-  of its target: it reports no eligible children, which is exactly what a full
-  `FileWalker.walk` indexes under it. `realpath` is used only to prove
-  containment (an alias resolving OUTSIDE the root is still refused). The
-  collection root itself is still canonicalized — it is legitimately a symlink
-  (`/tmp -> /private/tmp` on macOS).
+  of its target. `realpath` is used only to prove containment (an alias
+  resolving OUTSIDE the root is still refused). The collection root itself is
+  still canonicalized — it is legitimately a symlink (`/tmp -> /private/tmp` on
+  macOS).
+
+  Enumeration parity is not enough for such a path: it is reported as a distinct
+  SKIPPED outcome, not as an empty directory. A full `FileWalker.walk` never
+  enters a symlinked directory, so a full `gno update` deactivates everything it
+  had indexed beneath it. An empty enumeration only empties the DISK half of the
+  reconciliation union; the INDEXED half would then reach `syncPaths`, which
+  stats each candidate, FOLLOWS the alias, finds the file alive and keeps the
+  document active — so an indexed real `dir/` replaced by `dir -> real` stayed
+  active in the watcher and inactive after a full update. The skipped outcome is
+  therefore converged by DEACTIVATING the indexed side directly, over the whole
+  subtree beneath the skipped path and without ever following it, which is
+  exactly what a full walk concludes.
 
   Suppression is scoped to SYNCING, not to classification. Its purpose is that an
   application-originated write is not fed back into the watcher as a change, so a
@@ -708,7 +741,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R1  | Exact eligible paths stay on the incremental path; vanished paths widen, and the delete-then-recreate window is documented | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — (guarantee bounded to what a flush-time `stat` can observe) |
 | R2  | Ambiguous atomic-write events reconcile the bounded directory | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R3  | Deleted eligible documents deactivate live, from a proven repro, up to and including a removed collection root, and never classified by name alone | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commit | — |
-| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
+| R4  | Eligibility, normalization, containment, suppression preserved — suppression scoped to syncing on every route into `syncPaths` (named exact path AND resolved reconciliation candidate), decided ONCE at event time from retained window MEMBERSHIP rather than a bare expiry, with a CAUSAL start (a monotonic sequence shared by events and `suppress()`) and a wall-clock end, so a window opened after an event cannot suppress it retroactively even within the same millisecond; coalesced work drops a candidate only when suppressed at EVERY observation that asked for the same reconciliation KEY, witnesses scoped per key so a sibling hint's event is not evidence about another hint's candidates; history reclaimed opportunistically against the oldest live observation on every `suppress()` and at the end of every flush, bounding it at one retained entry per suppressed path; never applied to classification of a vanished path; containment enforced at traversal time over the unresolved component chain (verified before the read, re-proven after it) with every DETECTED change failing closed — explicitly NOT race-free, since a swap undone before the re-check or one preserving `(dev, ino)` cannot be excluded without dirfd-relative no-follow primitives Node/Bun does not expose; a path the walker never enters is reported SKIPPED and converged by deactivating its indexed subtree without following it | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R5  | Coalescing; no duplicate events or redundant embedding | fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R6  | Live collection generations respected at EVERY flush resume point (classification and enumeration windows alike) | fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R7  | Diagnostics distinguish event receipt from reconciliation outcome, including `lastEventAt` attributed per contributing path/directory rather than per collection, published from the ELIGIBLE observation rather than the latest one seen, and carried beside the capped witness set so a stream past the observation cap still publishes the latest ACCEPTED observation; per-directory sync outcomes only where the failure is owned by a batched path, with the unattributable cause summarized once per sync result, bounded, and skipped when no observer is installed | fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — |
