@@ -4,10 +4,8 @@
  * @module src/mcp/tools/workspace-write
  */
 
-// node:fs/promises for mkdir (no Bun equivalent for structure ops)
-import { mkdir } from "node:fs/promises";
-// node:path for dirname/join (no Bun path utils)
-import { dirname, join } from "node:path";
+// node:path for join (no Bun path utils)
+import { join } from "node:path";
 import { z } from "zod";
 
 import type { Collection } from "../../config/types";
@@ -34,7 +32,12 @@ import {
   type FileRefactorPreviewPlan,
 } from "../../core/file-refactors";
 import { recordContentMutation } from "../../core/mutation-generations";
-import { defaultSyncService, withContentTypeRules } from "../../ingestion";
+import {
+  CaptureDestinationError,
+  defaultSyncService,
+  prepareCaptureDestination,
+  withContentTypeRules,
+} from "../../ingestion";
 import { runTool, type ToolResult } from "./index";
 
 interface CreateFolderInput {
@@ -429,7 +432,19 @@ export function handleDuplicateNote(
         });
         const currentPath = join(collection.path, doc.relPath);
         const nextPath = join(collection.path, plan.nextRelPath);
-        await mkdir(dirname(nextPath), { recursive: true });
+        // `mkdir -p` follows an existing directory symlink; a copy written
+        // through one is unreachable to the indexer, so `plan.nextUri` would
+        // name nothing. Prove the chain first.
+        try {
+          await prepareCaptureDestination(collection.path, plan.nextRelPath);
+        } catch (error) {
+          if (error instanceof CaptureDestinationError) {
+            throw new Error(
+              `${MCP_ERRORS.INVALID_INPUT.code}: ${error.message}`
+            );
+          }
+          throw error;
+        }
         await copyFilePath(currentPath, nextPath);
         const syncResult = await defaultSyncService.syncCollection(
           collection,

@@ -145,7 +145,10 @@ import {
 import { normalizeStructuredQueryInput } from "../core/structured-query";
 import { parseAndValidateTagFilter } from "../core/tags";
 import {
+  CaptureDestinationError,
   defaultSyncService,
+  prepareCaptureDestination,
+  requireActiveCaptureDocument,
   type SyncResult,
   withContentTypeRules,
 } from "../ingestion";
@@ -234,6 +237,31 @@ function unwrapTraceStore<T>(result: StoreResult<T>): T {
 function unwrapKnowledgeDelta<T>(result: KnowledgeDeltaServiceResult<T>): T {
   if (result.success) return result.data;
   throw sdkError(result.isValidation ? "VALIDATION" : "STORE", result.error);
+}
+
+/**
+ * Prove a write destination before writing it, and translate the refusal into
+ * an SDK error.
+ *
+ * `mkdir(dir, { recursive: true })` FOLLOWS an existing directory symlink, so
+ * without this a note written beneath `alias -> real/` lands on disk somewhere
+ * the indexer never walks, and one beneath `alias -> /outside` lands outside
+ * the collection. Both used to come back as success.
+ */
+async function prepareSdkWriteDestination(
+  collectionPath: string,
+  relPath: string
+): Promise<void> {
+  try {
+    await prepareCaptureDestination(collectionPath, relPath);
+  } catch (error) {
+    if (error instanceof CaptureDestinationError) {
+      throw sdkError("VALIDATION", error.message, {
+        details: { code: error.code, relPath: error.relPath },
+      });
+    }
+    throw error;
+  }
 }
 
 async function resolveClientState(
@@ -1547,7 +1575,7 @@ class GnoClientImpl implements GnoClient {
       contentToWrite = updateFrontmatterTags(contentToWrite, validatedTags);
     }
 
-    await mkdir(dirname(fullPath), { recursive: true });
+    await prepareSdkWriteDestination(collection.path, plan.relPath);
     await atomicWrite(fullPath, contentToWrite);
     const syncResults = await defaultSyncService.syncFiles(
       collection,
@@ -1568,9 +1596,20 @@ class GnoClientImpl implements GnoClient {
         syncResult?.errorMessage ?? "Failed to sync created note"
       );
     }
+    // "Not an error" is not proof: `skipped` and `unchanged` are non-errors
+    // too, and returning a `gno://` URI for a path with no ACTIVE document
+    // hands the caller a reference that resolves to nothing.
+    const indexed = await requireActiveCaptureDocument(
+      this.store,
+      collection.name,
+      plan.relPath
+    );
+    if (!indexed.ok) {
+      throw sdkError("RUNTIME", indexed.message);
+    }
 
     return {
-      uri: `gno://${collection.name}/${plan.relPath}`,
+      uri: indexed.document.uri,
       path: fullPath,
       relPath: plan.relPath,
       created: true,
@@ -1645,7 +1684,7 @@ class GnoClientImpl implements GnoClient {
       });
     }
 
-    await mkdir(dirname(fullPath), { recursive: true });
+    await prepareSdkWriteDestination(collection.path, plan.relPath);
     await writeCapturePlanFile(plan, fullPath);
     const syncResults = await defaultSyncService.syncFiles(
       collection,
@@ -1660,25 +1699,39 @@ class GnoClientImpl implements GnoClient {
       )
     );
     const syncResult = syncResults[0];
-    const docResult = await this.store.getDocument(
+    if (syncResult?.status === "error") {
+      return buildCaptureReceipt({
+        plan,
+        absPath: fullPath,
+        docid: syncResult.docid,
+        sync: {
+          status: "failed",
+          error:
+            syncResult.errorMessage ??
+            syncResult.errorCode ??
+            "Unknown sync error",
+        },
+      });
+    }
+    // "Not an error" is not proof of a capture: `skipped` and `unchanged` are
+    // non-errors too. Demand an ACTIVE document for the path.
+    const indexed = await requireActiveCaptureDocument(
+      this.store,
       collection.name,
       plan.relPath
     );
-    const docid = docResult.ok ? docResult.value?.docid : undefined;
+    if (!indexed.ok) {
+      return buildCaptureReceipt({
+        plan,
+        absPath: fullPath,
+        sync: { status: "failed", error: indexed.message },
+      });
+    }
     return buildCaptureReceipt({
       plan,
       absPath: fullPath,
-      docid: syncResult?.docid ?? docid,
-      sync:
-        syncResult?.status === "error"
-          ? {
-              status: "failed",
-              error:
-                syncResult.errorMessage ??
-                syncResult.errorCode ??
-                "Unknown sync error",
-            }
-          : { status: "completed" },
+      docid: syncResult?.docid ?? indexed.document.docid,
+      sync: { status: "completed" },
     });
   }
 
@@ -1867,7 +1920,7 @@ class GnoClientImpl implements GnoClient {
     });
     const currentPath = `${collection.path}/${storedDoc.relPath}`;
     const nextPath = `${collection.path}/${plan.nextRelPath}`;
-    await mkdir(dirname(nextPath), { recursive: true });
+    await prepareSdkWriteDestination(collection.path, plan.nextRelPath);
     await copyFilePath(currentPath, nextPath);
     await defaultSyncService.syncCollection(
       collection,

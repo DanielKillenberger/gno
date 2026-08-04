@@ -118,7 +118,9 @@ import {
 } from "../../core/tags";
 import { validateRelPath } from "../../core/validation";
 import {
+  CaptureDestinationError,
   defaultSyncService,
+  prepareCaptureDestination,
   type SyncResult,
   withContentTypeRules,
 } from "../../ingestion";
@@ -563,6 +565,20 @@ function errorResponse(
     },
     status
   );
+}
+
+/**
+ * A destination the indexer could never reach is a request problem, not a
+ * server fault: report the refusal instead of the generic 500 the surrounding
+ * catch would produce.
+ */
+function captureDestinationErrorResponse(
+  error: CaptureDestinationError
+): Response {
+  return errorResponse("VALIDATION", error.message, 409, {
+    reason: error.code,
+    relPath: error.relPath,
+  });
 }
 
 function fileRefactorHttpErrorResponse(error: FileRefactorHttpError): Response {
@@ -3016,8 +3032,9 @@ export async function handleDuplicateDoc(
   const nextFullPath = nodePath.join(collection.path, plan.nextRelPath);
 
   try {
-    const { mkdir } = await import("node:fs/promises"); // structure ops need fs
-    await mkdir(nodePath.dirname(nextFullPath), { recursive: true });
+    // `mkdir -p` follows an existing directory symlink; a copy written through
+    // one is unreachable to the indexer, so `plan.nextUri` would name nothing.
+    await prepareCaptureDestination(collection.path, plan.nextRelPath);
     await copyFilePath(fullPath, nextFullPath);
     let warning: string | undefined;
     try {
@@ -3050,6 +3067,9 @@ export async function handleDuplicateDoc(
       warning,
     });
   } catch (error) {
+    if (error instanceof CaptureDestinationError) {
+      return captureDestinationErrorResponse(error);
+    }
     return errorResponse(
       "RUNTIME",
       error instanceof Error ? error.message : "Failed to duplicate document",
@@ -3584,6 +3604,9 @@ export async function handleCreateCapture(
     );
     return jsonResponse(result.body, result.status);
   } catch (error) {
+    if (error instanceof CaptureDestinationError) {
+      return captureDestinationErrorResponse(error);
+    }
     return errorResponse(
       "RUNTIME",
       `Failed to capture document: ${
@@ -3740,10 +3763,10 @@ export async function handleCreateDoc(
       );
     }
 
-    // Ensure parent directory exists
-    const parentDir = nodePath.dirname(fullPath);
-    const { mkdir } = await import("node:fs/promises"); // structure ops need fs
-    await mkdir(parentDir, { recursive: true });
+    // Prove the parent chain instead of `mkdir -p`, which follows an existing
+    // directory symlink and would put the new note where the walker never
+    // looks - or, for an escaping alias, outside the collection.
+    await prepareCaptureDestination(collection.path, normalizedRelPath);
 
     // Inject tags into frontmatter for markdown files
     const presetContent = body.presetId
@@ -3828,6 +3851,9 @@ export async function handleCreateDoc(
       202
     );
   } catch (e) {
+    if (e instanceof CaptureDestinationError) {
+      return captureDestinationErrorResponse(e);
+    }
     return errorResponse(
       "RUNTIME",
       `Failed to create document: ${e instanceof Error ? e.message : String(e)}`,

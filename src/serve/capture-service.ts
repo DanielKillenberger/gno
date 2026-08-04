@@ -5,10 +5,8 @@
  * collision, provenance, atomic-write, sync, and receipt semantics cannot drift.
  */
 
-// node:fs/promises structure operations have no Bun equivalent.
-import { mkdir } from "node:fs/promises";
 // node:path has no Bun path utilities.
-import { basename, dirname, join as pathJoin } from "node:path";
+import { basename, join as pathJoin } from "node:path";
 
 import type { Collection, Config } from "../config/types";
 import type { PreparedBrowserClip } from "../core/browser-clip";
@@ -32,6 +30,7 @@ import { recordContentMutation } from "../core/mutation-generations";
 import {
   type CollectionSyncResult,
   defaultSyncService,
+  prepareCaptureDestination,
   type SyncResult,
   withContentTypeRules,
 } from "../ingestion";
@@ -219,7 +218,11 @@ export const executeResidentCapturePlan = async (
     };
   }
 
-  await mkdir(dirname(fullPath), { recursive: true });
+  // Prove the parent chain BEFORE writing. `mkdir -p` follows an existing
+  // directory symlink, and a capture written through one lands where the
+  // walker never looks - or, for an escaping alias, outside the collection.
+  // Throws `CaptureDestinationError`; the routes map it to a 4xx.
+  await prepareCaptureDestination(collection.path, plan.relPath);
   context.watchService?.suppress(fullPath);
   await writeCapturePlanFile(plan, fullPath);
   const gnoUri = `gno://${collection.name}/${plan.relPath}`;

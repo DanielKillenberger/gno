@@ -4,8 +4,6 @@
  * @module src/cli/commands/capture
  */
 
-// node:fs/promises for mkdir (no Bun equivalent for recursive dir creation)
-import { mkdir } from "node:fs/promises";
 // node:path has no Bun path utilities
 import { dirname, join } from "node:path";
 
@@ -26,7 +24,13 @@ import {
 } from "../../core/capture";
 import { writeCapturePlanFile } from "../../core/capture-write";
 import { withWriteLock } from "../../core/file-lock";
-import { defaultSyncService, withContentTypeRules } from "../../ingestion";
+import {
+  CaptureDestinationError,
+  defaultSyncService,
+  prepareCaptureDestination,
+  requireActiveCaptureDocument,
+  withContentTypeRules,
+} from "../../ingestion";
 import { CliError } from "../errors";
 import { initStore } from "./shared";
 
@@ -216,7 +220,20 @@ export async function capture(
         });
       }
 
-      await mkdir(dirname(absPath), { recursive: true });
+      // Prove the destination BEFORE writing: `mkdir -p` follows an existing
+      // directory symlink, and a file written through one is unreachable to the
+      // indexer (or, for an escaping alias, outside the collection entirely).
+      try {
+        await prepareCaptureDestination(collection.path, plan.relPath);
+      } catch (error) {
+        if (error instanceof CaptureDestinationError) {
+          throw new CliError("VALIDATION", error.message, {
+            code: error.code,
+            relPath: error.relPath,
+          });
+        }
+        throw error;
+      }
       await writeCapturePlanFile(plan, absPath);
       const syncResults = await defaultSyncService.syncFiles(
         collection,
@@ -231,22 +248,39 @@ export async function capture(
         )
       );
       const syncResult = syncResults[0];
-      const docResult = await store.getDocument(collection.name, plan.relPath);
-      const docid = docResult.ok ? docResult.value?.docid : undefined;
+      if (syncResult?.status === "error") {
+        return buildCaptureReceipt({
+          plan,
+          absPath,
+          docid: syncResult.docid,
+          sync: {
+            status: "failed",
+            error:
+              syncResult.errorMessage ??
+              syncResult.errorCode ??
+              "Unknown sync error",
+          },
+        });
+      }
+      // "Not an error" is not proof of a capture: `skipped` and `unchanged` are
+      // non-errors too. Demand an ACTIVE document for the path.
+      const indexed = await requireActiveCaptureDocument(
+        store,
+        collection.name,
+        plan.relPath
+      );
+      if (!indexed.ok) {
+        return buildCaptureReceipt({
+          plan,
+          absPath,
+          sync: { status: "failed", error: indexed.message },
+        });
+      }
       return buildCaptureReceipt({
         plan,
         absPath,
-        docid: syncResult?.docid ?? docid,
-        sync:
-          syncResult?.status === "error"
-            ? {
-                status: "failed",
-                error:
-                  syncResult.errorMessage ??
-                  syncResult.errorCode ??
-                  "Unknown sync error",
-              }
-            : { status: "completed" },
+        docid: syncResult?.docid ?? indexed.document.docid,
+        sync: { status: "completed" },
       });
     });
   } finally {

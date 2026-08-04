@@ -4,6 +4,16 @@
  * @module src/ingestion
  */
 
+// Destination safety for paths GNO itself writes into a collection
+export type {
+  ActiveCaptureDocument,
+  CaptureDestinationErrorCode,
+} from "./capture-destination";
+export {
+  CaptureDestinationError,
+  prepareCaptureDestination,
+  requireActiveCaptureDocument,
+} from "./capture-destination";
 // Chunker
 export { defaultChunker, MarkdownChunker } from "./chunker";
 // Bounded single-level directory enumeration

@@ -4,10 +4,8 @@
  * @module src/mcp/tools/capture
  */
 
-// node:fs/promises for mkdir (no Bun equivalent for structure ops)
-import { mkdir } from "node:fs/promises";
 // node:path for path utils (no Bun path utils)
-import { dirname, extname, join } from "node:path";
+import { extname, join } from "node:path";
 
 import type { NoteCollisionPolicy } from "../../core/note-creation";
 import type { NotePresetId } from "../../core/note-presets";
@@ -24,7 +22,13 @@ import { writeCapturePlanFile } from "../../core/capture-write";
 import { MCP_ERRORS } from "../../core/errors";
 import { withWriteLock } from "../../core/file-lock";
 import { normalizeCollectionName } from "../../core/validation";
-import { defaultSyncService, withContentTypeRules } from "../../ingestion";
+import {
+  CaptureDestinationError,
+  defaultSyncService,
+  prepareCaptureDestination,
+  requireActiveCaptureDocument,
+  withContentTypeRules,
+} from "../../ingestion";
 import { runTool, type ToolResult } from "./index";
 
 interface CaptureInput extends Omit<
@@ -169,7 +173,19 @@ export function handleCapture(
           }) as McpCaptureResult;
         }
 
-        await mkdir(dirname(absPath), { recursive: true });
+        // Prove the destination BEFORE writing: `mkdir -p` follows an existing
+        // directory symlink, and a file written through one is unreachable to
+        // the indexer (or outside the collection, for an escaping alias).
+        try {
+          await prepareCaptureDestination(collection.path, plan.relPath);
+        } catch (error) {
+          if (error instanceof CaptureDestinationError) {
+            throw new Error(
+              `${MCP_ERRORS.INVALID_INPUT.code}: ${error.message}`
+            );
+          }
+          throw error;
+        }
         await writeCapturePlanFile(plan, absPath);
 
         const results = await defaultSyncService.syncFiles(
@@ -214,35 +230,33 @@ export function handleCapture(
           ctx.markContentMutation?.();
         }
 
-        let docid = syncResult.docid;
-        let documentId: number | undefined;
-        const docResult = await ctx.store.getDocument(
+        // "Not an error" is not proof of a capture: `skipped` and `unchanged`
+        // are non-errors too. Demand an ACTIVE document for the path.
+        const indexed = await requireActiveCaptureDocument(
+          ctx.store,
           collectionName,
           plan.relPath
         );
-        if (docResult.ok && docResult.value) {
-          docid = docid ?? docResult.value.docid;
-          documentId = docResult.value.id;
-        }
-        if (!docid) {
+        if (!indexed.ok) {
           return buildCaptureReceipt({
             plan,
             absPath,
             docid: "",
             sync: {
               status: "failed",
-              error: "RUNTIME: Document missing after sync",
+              error: `RUNTIME: Document missing after sync - ${indexed.message}`,
             },
             overwritten: exists && args.overwrite === true,
             serverInstanceId: ctx.serverInstanceId,
           }) as McpCaptureResult;
         }
+        const docid = syncResult.docid ?? indexed.document.docid;
 
         const isMarkdown =
           plan.relPath.endsWith(".md") || plan.relPath.endsWith(".markdown");
-        if (!isMarkdown && plan.tags.length > 0 && documentId) {
+        if (!isMarkdown && plan.tags.length > 0) {
           const tagResult = await ctx.store.setDocTags(
-            documentId,
+            indexed.document.id,
             plan.tags,
             "user"
           );

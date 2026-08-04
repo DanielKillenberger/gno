@@ -8,7 +8,7 @@ import {
   type SearchResults,
 } from "@gmickel/gno";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -67,6 +67,22 @@ async function cli(...args: string[]) {
   } finally {
     restoreOutput();
   }
+}
+
+async function expectWriteRefused(
+  operation: Promise<unknown>,
+  reason: string
+): Promise<void> {
+  try {
+    await operation;
+  } catch (error) {
+    expect(error).toMatchObject({
+      code: "VALIDATION",
+      details: { code: reason },
+    });
+    return;
+  }
+  throw new Error(`expected the write to be refused with ${reason}`);
 }
 
 beforeAll(async () => {
@@ -547,6 +563,98 @@ describe("SDK client", () => {
     const created = await client.get(result.uri);
     expect(created.content).toContain("Captured from SDK");
     expect(created.content).toContain("source:");
+  });
+
+  test("creates and captures into a real nested folder, and the URI resolves", async () => {
+    // Non-discriminating regression guard: passes at fc38f2de too. It keeps
+    // the refusals below from being satisfied by refusing nested writes.
+    const created = await client.createNote({
+      collection: "fixtures",
+      title: "Real Nested",
+      folderPath: "generated/real-nested",
+      content: "# Real Nested\n\nBody\n",
+    });
+    expect(created.relPath).toBe("generated/real-nested/real-nested.md");
+    const fetched = await client.get(created.uri);
+    expect(fetched.content).toContain("Body");
+
+    const captured = await client.capture({
+      collection: "fixtures",
+      content: "Captured nested",
+      folderPath: "generated/real-nested",
+      title: "Captured Nested",
+    });
+    expect(captured.sync.status).toBe("completed");
+    expect((await client.get(captured.uri)).content).toContain(
+      "Captured nested"
+    );
+  });
+
+  test("SDK refuses writes beneath a symlinked folder inside the collection", async () => {
+    // DISCRIMINATING: at fc38f2de `mkdir -p` followed the alias, both calls
+    // "succeeded", and `createNote` handed back a gno:// URI that resolved to
+    // nothing because the no-follow indexer never saw the file.
+    await mkdir(join(fixturesDir, "aliased-real"), { recursive: true });
+    await symlink(
+      join(fixturesDir, "aliased-real"),
+      join(fixturesDir, "aliased")
+    );
+
+    await expectWriteRefused(
+      client.createNote({
+        collection: "fixtures",
+        title: "Aliased Note",
+        folderPath: "aliased",
+        content: "# Aliased\n",
+      }),
+      "PATH_NOT_WALKABLE"
+    );
+
+    await expectWriteRefused(
+      client.capture({
+        collection: "fixtures",
+        content: "Aliased capture",
+        folderPath: "aliased",
+      }),
+      "PATH_NOT_WALKABLE"
+    );
+
+    const leaked = await Array.fromAsync(
+      new Bun.Glob("*").scan({ cwd: join(fixturesDir, "aliased-real") })
+    );
+    expect(leaked).toEqual([]);
+  });
+
+  test("SDK reports containment when a symlinked folder escapes the collection", async () => {
+    // DISCRIMINATING: at fc38f2de both calls wrote OUTSIDE the collection and
+    // reported success; the containment error was lost.
+    const outsideDir = await mkdtemp(join(tmpdir(), "gno-sdk-outside-"));
+    await symlink(outsideDir, join(fixturesDir, "escaped"));
+
+    await expectWriteRefused(
+      client.createNote({
+        collection: "fixtures",
+        title: "Escaped Note",
+        folderPath: "escaped",
+        content: "# Escaped\n",
+      }),
+      "PATH_OUTSIDE_COLLECTION"
+    );
+
+    await expectWriteRefused(
+      client.capture({
+        collection: "fixtures",
+        content: "Escaped capture",
+        folderPath: "escaped",
+      }),
+      "PATH_OUTSIDE_COLLECTION"
+    );
+
+    const leaked = await Array.fromAsync(
+      new Bun.Glob("*").scan({ cwd: outsideDir })
+    );
+    expect(leaked).toEqual([]);
+    await safeRm(outsideDir);
   });
 
   test("rejects invalid capture collision policies at runtime", async () => {

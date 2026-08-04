@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -176,6 +176,80 @@ describe("gno_capture MCP", () => {
     expect(written).toContain('url: "https://example.com/source"');
     expect(result.content[0]?.text).toContain("Content hash:");
     expect(contentGeneration).toBe(1);
+  });
+
+  test("captures into a real nested directory and indexes it", async () => {
+    // Non-discriminating regression guard: passes at fc38f2de too. It keeps
+    // the two refusals below from being satisfied by refusing subdirectory
+    // captures wholesale.
+    const result = await handleCapture(
+      {
+        collection: "notes",
+        content: "Nested body",
+        title: "Nested",
+        path: "deep/nested/note.md",
+      },
+      toolContext(true)
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({
+      sync: { status: "completed" },
+    });
+    expect(result.structuredContent?.docid).toBeTruthy();
+    const stored = await store.getDocument("notes", "deep/nested/note.md");
+    expect(stored.ok && stored.value?.active).toBe(true);
+  });
+
+  test("refuses to capture beneath a symlinked parent inside the collection", async () => {
+    // DISCRIMINATING: at fc38f2de `mkdir -p` followed `alias`, the note landed
+    // in `real/`, the no-follow indexer never saw it, and the receipt still
+    // said `completed`.
+    await mkdir(join(tmpDir, "real"), { recursive: true });
+    await symlink(join(tmpDir, "real"), join(tmpDir, "alias"));
+
+    const result = await handleCapture(
+      {
+        collection: "notes",
+        content: "Through the alias",
+        title: "Aliased",
+        path: "alias/note.md",
+      },
+      toolContext(true)
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain("symlink");
+    expect(await Bun.file(join(tmpDir, "real", "note.md")).exists()).toBe(
+      false
+    );
+  });
+
+  test("reports containment when a symlinked parent escapes the collection", async () => {
+    // DISCRIMINATING: at fc38f2de this wrote OUTSIDE the collection and
+    // reported a completed capture.
+    const outsideDir = await mkdtemp(join(tmpdir(), "gno-mcp-outside-"));
+    try {
+      await symlink(outsideDir, join(tmpDir, "escape"));
+
+      const result = await handleCapture(
+        {
+          collection: "notes",
+          content: "Out of bounds",
+          title: "Escaped",
+          path: "escape/note.md",
+        },
+        toolContext(true)
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain(
+        "resolving outside the collection root"
+      );
+      expect(await Bun.file(join(outsideDir, "note.md")).exists()).toBe(false);
+    } finally {
+      await safeRm(outsideDir);
+    }
   });
 
   test("supports open_existing through shared collision planning", async () => {

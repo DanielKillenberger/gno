@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -154,6 +154,85 @@ describe("gno capture", () => {
     const payload = JSON.parse(result.stderr);
     expect(payload.error.code).toBe("VALIDATION");
     expect(payload.error.message).toContain("binary-like");
+  });
+
+  test("captures into a real nested directory and indexes it", async () => {
+    // Non-discriminating regression guard: this passes at fc38f2de too. It is
+    // here so the two refusals below cannot be satisfied by refusing captures
+    // into subdirectories wholesale.
+    const result = await cli(
+      "capture",
+      "Nested body",
+      "--collection",
+      "notes",
+      "--path",
+      "deep/nested/note.md",
+      "--json"
+    );
+
+    expect(result.code).toBe(0);
+    const receipt = JSON.parse(result.stdout);
+    expect(receipt.relPath).toBe("deep/nested/note.md");
+    expect(receipt.sync.status).toBe("completed");
+    expect(receipt.docid).toBeTruthy();
+
+    const stored = await cli("get", receipt.uri, "--json");
+    expect(stored.code).toBe(0);
+    expect(stored.stdout).toContain("Nested body");
+  });
+
+  test("refuses to capture beneath a symlinked parent inside the collection", async () => {
+    // `mkdir -p` FOLLOWS `alias`, so before the fix the note was written into
+    // `real/`, the indexer (no-follow) never saw it, and the receipt still
+    // reported `sync.status: completed` with a `gno://` URI resolving to
+    // nothing. DISCRIMINATING: at fc38f2de this exits 0.
+    await mkdir(join(notesDir, "real"), { recursive: true });
+    await symlink(join(notesDir, "real"), join(notesDir, "alias"));
+
+    const result = await cli(
+      "capture",
+      "Through the alias",
+      "--collection",
+      "notes",
+      "--path",
+      "alias/note.md",
+      "--json"
+    );
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr);
+    expect(payload.error.code).toBe("VALIDATION");
+    expect(payload.error.message).toContain("symlink");
+    expect(payload.error.details.code).toBe("PATH_NOT_WALKABLE");
+    // Nothing was written through the alias.
+    expect(await Bun.file(join(notesDir, "real", "note.md")).exists()).toBe(
+      false
+    );
+  });
+
+  test("reports containment when a symlinked parent escapes the collection", async () => {
+    // DISCRIMINATING: at fc38f2de this wrote the file OUTSIDE the collection
+    // and exited 0 with `sync.status: completed` - a containment failure
+    // downgraded to silent success.
+    const escapeTarget = join(testDir, "outside");
+    await mkdir(escapeTarget, { recursive: true });
+    await symlink(escapeTarget, join(notesDir, "escape"));
+
+    const result = await cli(
+      "capture",
+      "Out of bounds",
+      "--collection",
+      "notes",
+      "--path",
+      "escape/note.md",
+      "--json"
+    );
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr);
+    expect(payload.error.code).toBe("VALIDATION");
+    expect(payload.error.details.code).toBe("PATH_OUTSIDE_COLLECTION");
+    expect(await Bun.file(join(escapeTarget, "note.md")).exists()).toBe(false);
   });
 
   test("detects disk-only collisions", async () => {
