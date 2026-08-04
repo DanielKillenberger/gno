@@ -308,8 +308,14 @@ export function formatCaptureReceipt(
     `URI: ${receipt.uri}`,
     `Path: ${receipt.absPath ?? receipt.relPath}`,
     `Sync: ${receipt.sync.status}`,
-    `Embed: ${receipt.embed.status}`,
   ];
+  // `sync.reason` is where a record container explains that the URI above
+  // names the written FILE and no document. Dropping it here left the only
+  // thing a person actually reads looking like an ordinary success.
+  if (receipt.sync.reason) {
+    lines.push(`Note: ${receipt.sync.reason}`);
+  }
+  lines.push(`Embed: ${receipt.embed.status}`);
   if (receipt.tags.length > 0) {
     lines.push(`Tags: ${receipt.tags.join(", ")}`);
   }

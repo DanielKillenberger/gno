@@ -230,14 +230,51 @@ export interface GnoCreateNoteOptions {
   tags?: string[];
 }
 
-export interface GnoCreateNoteResult {
-  uri: string;
+/** The written FILE, identified identically for both `createNote` outcomes. */
+export interface GnoCreateNoteFile {
+  /** Absolute path of the file that was written. */
   path: string;
+  /** Collection-relative path of the file that was written. */
   relPath: string;
   created: boolean;
   openedExisting: boolean;
   createdWithSuffix?: boolean;
 }
+
+/**
+ * The written path IS a document: `uri` is fetchable with `client.get()`.
+ */
+export interface GnoCreatedNoteDocument extends GnoCreateNoteFile {
+  kind: "document";
+  /** Resolves through `client.get()` / `getDocumentByUri` to this document. */
+  uri: string;
+}
+
+/**
+ * The written path is a record container (a `.jsonl` export, a `.vtt`
+ * transcript, ...): it was imported as N logical record documents living at
+ * virtual `.gno/records/...` paths, and there is NO document at the path that
+ * was written.
+ *
+ * This shape deliberately has no `uri` field. A `gno://<collection>/<relPath>`
+ * for a container resolves to nothing - `getDocumentByUri` is an exact lookup -
+ * so offering one here would hand back an unfetchable document handle that
+ * looks exactly like a fetchable one. Accessing `.uri` on
+ * {@link GnoCreateNoteResult} is therefore a compile error until the caller
+ * narrows on `kind`, and the fetchable things it gets in the container case are
+ * the record URIs.
+ */
+export interface GnoCreatedNoteRecordContainer extends GnoCreateNoteFile {
+  kind: "record-container";
+  /** URIs of the logical records the container produced. Each is fetchable. */
+  recordUris: string[];
+  /** Human-readable explanation of why there is no single document URI. */
+  reason: string;
+}
+
+export type GnoCreateNoteResult =
+  | GnoCreatedNoteDocument
+  | GnoCreatedNoteRecordContainer;
 
 export interface GnoCaptureOptions extends Omit<CaptureInput, "overwrite"> {}
 

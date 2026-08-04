@@ -34,6 +34,7 @@ import {
 import { recordContentMutation } from "../../core/mutation-generations";
 import {
   CaptureDestinationError,
+  captureProofContainerSummary,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -463,7 +464,18 @@ export function handleDuplicateNote(
           collection.name,
           plan.nextRelPath
         );
-        if (!indexed.ok) {
+        if (indexed.ok) {
+          // A container copy IS indexed - as N logical records at virtual
+          // paths, with nothing at the copy's own path. `uri` below therefore
+          // resolves to nothing, exactly like the unindexed case, and must say
+          // so rather than read as an ordinary duplicate.
+          const containerSummary = captureProofContainerSummary(indexed);
+          if (containerSummary) {
+            warnings.push(
+              `File duplicated on disk and ${containerSummary}, so ${plan.nextUri} resolves to no document.`
+            );
+          }
+        } else {
           warnings.push(
             `File duplicated on disk, but it is not indexed: ${indexed.message}`
           );

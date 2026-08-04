@@ -3,7 +3,11 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { CaptureReceipt } from "../../src/core/capture";
+
+import { formatCaptureReceipt } from "../../src/cli/commands/capture";
 import { runCli } from "../../src/cli/run";
+import { captureProofSyncReason } from "../../src/ingestion";
 import { safeRm } from "../helpers/cleanup";
 
 let stdoutData = "";
@@ -254,5 +258,63 @@ describe("gno capture", () => {
     expect(receipt.relPath).toBe("project-plan-2.md");
     expect(receipt.createdWithSuffix).toBe(true);
     expect(receipt.collisionPolicyResult).toBe("created_with_suffix");
+  });
+});
+
+describe("formatCaptureReceipt text output", () => {
+  const baseReceipt: CaptureReceipt = {
+    uri: "gno://notes/export.jsonl",
+    collection: "notes",
+    relPath: "export.jsonl",
+    absPath: "/tmp/notes/export.jsonl",
+    created: true,
+    openedExisting: false,
+    createdWithSuffix: false,
+    contentHash: "sha256:abc",
+    source: { kind: "direct", capturedAt: "2026-08-04T10:00:00.000Z" },
+    tags: [],
+    sync: { status: "completed" },
+    embed: { status: "not_requested" },
+    collisionPolicyResult: "created",
+  };
+
+  test("surfaces sync.reason so a container capture does not read as ordinary", () => {
+    // A record container's whole explanation - the URI names the written FILE
+    // and no document - lives in `sync.reason`. DISCRIMINATING against
+    // 0a3b57f5: the formatter there printed "Captured note." / "Sync:
+    // completed" and dropped the reason, so the only thing a person reads
+    // claimed an ordinary success.
+    const reason = captureProofSyncReason({
+      ok: true,
+      kind: "record-container",
+      records: [{}, {}] as never,
+    });
+    const output = formatCaptureReceipt({
+      ...baseReceipt,
+      sync: { status: "completed", reason },
+    });
+
+    expect(output).toContain("Sync: completed");
+    expect(output).toContain(`Note: ${reason}`);
+    expect(output).toContain("2 logical record documents");
+    // Still after Sync and before Embed - the reason qualifies the sync line.
+    const lines = output.split("\n");
+    expect(lines.indexOf("Sync: completed")).toBeLessThan(
+      lines.findIndex((line) => line.startsWith("Note: "))
+    );
+    expect(lines.findIndex((line) => line.startsWith("Note: "))).toBeLessThan(
+      lines.indexOf("Embed: not_requested")
+    );
+  });
+
+  test("an ordinary capture prints no Note line and json/quiet are untouched", () => {
+    const output = formatCaptureReceipt(baseReceipt);
+    expect(output).not.toContain("Note: ");
+    expect(formatCaptureReceipt(baseReceipt, { quiet: true })).toBe(
+      baseReceipt.uri
+    );
+    expect(
+      JSON.parse(formatCaptureReceipt(baseReceipt, { json: true })).uri
+    ).toBe(baseReceipt.uri);
   });
 });

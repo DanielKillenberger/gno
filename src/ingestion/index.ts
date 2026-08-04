@@ -12,6 +12,7 @@ export type {
 } from "./capture-destination";
 export {
   CaptureDestinationError,
+  captureProofContainerSummary,
   captureProofDocid,
   captureProofSyncReason,
   prepareCaptureDestination,

@@ -398,3 +398,102 @@ describe("gno_capture MCP", () => {
     expect(result.content[0]?.text).toContain("byte limit");
   });
 });
+
+describe("gno_capture MCP - record containers", () => {
+  let tmpDir: string;
+  let store: SqliteAdapter;
+
+  const collection = () => ({
+    name: "records",
+    path: tmpDir,
+    pattern: "**/*",
+    include: [],
+    exclude: [],
+    recordAdapters: {
+      jsonl: {
+        fieldMapping: { id: "/id", title: "/title", body: "/text" },
+      },
+    },
+  });
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "gno-mcp-capture-records-"));
+    store = new SqliteAdapter();
+    expect((await store.open(join(tmpDir, "test.db"), "porter")).ok).toBe(true);
+    expect((await store.syncCollections([collection()])).ok).toBe(true);
+  });
+
+  afterEach(async () => {
+    await store.close();
+    await safeRm(tmpDir);
+  });
+
+  function recordsContext(): ToolContext {
+    return {
+      indexName: "default",
+      store,
+      config: {
+        version: "1.0",
+        ftsTokenizer: "porter",
+        collections: [],
+        contexts: [],
+      },
+      collections: [collection()],
+      actualConfigPath: join(tmpDir, "config.yml"),
+      toolMutex: {
+        acquire: async () => () => {},
+      } as ToolContext["toolMutex"],
+      jobManager: {} as ToolContext["jobManager"],
+      serverInstanceId: "test-server",
+      writeLockPath: join(tmpDir, ".lock"),
+      enableWrite: true,
+      isShuttingDown: () => false,
+    };
+  }
+
+  test("the TEXT an agent reads states the container fact and omits an empty Doc", async () => {
+    const result = await handleCapture(
+      {
+        collection: "records",
+        path: "export.jsonl",
+        content: `${[
+          { id: "one", title: "First", text: "Zephyr ships Friday" },
+          { id: "two", title: "Second", text: "Budget capped at forty" },
+        ]
+          .map((record) => JSON.stringify(record))
+          .join("\n")}\n`,
+      },
+      recordsContext()
+    );
+
+    expect(result.isError).toBeUndefined();
+    // The JSON half is unchanged: `docid` is still required by the schema and
+    // is still the empty string for "not resolved".
+    expect(result.structuredContent?.docid).toBe("");
+    expect(result.structuredContent?.sync).toMatchObject({
+      status: "completed",
+    });
+
+    const text = result.content[0]?.text ?? "";
+    // DISCRIMINATING against 0a3b57f5: there this text opened with a bare
+    // `Doc: ` and reported `Sync: completed` with no further word, reading as
+    // an ordinary capture of a document that does not exist.
+    expect(text).not.toContain("Doc: ");
+    expect(text).toContain("Sync: completed");
+    expect(text).toContain("Note: ");
+    expect(text).toContain("2 logical record documents");
+    expect(text).toContain("the container path itself has no document");
+  });
+
+  test("an ordinary markdown capture still prints Doc and no Note line", async () => {
+    const result = await handleCapture(
+      { collection: "records", path: "plain.md", content: "# Plain\n\nBody" },
+      recordsContext()
+    );
+
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain("Doc: ");
+    expect(result.structuredContent?.docid).not.toBe("");
+    expect(text).not.toContain("Note: ");
+  });
+});

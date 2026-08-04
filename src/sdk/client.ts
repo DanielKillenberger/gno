@@ -56,7 +56,6 @@ import type {
 } from "./types";
 
 import {
-  buildUri,
   decorateUriForIndex,
   DEFAULT_INDEX_NAME,
   getIndexDbPath,
@@ -147,6 +146,7 @@ import { normalizeStructuredQueryInput } from "../core/structured-query";
 import { parseAndValidateTagFilter } from "../core/tags";
 import {
   CaptureDestinationError,
+  captureProofContainerSummary,
   captureProofDocid,
   captureProofSyncReason,
   defaultSyncService,
@@ -1543,7 +1543,12 @@ class GnoClientImpl implements GnoClient {
       if (!existingDoc.ok || !existingDoc.value) {
         throw sdkError("NOT_FOUND", "Existing note could not be resolved");
       }
+      // Collision detection is by INDEXED rel path, and a container's records
+      // are indexed at virtual `.gno/records/...` paths, so a container path is
+      // never "existing" here - this branch is only ever reached for a real
+      // per-path document.
       return {
+        kind: "document",
         uri: existingDoc.value.uri,
         path: fullPath,
         relPath: plan.relPath,
@@ -1611,20 +1616,27 @@ class GnoClientImpl implements GnoClient {
       throw sdkError("RUNTIME", indexed.message);
     }
 
-    return {
-      // For a record container there is no document AT the written path, and
-      // its N logical records live at virtual `.gno/records/...` paths. Naming
-      // one of them here would contradict the `path`/`relPath` this call
-      // returns alongside, so the URI names the file that was written.
-      uri:
-        indexed.kind === "file"
-          ? indexed.document.uri
-          : buildUri(collection.name, plan.relPath),
+    const writtenFile = {
       path: fullPath,
       relPath: plan.relPath,
       created: true,
       openedExisting: false,
       createdWithSuffix: plan.createdWithSuffix,
+    };
+    if (indexed.kind === "file") {
+      return { kind: "document", uri: indexed.document.uri, ...writtenFile };
+    }
+    // A record container has no document AT the written path: its N logical
+    // records live at virtual `.gno/records/...` paths. Handing back
+    // `gno://<collection>/<relPath>` would be a URI `client.get()` cannot
+    // resolve, so this shape carries no `uri` at all - the file stays
+    // identified by `path`/`relPath`, and the fetchable handles are the
+    // records' own URIs.
+    return {
+      kind: "record-container",
+      recordUris: indexed.records.map((row) => row.uri),
+      reason: `Written as a record container: ${captureProofContainerSummary(indexed)}, so there is no single fetchable URI for it - fetch the records in recordUris instead.`,
+      ...writtenFile,
     };
   }
 

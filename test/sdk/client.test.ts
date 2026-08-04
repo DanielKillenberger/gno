@@ -3,6 +3,8 @@ import {
   createGnoClient,
   getRetrievalTraceMetadata,
   type GnoClient,
+  type GnoCreatedNoteDocument,
+  type GnoCreateNoteResult,
   type GnoProjectHintOptions,
   type GnoSearchOptions,
   type SearchResults,
@@ -85,6 +87,21 @@ async function expectWriteRefused(
   throw new Error(`expected the write to be refused with ${reason}`);
 }
 
+/**
+ * Narrow a `createNote` result to the plain-document shape.
+ *
+ * `GnoCreateNoteResult` is a union and only the `document` arm carries a
+ * fetchable `uri`, so a test that wants one has to say which arm it expects.
+ */
+function expectDocumentNote(
+  result: GnoCreateNoteResult
+): GnoCreatedNoteDocument {
+  if (result.kind !== "document") {
+    throw new Error(`expected a document note, got kind=${result.kind}`);
+  }
+  return result;
+}
+
 beforeAll(async () => {
   testDir = join(tmpdir(), `gno-sdk-test-${Date.now()}`);
   fixturesDir = join(testDir, "fixtures");
@@ -107,6 +124,13 @@ beforeAll(async () => {
       pattern: "**/*",
       include: [],
       exclude: [],
+      // Makes `.jsonl` a RECORD CONTAINER for this collection: one written
+      // file, N logical record documents, and no document at the written path.
+      recordAdapters: {
+        jsonl: {
+          fieldMapping: { id: "/id", title: "/title", body: "/text" },
+        },
+      },
     },
   ];
   config.contexts = [
@@ -535,10 +559,53 @@ describe("SDK client", () => {
     });
 
     expect(result.relPath).toBe("generated/sdk-project.md");
+    // An ordinary note IS its document, so it keeps the fetchable-URI shape.
+    expect(result.kind).toBe("document");
 
     const created = await client.get("fixtures/generated/sdk-project.md");
     expect(created.content).toContain("## Goal");
     expect(created.content).toContain('category: "project"');
+  });
+
+  test("createNote into a record container returns fetchable record URIs and no document URI", async () => {
+    // DISCRIMINATING against 0a3b57f5: there this call returned
+    // `uri: "gno://fixtures/generated/session.jsonl"`, and `client.get()` on it
+    // threw - a supported creation that succeeded and handed back a handle
+    // resolving to nothing. The result now has no `uri` for this shape at all,
+    // and what it does hand back resolves.
+    const relPath = "generated/session.jsonl";
+    const created = await client.createNote({
+      collection: "fixtures",
+      relPath,
+      content: `${[
+        { id: "one", title: "First record", text: "Zephyr ships on Friday" },
+        { id: "two", title: "Second record", text: "Budget capped at forty" },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    });
+
+    expect(created.kind).toBe("record-container");
+    if (created.kind !== "record-container") {
+      throw new Error("expected a record-container result");
+    }
+    // The physical file is still identified, exactly as before.
+    expect(created.relPath).toBe(relPath);
+    expect(created.path).toBe(join(fixturesDir, "generated", "session.jsonl"));
+    expect(created.created).toBe(true);
+    // No document URI is offered, because none would resolve.
+    expect(created).not.toHaveProperty("uri");
+    expect(created.reason).toContain("2 logical record documents");
+
+    expect(created.recordUris).toHaveLength(2);
+    for (const uri of created.recordUris) {
+      expect(uri).not.toBe(`gno://fixtures/${relPath}`);
+      const fetched = await client.get(uri);
+      expect(fetched.content.length).toBeGreaterThan(0);
+    }
+
+    // The reason the shape exists: the written path resolves to nothing.
+    expect(client.get(`gno://fixtures/${relPath}`)).rejects.toThrow();
   });
 
   test("captures notes with provenance receipt through the SDK", async () => {
@@ -568,12 +635,14 @@ describe("SDK client", () => {
   test("creates and captures into a real nested folder, and the URI resolves", async () => {
     // Non-discriminating regression guard: passes at fc38f2de too. It keeps
     // the refusals below from being satisfied by refusing nested writes.
-    const created = await client.createNote({
-      collection: "fixtures",
-      title: "Real Nested",
-      folderPath: "generated/real-nested",
-      content: "# Real Nested\n\nBody\n",
-    });
+    const created = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        title: "Real Nested",
+        folderPath: "generated/real-nested",
+        content: "# Real Nested\n\nBody\n",
+      })
+    );
     expect(created.relPath).toBe("generated/real-nested/real-nested.md");
     const fetched = await client.get(created.uri);
     expect(fetched.content).toContain("Body");
@@ -704,12 +773,14 @@ describe("SDK client", () => {
   });
 
   test("renames notes through the SDK", async () => {
-    const created = await client.createNote({
-      collection: "fixtures",
-      title: "Rename Me",
-      folderPath: "generated",
-      content: "# Rename Me\n",
-    });
+    const created = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        title: "Rename Me",
+        folderPath: "generated",
+        content: "# Rename Me\n",
+      })
+    );
     const preview = await client.previewRenameNote({
       ref: created.uri,
       name: "renamed.md",
@@ -728,12 +799,14 @@ describe("SDK client", () => {
   });
 
   test("moves notes through the SDK", async () => {
-    const created = await client.createNote({
-      collection: "fixtures",
-      title: "Move Me",
-      folderPath: "generated",
-      content: "# Move Me\n",
-    });
+    const created = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        title: "Move Me",
+        folderPath: "generated",
+        content: "# Move Me\n",
+      })
+    );
     const preview = await client.previewMoveNote({
       ref: created.uri,
       folderPath: "generated/archive",
@@ -752,12 +825,14 @@ describe("SDK client", () => {
   });
 
   test("rejects SDK apply without an exact plan digest", async () => {
-    const created = await client.createNote({
-      collection: "fixtures",
-      title: "Stale Rename",
-      folderPath: "generated",
-      content: "# Stale Rename\n",
-    });
+    const created = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        title: "Stale Rename",
+        folderPath: "generated",
+        content: "# Stale Rename\n",
+      })
+    );
     const result = await client.renameNote({
       ref: created.uri,
       name: "stale-renamed.md",
@@ -778,12 +853,14 @@ describe("SDK client", () => {
   });
 
   test("duplicates notes through the SDK", async () => {
-    const created = await client.createNote({
-      collection: "fixtures",
-      title: "Duplicate Me",
-      folderPath: "generated",
-      content: "# Duplicate Me\n",
-    });
+    const created = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        title: "Duplicate Me",
+        folderPath: "generated",
+        content: "# Duplicate Me\n",
+      })
+    );
     const duplicated = await client.duplicateNote({
       ref: created.uri,
       folderPath: "generated/archive",

@@ -474,6 +474,32 @@ create a distinct note.
 Use `client.createNote()` for lower-level raw note creation without provenance
 capture semantics.
 
+`createNote()` returns a discriminated union, because not every written path is
+a document. A configured record container (a `.jsonl` export, a `.vtt`
+transcript) is imported as N logical records at virtual `.gno/records/...`
+paths and has no document at the path that was written, so no fetchable URI
+exists for it:
+
+```ts
+const created = await client.createNote({
+  collection: "notes",
+  relPath: "exports/session.jsonl",
+  content: jsonlBody,
+});
+
+if (created.kind === "document") {
+  const doc = await client.get(created.uri); // always resolves
+} else {
+  console.log(created.reason, created.relPath);
+  const first = await client.get(created.recordUris[0]!); // records are fetchable
+}
+```
+
+The written file is identified by `path`/`relPath` in both cases. The
+`record-container` shape has no `uri` field at all, so `created.uri` does not
+type-check until you narrow on `kind` - a URI that `client.get()` cannot
+resolve is not something the API hands back.
+
 ### Status
 
 ```ts

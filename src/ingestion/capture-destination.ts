@@ -387,15 +387,31 @@ export const captureProofDocid = (
   proof.kind === "file" ? proof.document.docid : undefined;
 
 /**
+ * One phrasing of the container fact, for every surface that has to state it.
+ *
+ * `undefined` for a plain file - there is nothing unusual to say about it.
+ * Returned as a sentence FRAGMENT so each caller can finish the sentence with
+ * the consequence its own surface has (no docid, an unresolvable URI, ...).
+ */
+export const captureProofContainerSummary = (
+  proof: ActiveCaptureProof
+): string | undefined => {
+  if (proof.kind !== "record-container") return undefined;
+  const count = proof.records.length;
+  return `imported as ${count} logical record document${count === 1 ? "" : "s"} at virtual paths; the container path itself has no document`;
+};
+
+/**
  * The `sync.reason` that keeps a container receipt from reading as a plain
  * document capture whose docid merely went missing.
  */
 export const captureProofSyncReason = (
   proof: ActiveCaptureProof
 ): string | undefined => {
-  if (proof.kind !== "record-container") return undefined;
-  const count = proof.records.length;
-  return `Imported as ${count} logical record document${count === 1 ? "" : "s"}; the container path itself has no document, so this receipt carries no docid.`;
+  const summary = captureProofContainerSummary(proof);
+  return summary === undefined
+    ? undefined
+    : `Written as a record container: ${summary}, so this receipt carries no docid.`;
 };
 
 /**

@@ -119,6 +119,7 @@ import {
 import { validateRelPath } from "../../core/validation";
 import {
   CaptureDestinationError,
+  captureProofContainerSummary,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -3055,7 +3056,15 @@ export async function handleDuplicateDoc(
         collection.name,
         plan.nextRelPath
       );
-      if (!indexed.ok) {
+      if (indexed.ok) {
+        // A container copy IS indexed - as N logical records at virtual paths,
+        // with nothing at the copy's own path - so `uri` below resolves to
+        // nothing just as in the unindexed case. Same channel, same honesty.
+        const containerSummary = captureProofContainerSummary(indexed);
+        if (containerSummary) {
+          warning = `File duplicated on disk and ${containerSummary}, so ${plan.nextUri} resolves to no document.`;
+        }
+      } else {
         warning = `File duplicated on disk, but it is not indexed: ${indexed.message}`;
       }
     } catch {

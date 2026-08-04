@@ -74,7 +74,12 @@ function assertNotSensitive(relPath: string): void {
 
 function formatCaptureResult(result: McpCaptureResult): string {
   const lines: string[] = [];
-  lines.push(`Doc: ${result.docid}`);
+  // The JSON result must carry `docid` (the schema requires it) and uses the
+  // empty string for "not resolved". The TEXT an agent reads must not print
+  // `Doc:` with nothing after it - `sync.reason` below says what happened.
+  if (result.docid) {
+    lines.push(`Doc: ${result.docid}`);
+  }
   lines.push(`URI: ${result.uri}`);
   lines.push(`Path: ${result.absPath}`);
   lines.push(`Created: ${result.created ? "yes" : "no"}`);
@@ -82,6 +87,9 @@ function formatCaptureResult(result: McpCaptureResult): string {
   lines.push(`Overwritten: ${result.overwritten ? "yes" : "no"}`);
   lines.push(`Collision: ${result.collisionPolicyResult}`);
   lines.push(`Sync: ${result.sync.status}`);
+  if (result.sync.reason) {
+    lines.push(`Note: ${result.sync.reason}`);
+  }
   lines.push(`Embed: ${result.embed.status}`);
   lines.push(`Content hash: ${result.contentHash}`);
   if (result.tags.length > 0) {
