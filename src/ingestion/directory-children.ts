@@ -101,8 +101,23 @@ function escapesRoot(rootReal: string, candidateReal: string): boolean {
  * closed, exactly like the enumeration outcome above.
  */
 export type VanishedPathOutcome =
-  /** The reported path still exists: the event named the whole change. */
-  | { status: "present" }
+  /**
+   * The reported path still exists: the event named the whole change.
+   *
+   * `isDirectory` is the leaf's NO-FOLLOW type, carried because a path that
+   * exists is not automatically the same KIND of thing the index has under
+   * that name. An indexed directory deleted and replaced by a regular FILE of
+   * the same eligible name (`archive.md/` -> `archive.md`) is `present` here -
+   * correctly, the walker can see it - while everything indexed beneath the
+   * old directory is now unreachable. The caller cannot re-derive this without
+   * a second stat, and only the INDEXED side can say whether the replacement
+   * actually stranded anything, so the type travels with the outcome and the
+   * decision stays with the caller (this module holds no store dependency).
+   *
+   * `true` for the collection root, which has no leaf to stat and is never a
+   * replacement candidate.
+   */
+  | { status: "present"; isDirectory: boolean }
   /**
    * The reported path is gone. `directory` is the SHALLOWEST ancestor that is
    * also gone, or the path's own (surviving) parent directory when only the
@@ -148,6 +163,15 @@ async function pathExists(
 }
 
 /**
+ * What `walkerVisible` answers: reachable (and what KIND of thing is there),
+ * gone to the walker, or unanswerable.
+ */
+type WalkerPresence =
+  | { visible: true; isDirectory: boolean }
+  | { visible: false }
+  | { cause: unknown };
+
+/**
  * Does the WALKER still see `relPath` inside `rootAbs`?
  *
  * This is the existence question the index actually cares about, and it is not
@@ -161,16 +185,25 @@ async function pathExists(
  * So gone-ness here means gone TO THE WALKER: absent, or unreachable no-follow.
  * Only genuine unreadability (`EACCES`, `EIO`, a hung mount) stays an error, and
  * an error still infers nothing.
+ *
+ * The leaf's no-follow TYPE comes back with a positive answer, at no extra
+ * syscall: the visibility check already `lstat`ed every component, and the
+ * caller needs the type to notice a directory that was replaced by a file.
  */
 async function walkerVisible(
   rootAbs: string,
   normalizedRelPath: string
-): Promise<boolean | { cause: unknown }> {
+): Promise<WalkerPresence> {
   const visibility = await checkWalkPathVisibility(rootAbs, normalizedRelPath);
   if (visibility.status === "error") {
     return { cause: visibility.cause };
   }
-  return visibility.status === "visible";
+  if (visibility.status !== "visible") {
+    return { visible: false };
+  }
+  // `leaf` is null only for the collection root, which is a directory by
+  // definition and never a replacement candidate.
+  return { visible: true, isDirectory: visibility.leaf?.isDirectory() ?? true };
 }
 
 /**
@@ -198,7 +231,13 @@ async function walkerVisible(
  *
  * - The path still exists (a live edit, the overwhelmingly common case):
  *   `present`, and the caller keeps its narrow per-path flow. This is what
- *   keeps the hot path unwidened.
+ *   keeps the hot path unwidened. The leaf's no-follow TYPE rides along,
+ *   because "still there" is not "still the same KIND of thing": an indexed
+ *   directory replaced by a regular file of the same eligible name is present
+ *   AND has stranded everything indexed beneath it. Only the indexed side can
+ *   tell that apart from an ordinary file, so the type is reported and the
+ *   decision stays with the caller - the mirror of the file-NAMED directory
+ *   case above, in the replacement direction.
  * - The path is gone but its parent survives: `removed` with the parent, so a
  *   bounded direct-children reconciliation of that one directory runs.
  * - The path AND one or more ancestors are gone: `removed` with the shallowest
@@ -236,21 +275,21 @@ export async function resolveVanishedPathDirectory(
 
   const rootReal = resolve(root);
   const reported = await walkerVisible(rootReal, normalized);
-  if (reported === true) {
-    return { status: "present" };
-  }
-  if (reported !== false) {
+  if ("cause" in reported) {
     return { status: "error", cause: reported.cause };
+  }
+  if (reported.visible) {
+    return { status: "present", isDirectory: reported.isDirectory };
   }
 
   let directory = parentDirectoryOf(normalized);
   while (directory !== "") {
     const exists = await walkerVisible(rootReal, directory);
-    if (exists === true) {
-      break;
-    }
-    if (exists !== false) {
+    if ("cause" in exists) {
       return { status: "error", cause: exists.cause };
+    }
+    if (exists.visible) {
+      break;
     }
     directory = parentDirectoryOf(directory);
   }

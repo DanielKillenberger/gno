@@ -2178,7 +2178,7 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
           }
           // The path is still there: no directory is widened, so this batch
           // NEVER enters the enumeration branch.
-          return { status: "present" as const };
+          return { status: "present" as const, isDirectory: false };
         },
       };
       harness = createReconcileHarness(
@@ -2233,7 +2233,7 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
               createCollection("notes", moved),
             ]);
           }
-          return { status: "present" as const };
+          return { status: "present" as const, isDirectory: false };
         },
       };
       harness = createReconcileHarness(
@@ -2290,7 +2290,7 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
             retuned.exclude = ["archive"];
             harness?.service.updateCollections([retuned]);
           }
-          return { status: "present" as const };
+          return { status: "present" as const, isDirectory: false };
         },
       };
       harness = createReconcileHarness(
@@ -2335,6 +2335,7 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
         store: createRecordingStore({}).store,
         resolveVanishedPath: async (): Promise<VanishedPathOutcome> => ({
           status: "present" as const,
+          isDirectory: false,
         }),
       });
 
@@ -2729,10 +2730,11 @@ describe("CollectionWatchService full-subtree deletion reconciliation", () => {
       await Bun.write(join(root, "dir1", "doc.md"), "# doc\n");
       await Bun.write(join(root, "dir1", "neighbour.md"), "# neighbour\n");
 
-      const { store, directCalls, descendantCalls } = createSubtreeStore({
-        direct: { dir1: ["dir1/doc.md", "dir1/neighbour.md"] },
-        descendants: { dir1: ["dir1/doc.md", "dir1/neighbour.md"] },
-      });
+      const { store, directCalls, descendantCalls, descendantRoundTrips } =
+        createSubtreeStore({
+          direct: { dir1: ["dir1/doc.md", "dir1/neighbour.md"] },
+          descendants: { dir1: ["dir1/doc.md", "dir1/neighbour.md"] },
+        });
       const harness = createReconcileHarness(createCollection("notes", root), {
         store,
       });
@@ -2743,13 +2745,21 @@ describe("CollectionWatchService full-subtree deletion reconciliation", () => {
         expect(await harness.settle()).toBe("settled");
 
         // R1's hot path, intact: the file exists, so the event named the whole
-        // change. One path synced, no enumeration, no store lookup of either
-        // kind, and no reconciliation diagnostics at all.
+        // change. One path synced, no enumeration, and no reconciliation
+        // diagnostics at all.
         expect(harness.batches).toEqual([["dir1/doc.md"]]);
         expect(directCalls).toEqual([]);
-        expect(descendantCalls).toEqual([]);
         expect(harness.started).toEqual([]);
         expect(harness.ambiguous).toEqual([]);
+        // The one thing the hot path now spends: the reported path rides the
+        // flush's batched REPLACEMENT probe - "is anything indexed beneath a
+        // name that is now a plain file?" - which is what catches an indexed
+        // directory deleted and rewritten as a document in one window. It is
+        // asked once per window, not once per event, and it answers "nothing"
+        // here, so nothing above changes: no widening, no enumeration, no
+        // direct-children query, no reconciliation.
+        expect(descendantCalls).toEqual(["dir1/doc.md"]);
+        expect(descendantRoundTrips).toHaveLength(1);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
@@ -3049,6 +3059,157 @@ describe("CollectionWatchService file-like directory names", () => {
 });
 
 /**
+ * fn-114 corrective coverage — the REPLACEMENT direction of the same question.
+ *
+ * The suite above covers an indexed directory that VANISHED under an
+ * eligible-looking name. The mirror case is an indexed directory deleted and
+ * replaced by a regular FILE of that same name inside one debounce window
+ * (`archive.md/` holding `archive.md/child.md`, then a document `archive.md`).
+ *
+ * The disk answers "still here", because it is — as a file. The exact-path
+ * flow then synced only `archive.md`, never ran the indexed-descendant
+ * discriminator, and left every document under the old directory active and
+ * searchable indefinitely, while a full `gno update` deactivated them. A
+ * directory replaced by a SYMLINK was already covered (the walker cannot reach
+ * through it, so it classifies as gone); a plain file was not.
+ *
+ * The fix is the shape the design already uses: a visible NON-DIRECTORY leaf
+ * is a REPLACEMENT CANDIDATE, discriminated on the indexed side through the
+ * flush's single batched descendant lookup. It differs from a hint in the one
+ * way that matters for cost — a candidate that resolves to nothing resolves to
+ * NOTHING, with no directory fallback — because every ordinary file event is
+ * one of these, and a fallback would enumerate the parent of every live edit.
+ */
+describe("CollectionWatchService directory replaced by a file", () => {
+  test(
+    "deactivates the subtree of a directory rewritten as a document",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-replace-file-"));
+      // Post-replacement disk state: `archive.md` is now a regular FILE.
+      await Bun.write(join(root, "archive.md"), "# archive\n");
+      await Bun.write(join(root, "keep.md"), "# keep\n");
+
+      const { store, descendantCalls, directCalls, descendantRoundTrips } =
+        createSubtreeStore({
+          descendants: { "archive.md": ["archive.md/child.md"] },
+        });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // One eligible name, present on disk: the delete of the directory and
+        // the write of the file coalesce into a single reported path.
+        harness.emit([["rename", "archive.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        // The document the event never named. Before the fix it stayed active
+        // forever: the path exists, so nothing ever implicated it.
+        expect(batch).toContain("archive.md/child.md");
+        // ...and the new file is still indexed. Widening must not cost the
+        // exact path its own place in the batch.
+        expect(batch).toContain("archive.md");
+        // Bounded: the untouched root document is not dragged in, and the root
+        // is neither enumerated nor reconciled.
+        expect(batch).not.toContain("keep.md");
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "archive.md" },
+        ]);
+        // One question, on the discriminator seam, in one round trip - and no
+        // direct-children query at all, because a surviving file has no
+        // direct-children question to answer.
+        expect(descendantCalls).toEqual(["archive.md"]);
+        expect(descendantRoundTrips).toHaveLength(1);
+        expect(directCalls).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "reaches a descendant nested below the replaced directory",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-replace-deep-"));
+      await Bun.write(join(root, "archive.md"), "# archive\n");
+
+      // Every indexed document sits one level DEEPER than the replaced name,
+      // so a direct-children answer would see nothing at all.
+      const { store, descendantCalls } = createSubtreeStore({
+        direct: { "archive.md": [] },
+        descendants: { "archive.md": ["archive.md/sub/deep.md"] },
+      });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "archive.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        const batch = harness.batches[0] ?? [];
+        expect(batch).toContain("archive.md/sub/deep.md");
+        expect(batch).toContain("archive.md");
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "archive.md" },
+        ]);
+        expect(descendantCalls).toEqual(["archive.md"]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "an ordinary new file costs no round trip beyond the shared probe",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-replace-plain-"));
+      await mkdir(join(root, "dir1"), { recursive: true });
+      await Bun.write(join(root, "dir1", "new.md"), "# new\n");
+      await Bun.write(join(root, "dir1", "neighbour.md"), "# neighbour\n");
+
+      // Nothing is indexed beneath the new name - it merely shares the shape.
+      const { store, directCalls, directRoundTrips, descendantRoundTrips } =
+        createSubtreeStore({
+          direct: { dir1: ["dir1/neighbour.md"] },
+          descendants: { dir1: ["dir1/neighbour.md"] },
+        });
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "dir1/new.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        // The exact path alone was the whole change.
+        expect(harness.batches).toEqual([["dir1/new.md"]]);
+        // The probe rides ONE batched round trip and asks nothing else: no
+        // direct-children query, no enumeration, no reconciliation, and no
+        // per-path lookup that would grow with the event count.
+        expect(descendantRoundTrips).toHaveLength(1);
+        expect(directRoundTrips).toEqual([]);
+        expect(directCalls).toEqual([]);
+        expect(harness.started).toEqual([]);
+        expect(harness.ambiguous).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
+
+/**
  * fn-114 corrective coverage — the three conditions the subtree work left open.
  *
  * 1. The collection ROOT is the ceiling of the ancestor walk, and that ceiling
@@ -3188,8 +3349,14 @@ describe("CollectionWatchService removed-root and recreation reconciliation", ()
         // watcher; it is documented in docs/TROUBLESHOOTING.md and R1.
         expect(harness.batches).toEqual([["dir1/a.md"]]);
         expect(directCalls).toEqual([]);
-        expect(descendantCalls).toEqual([]);
         expect(harness.started).toEqual([]);
+        // The recreated path rides the batched replacement probe like any
+        // other surviving file. It answers "nothing indexed beneath
+        // `dir1/a.md`", so the documented limit above is unchanged: the probe
+        // asks about the SUBTREE OF the reported name, which is not the
+        // question this window loses (`dir1/b.md` is a sibling, not a
+        // descendant).
+        expect(descendantCalls).toEqual(["dir1/a.md"]);
       } finally {
         await harness.service.dispose();
         await rm(root, { recursive: true, force: true });
@@ -3774,7 +3941,7 @@ describe("CollectionWatchService suppression decided at event time", () => {
         // or a queued flush would have produced - deterministically.
         resolveVanishedPath: async (): Promise<VanishedPathOutcome> => {
           expireWindow?.();
-          return { status: "present" };
+          return { status: "present", isDirectory: false };
         },
       });
       expireWindow = () => harness.service.suppress(join(root, "note.md"), 0);

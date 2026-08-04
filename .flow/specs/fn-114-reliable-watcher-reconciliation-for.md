@@ -818,6 +818,27 @@ proportional to the event.
   the collection: that enumeration is `skipped`, not `error`, so the removed
   subtree's indexed side is still consulted and deactivated — see R4.
 
+  It holds in the REPLACEMENT direction too, and that sharpens the guarantee:
+  an indexed directory deleted and rewritten as a regular FILE of the same
+  eligible name inside one debounce window (`archive.md/` holding
+  `archive.md/child.md`, then a document `archive.md`) deactivates the whole
+  stranded subtree AND indexes the new file. The disk answers "still here" for
+  such a path — it is a file — so classification alone cannot see it; the
+  reported leaf's no-follow TYPE is therefore carried on the `present` outcome
+  and a visible NON-DIRECTORY leaf becomes a REPLACEMENT CANDIDATE for the same
+  indexed-descendant discriminator the hints use. It differs from a hint in
+  exactly one way, and that difference is what keeps the live-edit hot path
+  narrow: a candidate the store answers "nothing indexed here" for produces no
+  work at all — no enumeration, no reconciliation, no directory fallback —
+  where a hint falls back to reconciling its directory. Every ordinary file
+  event is such a candidate, so a fallback would enumerate the parent directory
+  of every live edit. The cost is one batched round trip per window on the
+  descendant seam (R5) — candidate count tracks event count, round trips do
+  not — and no direct-children query at all, since a surviving file has no
+  direct-children question to answer. A store predating the batched descendant
+  seam gets no replacement detection, the same degradation it already gets for
+  subtree-wide hint detection.
+
   Three documented limitations remain, none about depth:
 
   - Linux subdirectories created after the watcher started emit no event at all
@@ -868,7 +889,7 @@ If the captured sequence *does* report the final path, the root cause is elsewhe
 | R9  | Reconciliation failures degrade safely and visibly, including a failed descendant query, an unstattable collection root, and an unattributable collection-level sync failure whose reported cause names the collection-level error rather than the contributed paths, built once per result and bounded to a sampled few plus a truncated count, with each named field (path, message) truncated on its own raw value BEFORE composition so the WORK to build the cause is bounded and not just its length, so a broad failure is not amplified by the diagnostic describing it; the fail-closed outcome holds with no observer installed | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3, post-review corrective commits | — |
 | R10 | Record-backed documents reconcile via their physical source path | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.3 | — |
 | R11 | Active-children AND active-descendant lookups are index-served for root and nested directories | fn-114-reliable-watcher-reconciliation-for.2, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commit | — |
-| R12 | Recursive directory delete deactivates the whole removed subtree, collection root included, directories whose names match the collection pattern, and a removed subtree RECREATED before enumeration (bounded recursive disk read) | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |
+| R12 | Recursive directory delete deactivates the whole removed subtree, collection root included, directories whose names match the collection pattern, a directory REPLACED by a regular file of that same eligible name (visible non-directory leaf discriminated as a replacement candidate on the shared batched descendant seam, no directory fallback), and a removed subtree RECREATED before enumeration (bounded recursive disk read) | fn-114-reliable-watcher-reconciliation-for.1, fn-114-reliable-watcher-reconciliation-for.3, fn-114-reliable-watcher-reconciliation-for.4, post-review corrective commits | — (depth limitation removed; delete-then-recreate window documented under R1) |
 
 ## Test strategy
 

@@ -655,6 +655,25 @@ describe("resolveVanishedPathDirectory collection-root handling", () => {
     });
   });
 
+  test("a surviving path reports what KIND of thing now stands there", async () => {
+    // "Still here" is not "still the same thing". An indexed directory
+    // rewritten as a document of the same eligible name is present to the
+    // walker while everything indexed beneath it has been stranded, so the
+    // leaf's no-follow type travels with the outcome for the caller to
+    // discriminate on the indexed side.
+    await Bun.write(join(root, "file.md"), "# file\n");
+    await mkdir(join(root, "dir.md"));
+
+    expect(await resolveVanishedPathDirectory("file.md", root)).toEqual({
+      status: "present",
+      isDirectory: false,
+    });
+    expect(await resolveVanishedPathDirectory("dir.md", root)).toEqual({
+      status: "present",
+      isDirectory: true,
+    });
+  });
+
   test("a removed ancestor is reported as removed, not as a surviving parent", async () => {
     const outcome = await resolveVanishedPathDirectory("dir1/sub/c.md", root);
 

@@ -1691,6 +1691,7 @@ export class CollectionWatchService {
     };
     this.#inFlightObservationFloors.add(observationFloor);
     let relPaths: string[] = [];
+    let replacements = new Map<string, ObservationSet>();
     let reconciliations: DirectoryReconciliation[] = [];
     // Started reconciliations that still owe their single terminal outcome.
     let outstanding: DirectoryReconciliation[] = [];
@@ -1744,6 +1745,7 @@ export class CollectionWatchService {
       reconciliations = [];
       dirtyEntries = [];
       exactPaths = new Map();
+      replacements = new Map();
       if (!liveCollection) {
         // The collection is gone: there is nothing left to recover against, so
         // the queues are discarded rather than reflushed.
@@ -1768,15 +1770,20 @@ export class CollectionWatchService {
         // Both assignments land BEFORE the resume check so a drift-dropped
         // batch stays dropped - `resumeAfterAwait` clears them.
         exactPaths = widened.exactPaths;
+        replacements = widened.replacements;
         if (resumeAfterAwait() === "abort") {
           return;
         }
       }
 
-      if (dirtyEntries.length > 0) {
+      // Replacement candidates are reconciliation work in their own right - a
+      // window whose only event was the file that replaced an indexed
+      // directory has no dirty entry at all - so they open the same stage.
+      if (dirtyEntries.length > 0 || replacements.size > 0) {
         reconciliations = await this.#reconcileDirtyDirectories(
           collection,
-          dirtyEntries
+          dirtyEntries,
+          replacements
         );
         // Assigned BEFORE the resume check so a drift-dropped batch still
         // settles the terminal outcome every started reconciliation owes (R7).
@@ -2171,6 +2178,29 @@ export class CollectionWatchService {
    * plain single-file delete still deactivates exactly that file through the
    * existing `syncPaths` ENOENT branch.
    *
+   * The REPLACEMENT direction of the same question
+   * ----------------------------------------------
+   * A path that still exists is not automatically the same KIND of thing the
+   * index has under that name. `archive.md/` holding `archive.md/child.md`
+   * can be removed and a regular FILE `archive.md` written in its place inside
+   * one debounce window: the disk answers `present`, the exact path syncs the
+   * new file, and every document indexed under the old directory stays active
+   * and searchable indefinitely - the same silent staleness a vanished
+   * file-NAMED directory produced, reached from the other side. (A directory
+   * replaced by a SYMLINK is already covered: the walker cannot reach through
+   * it, so it classifies as gone.)
+   *
+   * A visible NON-DIRECTORY leaf is therefore retained as a REPLACEMENT
+   * CANDIDATE, and - exactly like a hint - the indexed side decides. It is
+   * deliberately a weaker thing than a hint: a hint that resolves to nothing
+   * falls back to reconciling its DIRECTORY, which for a surviving file would
+   * enumerate the parent of every live edit. A replacement candidate that
+   * resolves to nothing resolves to NOTHING: the path stays on the ordinary
+   * exact-path flow, no directory is enumerated, and no reconciliation starts.
+   * It costs no query of its own either - the candidates of a whole window
+   * join the flush's single batched descendant lookup, the same seam the hints
+   * use (R5).
+   *
    * This is also the one place that can finish the SUPPRESSION decision, which
    * is why it returns the exact paths as well as the queue. Suppression must
    * keep an application's own write from being resynced, but it must not
@@ -2188,10 +2218,12 @@ export class CollectionWatchService {
   ): Promise<{
     dirtyEntries: Array<[string, DirtyDirectoryEntry]>;
     exactPaths: Map<string, PendingPathEntry>;
+    replacements: Map<string, ObservationSet>;
   }> {
     const root = normalize(collection.path);
     const byDirectory = new Map(dirtyEntries);
     const suppressedSurvivors = new Set<string>();
+    const replacements = new Map<string, ObservationSet>();
     for (const [relPath, pending] of exactPaths) {
       if (this.#disposed) {
         break;
@@ -2211,6 +2243,20 @@ export class CollectionWatchService {
         // receipt-time drop this route replaced had always prevented.
         if (isFullySuppressed(pending)) {
           suppressedSurvivors.add(relPath);
+        }
+        if (outcome.status === "present" && !outcome.isDirectory) {
+          // Something that is not a directory stands at a path the index may
+          // hold a whole subtree under. Retained for the batched discriminator;
+          // see the REPLACEMENT direction above. Suppression is deliberately
+          // not consulted: an application write that replaced a directory has
+          // still stranded that directory's documents, and the candidates this
+          // produces are vanished paths, which suppression never withholds.
+          this.#addReplacementCandidate(
+            replacements,
+            collection,
+            relPath,
+            eligibleObservationOf(pending)
+          );
         }
         continue;
       }
@@ -2251,7 +2297,41 @@ export class CollectionWatchService {
         exactPaths.delete(relPath);
       }
     }
-    return { dirtyEntries: [...byDirectory], exactPaths };
+    return { dirtyEntries: [...byDirectory], exactPaths, replacements };
+  }
+
+  /**
+   * Retain a still-present path as a candidate REPLACED DIRECTORY.
+   *
+   * The same reconcilability filter a hint gets, for the same reason: a path
+   * the current rules would never walk into cannot have walkable documents
+   * indexed beneath it, so asking about it would only widen the flush's
+   * batched lookup for nothing.
+   *
+   * The observation is the one that made the path ELIGIBLE, so whatever this
+   * candidate goes on to deactivate answers the suppression rule against the
+   * events that named IT - never against another key's witnesses (R4).
+   */
+  #addReplacementCandidate(
+    replacements: Map<string, ObservationSet>,
+    collection: Collection,
+    relPath: string,
+    observation: Observation
+  ): void {
+    const reported = normalizeCollectionDirRelPath(relPath);
+    if (
+      reported === null ||
+      reported === "" ||
+      !this.#isReconcilableDirectory(reported, collection)
+    ) {
+      return;
+    }
+    const existing = replacements.get(reported);
+    if (existing) {
+      recordObservation(existing, observation);
+      return;
+    }
+    replacements.set(reported, newObservationSet(observation));
   }
 
   /**
@@ -2326,6 +2406,15 @@ export class CollectionWatchService {
    * not enumerated for it - that keeps a recursive directory delete from
    * dragging every unchanged sibling of the deleted directory into the batch.
    *
+   * `replacements` are the same question asked about paths that still EXIST as
+   * non-directories (see `#widenVanishedExactPaths`), and they ride the same
+   * batched round trip. They differ from hints in exactly one way, and it is
+   * the way that keeps the live-edit hot path narrow: a replacement candidate
+   * that the store answers "nothing indexed here" for produces NO work at all,
+   * where a hint falls back to reconciling its directory. Every ordinary file
+   * event is such a candidate, so a fallback would enumerate the parent
+   * directory of every live edit.
+   *
    * Generation drift is handled BEFORE enumeration (R6): an entry queued
    * against a different root is dropped, and everything else is re-resolved
    * against the CURRENT collection configuration. Drift that appears during
@@ -2335,7 +2424,8 @@ export class CollectionWatchService {
    */
   async #reconcileDirtyDirectories(
     collection: Collection,
-    entries: Array<[string, DirtyDirectoryEntry]>
+    entries: Array<[string, DirtyDirectoryEntry]>,
+    replacements: ReadonlyMap<string, ObservationSet>
   ): Promise<DirectoryReconciliation[]> {
     const currentRoot = normalize(collection.path);
     const walkConfig = collectionToWalkConfig(collection, 0);
@@ -2379,6 +2469,16 @@ export class CollectionWatchService {
         if (hint !== "" && this.#isReconcilableDirectory(hint, collection)) {
           hintKeys.add(hint);
         }
+      }
+    }
+    // Replacement candidates ask the SAME question of the SAME seam - "is
+    // anything indexed beneath this name?" - so they ride the same round trip
+    // rather than spending one each. They are asked here and nowhere else:
+    // they never enter `lookupKeys`, because a still-present file has no
+    // direct-children question to answer.
+    for (const candidate of replacements.keys()) {
+      if (this.#isReconcilableDirectory(candidate, collection)) {
+        hintKeys.add(candidate);
       }
     }
     const descendants = await this.#listActiveDescendantsBatch(
@@ -2484,6 +2584,9 @@ export class CollectionWatchService {
         askFor(hint, hintObservations);
       }
     }
+    for (const [candidate, candidateObservations] of replacements) {
+      askFor(candidate, candidateObservations);
+    }
 
     /**
      * The observations of the QUEUED ENTRIES that asked for this directory
@@ -2525,6 +2628,52 @@ export class CollectionWatchService {
       resolved.set(directory, outcome);
       return outcome;
     };
+
+    // Replacement candidates are resolved FIRST, so that a key which is also
+    // reached as a hint below is already carrying its subtree intent when the
+    // (memoized) reconciliation for it runs.
+    //
+    // Only the batched answer is consulted. Falling back to the per-directory
+    // seam here would spend one query per surviving eligible file, which is
+    // the per-event cost this whole discriminator exists to avoid; a store
+    // that predates the batched seam simply does not get replacement
+    // detection, exactly as it does not get subtree-wide hint detection.
+    if (descendants !== null) {
+      for (const candidate of replacements.keys()) {
+        if (this.#disposed) {
+          break;
+        }
+        const beneath = descendantCache.get(candidate);
+        if (!beneath) {
+          continue;
+        }
+        if (!beneath.ok) {
+          // Same rule as a hint: an unanswered query is not "nothing is
+          // indexed here". Reported against the candidate it blocked, and
+          // nothing is inferred - the path keeps its ordinary exact-path flow.
+          this.#notifyDiagnostic(() =>
+            this.#callbacks?.onReconcileFailed?.({
+              collection: collection.name,
+              directory: candidate,
+              stage: "store",
+              cause: beneath.error,
+            })
+          );
+          continue;
+        }
+        if (beneath.value.length === 0) {
+          // An ordinary file that merely shares a name with nothing indexed.
+          // It resolves to NOTHING: no enumeration, no reconciliation, no
+          // directory fallback - the exact path alone was the whole change.
+          continue;
+        }
+        // Documents are indexed beneath a path that is now a FILE. Whatever
+        // the index holds under it is unreachable to the walker, so the
+        // removal is established here and the enumeration cannot narrow it.
+        subtreeIntent.add(candidate);
+        await reconcile(candidate);
+      }
+    }
 
     for (const [directory, entry] of live) {
       if (this.#disposed) {
