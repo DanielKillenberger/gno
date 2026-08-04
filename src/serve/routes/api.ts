@@ -119,7 +119,9 @@ import {
 import { validateRelPath } from "../../core/validation";
 import {
   CaptureDestinationError,
+  captureFileSyncResult,
   captureProofContainerSummary,
+  captureWrittenHandle,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -3856,6 +3858,16 @@ export async function handleCreateDoc(
           posixRelPath
         );
         if (!indexed.ok) throw new Error(indexed.message);
+        // The 202 body already went out carrying `gnoUri`, which for a record
+        // container names the written FILE and resolves to no document. The
+        // completed job result is the only channel left that reaches the same
+        // caller, so the honest handle - and anything the adapter rejected -
+        // is stated HERE rather than left as an unfetchable URI.
+        const written = captureWrittenHandle(
+          indexed,
+          { collection: collection.name, relPath: posixRelPath },
+          captureFileSyncResult(result, normalizedRelPath)?.recordImport
+        );
         // Notify scheduler after sync completes (use gnoUri as docid placeholder)
         // The sync will create a proper docid, but we don't have it here yet
         // Using normalizedRelPath as identifier since docid is generated during sync
@@ -3867,8 +3879,13 @@ export async function handleCreateDoc(
           relPath: normalizedRelPath,
           origin: "create",
           changedAt: new Date().toISOString(),
+          kind: written.kind,
+          ...(written.kind === "record-container"
+            ? { recordUris: written.recordUris }
+            : {}),
         });
         return {
+          written,
           collections: [result],
           totalDurationMs: result.durationMs,
           totalFilesProcessed: result.filesProcessed,
@@ -3891,7 +3908,10 @@ export async function handleCreateDoc(
         openedExisting: false,
         createdWithSuffix: createPlan.createdWithSuffix,
         note: jobResult.ok
-          ? "File created. Sync job started - poll /api/jobs/:id for status."
+          ? // `uri` above is the written PATH, which is not fetchable when the
+            // path is a record container. The completed job's `result.written`
+            // is where the fetchable handle is settled.
+            "File created. Sync job started - poll /api/jobs/:id for status and result.written for the fetchable handle."
           : "File created. Sync skipped (another job running).",
       },
       202

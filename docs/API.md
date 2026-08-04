@@ -1121,6 +1121,41 @@ Poll the status of a background job (indexing, sync).
 | `completed` | Job finished successfully |
 | `failed`    | Job failed with error     |
 
+**`result.written` — the fetchable handle for a single-file write**
+
+Jobs started by `POST /api/docs` and `POST /api/capture` add an optional
+`result.written` object. Those endpoints answer `202` _before_ the write is
+proven, so the `uri` in the 202 body is a path, not a guaranteed handle. When
+the written path is a record container (a configured `.jsonl` / `.vtt` export)
+it is indexed as N logical records at virtual paths with **no** document at the
+container path, and `gno://<collection>/<relPath>` resolves to nothing. The
+completed job settles it:
+
+```json
+{
+  "written": {
+    "kind": "record-container",
+    "collection": "records",
+    "relPath": "export.jsonl",
+    "recordUris": ["gno://records/...", "gno://records/..."],
+    "reason": "Written as a record container: imported as 2 logical record documents at virtual paths; ..."
+  }
+}
+```
+
+| Field        | Present when                           | Description                                       |
+| :----------- | :------------------------------------- | :------------------------------------------------ |
+| `kind`       | always                                 | `document` or `record-container`                  |
+| `uri`        | `kind: "document"`                     | Fetchable URI for the written path                |
+| `recordUris` | `kind:"record-container"`              | Fetchable URIs of the container's logical records |
+| `reason`     | when there is something unusual to say | Container shape and/or a partial record import    |
+
+A `record-container` handle carries **no** `uri` field. `reason` also discloses
+a _partial_ record import — records the adapter rejected (and therefore did not
+index) or a partial snapshot — which the container's own file status reports as
+an ordinary non-error. Broad sync jobs (`POST /api/sync`) write nothing of their
+own and omit `written` entirely.
+
 **Example**:
 
 ```bash
@@ -1478,8 +1513,15 @@ event: capsule-reverified
 data: {"type":"capsule-reverified","registrationId":"capsule-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","capsuleId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","operationStatus":"completed","affectedQuestionState":"affected","changedAt":"2026-07-23T12:00:00.000Z"}
 ```
 
-The event is emitted only after the canonical verification receipt or separate
-operation failure has committed. It never includes a question, file path, URI,
+`document-changed` events carry `uri`, `collection`, `relPath`, `origin`, and
+`changedAt`. Emitters that proved what they wrote (the REST create and resident
+capture paths) additionally send `kind` (`document` or `record-container`) and,
+for a container, `recordUris` — because `uri` names the container FILE and
+resolves to no document. `kind` is absent from emitters that run no proof (the
+watcher), so treat an absent `kind` as unknown rather than as `document`.
+
+The capsule event is emitted only after the canonical verification receipt or
+separate operation failure has committed. It never includes a question, file path, URI,
 hash, passage, Capsule body, receipt body, credential, or source content.
 Event data uses the closed `capsule-reverified-event.schema.json` contract.
 Saved-Capsule registration management remains CLI-only.
@@ -2086,8 +2128,8 @@ being replaced.
 
 The response is the shared capture receipt. `sync.status` is usually `pending`
 with a `jobId` because the REST API syncs asynchronously; poll
-`/api/jobs/:id` for completion. `embed.status` is `not_requested` unless a
-separate embed job completes.
+`/api/jobs/:id` for completion and for `result.written`, the fetchable handle.
+`embed.status` is `not_requested` unless a separate embed job completes.
 
 Receipts produced by the browser-clip flow may also include normalized
 `source.canonicalUrl`, `source.site`, `source.publishedAt`, and a closed
@@ -2164,9 +2206,14 @@ Create a new document file in a collection. Triggers background sync to index it
   "uri": "file:///Users/you/notes/ideas/new-feature.md",
   "path": "/Users/you/notes/ideas/new-feature.md",
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
-  "note": "File created. Sync job started - poll /api/jobs/:id for status."
+  "note": "File created. Sync job started - poll /api/jobs/:id for status and result.written for the fetchable handle."
 }
 ```
+
+`uri` here names the path that was written. It is fetchable as a document only
+once the job completes with `result.written.kind === "document"`; for a record
+container the fetchable handles are `result.written.recordUris`. See
+[Job Status](#job-status).
 
 **Errors**:
 

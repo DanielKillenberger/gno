@@ -7,6 +7,10 @@ export interface DocumentEvent {
   relPath: string;
   origin: "watcher" | "save" | "create";
   changedAt: string;
+  /** Absent when the emitter did not prove what `uri` is. */
+  kind?: "document" | "record-container";
+  /** Fetchable record URIs when `uri` names a record container. */
+  recordUris?: string[];
 }
 
 export function getEventStreamRetryDelay(attempt: number): number {

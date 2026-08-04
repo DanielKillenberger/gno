@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -281,10 +281,11 @@ describe("gno capture - opening an existing record container", () => {
     .join("\n")}\n`;
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `gno-capture-records-${Date.now()}-${Math.random()}`
-    );
+    // `mkdtemp` rather than a `Date.now()`/`Math.random()` name under the OS
+    // temp dir: the latter is a PREDICTABLE path in a world-writable directory,
+    // so another local user can pre-create it (or plant a symlink at it) and
+    // this suite then writes its fixtures through their file.
+    testDir = await mkdtemp(join(tmpdir(), "gno-capture-records-"));
     recordsDir = join(testDir, "records");
     await mkdir(recordsDir, { recursive: true });
     await mkdir(join(testDir, "config"), { recursive: true });
@@ -432,6 +433,98 @@ describe("gno capture - opening an existing record container", () => {
     // sync over this file, so it is on disk and in no index.
     expect(receipt.sync.status).toBe("skipped");
     expect(receipt.sync.reason).toBe("Existing file is not indexed yet.");
+  });
+
+  /**
+   * An adapter that accepts SOME of what was written is not an error: the
+   * container's own file result is `added`/`updated` and the rejected records
+   * are disclosed only in `recordImport.failures`. A receipt that stops at
+   * `completed` therefore reports a malformed capture as a clean one.
+   */
+  test("a container whose adapter rejected a record says so", async () => {
+    const PARTIAL = `${JSON.stringify({
+      id: "one",
+      title: "First",
+      text: "Zephyr ships Friday",
+    })}\n{ this line is not JSON\n`;
+
+    const created = await cli(
+      "capture",
+      PARTIAL,
+      "--collection",
+      "records",
+      "--path",
+      "partial.jsonl",
+      "--json"
+    );
+
+    expect(created.code).toBe(0);
+    const receipt = JSON.parse(created.stdout);
+    // DISCRIMINATING against 5e5ed7ca: there the reason was built from the
+    // PROOF alone, which only knows the container shape, so this receipt read
+    // exactly like the fully valid capture below - `completed`, one sentence
+    // about record documents, and no hint that a line was thrown away.
+    expect(receipt.sync.status).toBe("completed");
+    expect(receipt.sync.reason).toContain("Record import was partial");
+    expect(receipt.sync.reason).toContain(
+      "rejected by the adapter/jsonl adapter and NOT indexed"
+    );
+    expect(receipt.sync.reason).toContain("(1 accepted)");
+    // The container fact is still stated alongside it - two independent facts,
+    // both said, neither replacing the other.
+    expect(receipt.sync.reason).toContain("Written as a record container");
+    // The text surface a person actually reads carries it too.
+    const text = await cli(
+      "capture",
+      PARTIAL,
+      "--collection",
+      "records",
+      "--path",
+      "partial-text.jsonl"
+    );
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("Record import was partial");
+  });
+
+  /**
+   * `gno capture` wraps EVERY payload in YAML frontmatter, `.jsonl` included,
+   * so the header lines it writes are themselves records the adapter rejects.
+   * That is a real pre-existing defect in capturing a container through this
+   * surface (tracked separately, not fixed here); what matters for this receipt
+   * is that the count is the caller's own bad line ON TOP of that baseline, so
+   * the disclosure tracks the payload rather than being a constant.
+   */
+  test("the rejected count tracks the payload, not just the frontmatter", async () => {
+    const clean = await cli(
+      "capture",
+      RECORDS,
+      "--collection",
+      "records",
+      "--path",
+      "clean.jsonl",
+      "--json"
+    );
+    const partial = await cli(
+      "capture",
+      `${RECORDS}{ this line is not JSON\n`,
+      "--collection",
+      "records",
+      "--path",
+      "one-bad.jsonl",
+      "--json"
+    );
+
+    expect(clean.code).toBe(0);
+    expect(partial.code).toBe(0);
+    const rejected = (stdout: string): number =>
+      Number(
+        /Record import was partial: (\d+) records? rejected/.exec(
+          JSON.parse(stdout).sync.reason
+        )?.[1]
+      );
+    expect(rejected(partial.stdout)).toBe(rejected(clean.stdout) + 1);
+    expect(JSON.parse(clean.stdout).sync.reason).toContain("(2 accepted)");
+    expect(JSON.parse(partial.stdout).sync.reason).toContain("(2 accepted)");
   });
 });
 

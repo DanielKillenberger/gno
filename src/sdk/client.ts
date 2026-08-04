@@ -149,7 +149,7 @@ import {
   captureProofContainerSummary,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
-  captureProofSyncReason,
+  captureSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -1783,7 +1783,10 @@ class GnoClientImpl implements GnoClient {
       plan,
       absPath: fullPath,
       docid: syncResult?.docid ?? captureProofDocid(indexed),
-      sync: { status: "completed", reason: captureProofSyncReason(indexed) },
+      sync: {
+        status: "completed",
+        reason: captureSyncReason(indexed, syncResult?.recordImport),
+      },
     });
   }
 

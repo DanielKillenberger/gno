@@ -83,6 +83,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not have, and a duplicate that lands somewhere the collection does not index
   says so instead of handing back a `gno://` URI that resolves to nothing.
 
+- Stopped reporting a half-imported record container as a clean capture. A
+  configured `.jsonl`/`.vtt` adapter that accepts one record and rejects another
+  produces an ordinary non-error file status, so the rejected records — and a
+  partial snapshot, whose unseen records were preserved rather than refreshed —
+  were visible only by digging into the sync result. Capture receipts now state
+  it in the existing `sync.reason`, on `gno capture`, `gno_capture`, SDK
+  `capture()`, and the REST capture/create jobs alike. A fully successful import
+  is unchanged.
+
+- Made the REST create/capture job result hand back a handle that resolves.
+  `POST /api/docs` answers `202` before the write is proven, so its `uri` is a
+  path; for a record container that path has no document at all and the
+  completed job — the one channel that still reaches the caller — reported
+  success while offering only the unfetchable URI. The completed job now carries
+  `result.written`: `kind: "document"` with a fetchable `uri`, or
+  `kind: "record-container"` with the records' `recordUris` and no `uri` field.
+  The emitted `document-changed` event carries the same `kind`/`recordUris`.
+
 ## [1.34.0] - 2026-08-04
 
 ### Added

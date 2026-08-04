@@ -19,6 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Config } from "../../src/config/types";
+import type { ActiveCaptureProof } from "../../src/ingestion/capture-destination";
+import type { FileSyncResult } from "../../src/ingestion/types";
 import type { DocumentRow, StorePort } from "../../src/store/types";
 
 import {
@@ -26,6 +28,8 @@ import {
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
+  captureSyncReason,
+  captureWrittenHandle,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
 } from "../../src/ingestion/capture-destination";
@@ -559,5 +563,133 @@ describe("requireActiveCaptureDocument - record containers", () => {
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.message).toContain("not indexed");
+  });
+});
+
+/**
+ * A record container's own file result is a NON-ERROR as long as the adapter
+ * accepted at least one record, so "the sync did not fail" says nothing about
+ * the records it threw away. Those live in `recordImport`, and every capture
+ * surface composes its `sync.reason` from both halves here so none of them can
+ * report a half-imported file as a clean one.
+ */
+describe("captureSyncReason - container shape and import completeness", () => {
+  const containerProof: ActiveCaptureProof = {
+    ok: true,
+    kind: "record-container",
+    records: [documentStub(true), documentStub(true)],
+  };
+
+  const fileProof: ActiveCaptureProof = {
+    ok: true,
+    kind: "file",
+    document: documentStub(true),
+  };
+
+  const recordImport = (overrides: {
+    accepted: number;
+    failed: number;
+    snapshotState: "complete" | "partial";
+  }): NonNullable<FileSyncResult["recordImport"]> => ({
+    adapterId: "adapter/jsonl",
+    adapterVersion: "1.0.0",
+    adapterFingerprint: "fp",
+    snapshotState: overrides.snapshotState,
+    authoritative: true,
+    stoppedByCap: false,
+    sourceBytesRead: 128,
+    records: {
+      accepted: overrides.accepted,
+      added: overrides.accepted,
+      updated: 0,
+      reactivated: 0,
+      unchanged: 0,
+      deactivated: 0,
+      preserved: 0,
+      failed: overrides.failed,
+    },
+    items: [],
+    itemsTruncated: 0,
+    warnings: [],
+    failures: [],
+  });
+
+  const CONTAINER_ONLY =
+    "Written as a record container: imported as 2 logical record documents at virtual paths; the container path itself has no document, so this receipt carries no docid.";
+
+  test("a fully successful import reads exactly as it did before", () => {
+    // The whole no-false-alarm requirement: an import with nothing rejected and
+    // a complete snapshot must not gain a word.
+    expect(
+      captureSyncReason(
+        containerProof,
+        recordImport({ accepted: 2, failed: 0, snapshotState: "complete" })
+      )
+    ).toBe(CONTAINER_ONLY);
+    expect(captureSyncReason(containerProof)).toBe(CONTAINER_ONLY);
+    expect(
+      captureSyncReason(
+        fileProof,
+        recordImport({ accepted: 1, failed: 0, snapshotState: "complete" })
+      )
+    ).toBeUndefined();
+  });
+
+  test("a rejected record is stated alongside the container fact", () => {
+    // DISCRIMINATING against 5e5ed7ca: the reason was `captureProofSyncReason`
+    // alone, which sees only the proof, so this returned CONTAINER_ONLY - the
+    // identical string a clean import produces.
+    const reason = captureSyncReason(
+      containerProof,
+      recordImport({ accepted: 2, failed: 1, snapshotState: "partial" })
+    );
+
+    expect(reason).toStartWith(CONTAINER_ONLY);
+    expect(reason).toContain(
+      "1 record rejected by the adapter/jsonl adapter and NOT indexed (2 accepted)"
+    );
+    expect(reason).toContain("partial snapshot");
+  });
+
+  test("a partial snapshot alone is disclosed, with nothing rejected", () => {
+    const reason = captureSyncReason(
+      containerProof,
+      recordImport({ accepted: 2, failed: 0, snapshotState: "partial" })
+    );
+
+    expect(reason).toContain("Record import was partial");
+    expect(reason).not.toContain("rejected");
+    // Records the adapter never saw were kept from the last import, so calling
+    // this a full refresh would be the same silent success one layer down.
+    expect(reason).toContain("preserved from the previous import");
+  });
+
+  test("the written handle offers only URIs a caller can fetch", () => {
+    const container = captureWrittenHandle(
+      containerProof,
+      { collection: "records", relPath: "export.jsonl" },
+      recordImport({ accepted: 2, failed: 1, snapshotState: "partial" })
+    );
+    const document = captureWrittenHandle(fileProof, {
+      collection: "notes",
+      relPath: "note.md",
+    });
+
+    // DISCRIMINATING against 5e5ed7ca: the REST create job had no handle at
+    // all and its caller was left with `gno://records/export.jsonl`, which
+    // `getDocumentByUri` resolves to nothing. The container shape carries no
+    // `uri` field, so that URI cannot be handed back by accident.
+    expect(container.kind).toBe("record-container");
+    expect(container).not.toHaveProperty("uri");
+    expect(
+      container.kind === "record-container" ? container.recordUris : []
+    ).toEqual(["gno://notes/note.md", "gno://notes/note.md"]);
+    expect(container.reason).toContain("rejected");
+
+    expect(document.kind).toBe("document");
+    expect(document.kind === "document" ? document.uri : "").toBe(
+      "gno://notes/note.md"
+    );
+    expect(document.reason).toBeUndefined();
   });
 });

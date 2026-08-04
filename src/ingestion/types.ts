@@ -245,8 +245,45 @@ export interface CollectionSyncResult {
   }>;
 }
 
+/**
+ * The honest handle for a single path a caller WROTE and then proved.
+ *
+ * A create/capture that answers 202 + a job id has already sent its response by
+ * the time the write is proven, so the completed JOB RESULT is the only channel
+ * left that can correct it. `gno://<collection>/<relPath>` is the right handle
+ * for an ordinary document and the WRONG one for a record container: the
+ * container is indexed as N logical records at virtual paths with no row at the
+ * written path, and `getDocumentByUri` is an exact lookup, so that URI resolves
+ * to nothing. The `record-container` shape therefore carries no `uri` at all -
+ * the file stays identified by `relPath`, and the fetchable handles are
+ * `recordUris`.
+ */
+export type WrittenPathHandle =
+  | {
+      kind: "document";
+      collection: string;
+      relPath: string;
+      /** Fetchable: resolves to the document at the written path. */
+      uri: string;
+      reason?: string;
+    }
+  | {
+      kind: "record-container";
+      collection: string;
+      relPath: string;
+      /** Fetchable: the virtual URIs of the container's logical records. */
+      recordUris: string[];
+      reason?: string;
+    };
+
 /** Full sync summary */
 export interface SyncResult {
+  /**
+   * Set only by the single-write create/capture job wrappers, where the job
+   * result is what a caller reads to learn whether their write succeeded. A
+   * broad `gno update` writes nothing of its own and leaves this absent.
+   */
+  written?: WrittenPathHandle;
   collections: CollectionSyncResult[];
   totalDurationMs: number;
   totalFilesProcessed: number;

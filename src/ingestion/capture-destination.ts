@@ -47,6 +47,7 @@ import {
 } from "node:path";
 
 import type { DocumentRow, StorePort } from "../store/types";
+import type { FileSyncResult, WrittenPathHandle } from "./types";
 
 import { normalizeCollectionDirRelPath } from "../core/path-rules";
 import { checkWalkPathVisibility } from "./walker";
@@ -419,6 +420,121 @@ export const captureProofSyncReason = (
   return summary === undefined
     ? undefined
     : `Written as a record container: ${summary}, so this receipt carries no docid.`;
+};
+
+/**
+ * The `sync.reason` fragment for a record import that did NOT take everything
+ * the written file offered.
+ *
+ * The container path's own sync result is a non-error whenever the adapter
+ * accepted at least ONE record - a `.jsonl` export with one good line and one
+ * malformed line is `added`/`updated`, not `error`. The rejected lines are
+ * disclosed only in `recordImport.failures`, so a receipt that reports
+ * `completed` and stops there tells the caller their malformed capture was
+ * fully imported. The same holds for a PARTIAL snapshot: records the adapter
+ * never saw were preserved from the previous import, not refreshed.
+ *
+ * `undefined` for a fully successful import (and for a file that is not a
+ * record container at all), so a clean capture reads exactly as it did before.
+ */
+export const captureRecordImportReason = (
+  recordImport: FileSyncResult["recordImport"]
+): string | undefined => {
+  if (!recordImport) return undefined;
+  const { accepted, failed } = recordImport.records;
+  const partialSnapshot = recordImport.snapshotState === "partial";
+  if (failed === 0 && !partialSnapshot) return undefined;
+  const parts: string[] = [];
+  if (failed > 0) {
+    parts.push(
+      `${failed} record${failed === 1 ? "" : "s"} rejected by the ${recordImport.adapterId} adapter and NOT indexed (${accepted} accepted)`
+    );
+  }
+  if (partialSnapshot) {
+    parts.push(
+      "the adapter reported a partial snapshot, so records it did not see were preserved from the previous import rather than refreshed"
+    );
+  }
+  const pointer =
+    failed > 0
+      ? " See the sync result's recordImport.failures for each rejected record."
+      : "";
+  return `Record import was partial: ${parts.join("; ")}.${pointer}`;
+};
+
+/**
+ * The whole `sync.reason` a proven capture receipt should carry.
+ *
+ * Two independent facts can need stating about one write - the path is a
+ * container (so the receipt carries no docid) and the import was partial (so
+ * some of what was written is not indexed) - and they are orthogonal: a
+ * container can import cleanly, and either fact alone must still be said. The
+ * capture surfaces that share this receipt shape (CLI `gno capture`, MCP
+ * `gno_capture`, SDK `capture()`, REST resident capture) all compose them here
+ * so none of them can drift into reporting only half of it.
+ *
+ * `undefined` when there is nothing unusual to say, which is the entire
+ * ordinary case.
+ */
+export const captureSyncReason = (
+  proof: ActiveCaptureProof,
+  recordImport?: FileSyncResult["recordImport"]
+): string | undefined => {
+  const stated = [
+    captureProofSyncReason(proof),
+    captureRecordImportReason(recordImport),
+  ].filter((reason): reason is string => reason !== undefined);
+  return stated.length === 0 ? undefined : stated.join(" ");
+};
+
+/**
+ * The one file result a single-path write cares about, out of a whole-collection
+ * sync.
+ *
+ * The 202 create paths sync the COLLECTION, not just the file they wrote, so the
+ * per-file receipt they need (`recordImport` above all) has to be picked back
+ * out. Compared on the posix form because a receipt built from a platform
+ * `relPath` and a walker entry must not miss each other on Windows.
+ */
+export const captureFileSyncResult = (
+  result: { files?: FileSyncResult[] },
+  relPath: string
+): FileSyncResult | undefined => {
+  const wanted = relPath.split(sep).join("/");
+  return result.files?.find(
+    (file) => file.relPath.split(sep).join("/") === wanted
+  );
+};
+
+/**
+ * The proven write, in the shape a job result and a change event can state.
+ *
+ * Same facts as {@link captureSyncReason}, addressed to a caller that gets a
+ * HANDLE rather than a rendered receipt: which URIs it can actually fetch.
+ */
+export const captureWrittenHandle = (
+  proof: ActiveCaptureProof,
+  location: { collection: string; relPath: string },
+  recordImport?: FileSyncResult["recordImport"]
+): WrittenPathHandle => {
+  const reason = captureSyncReason(proof, recordImport);
+  const stated = reason === undefined ? {} : { reason };
+  if (proof.kind === "file") {
+    return {
+      kind: "document",
+      collection: location.collection,
+      relPath: location.relPath,
+      uri: proof.document.uri,
+      ...stated,
+    };
+  }
+  return {
+    kind: "record-container",
+    collection: location.collection,
+    relPath: location.relPath,
+    recordUris: proof.records.map((record) => record.uri),
+    ...stated,
+  };
 };
 
 /**

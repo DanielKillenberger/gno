@@ -29,8 +29,10 @@ import { writeCapturePlanFile } from "../core/capture-write";
 import { recordContentMutation } from "../core/mutation-generations";
 import {
   type CollectionSyncResult,
+  captureFileSyncResult,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
+  captureWrittenHandle,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -260,6 +262,15 @@ export const executeResidentCapturePlan = async (
         plan.relPath
       );
       if (!indexed.ok) throw new Error(indexed.message);
+      // `gnoUri` names the FILE that was written. For a record container that
+      // path has no document, so the handle a poller can actually fetch has to
+      // come from the proof - together with anything the adapter rejected,
+      // which a bare `completed` job would otherwise bury in `recordImport`.
+      const written = captureWrittenHandle(
+        indexed,
+        { collection: collection.name, relPath: plan.relPath },
+        captureFileSyncResult(result, plan.relPath)?.recordImport
+      );
       context.scheduler?.notifySyncComplete([plan.relPath]);
       context.eventBus?.emit({
         type: "document-changed",
@@ -268,8 +279,13 @@ export const executeResidentCapturePlan = async (
         relPath: plan.relPath,
         origin: "create",
         changedAt: new Date().toISOString(),
+        kind: written.kind,
+        ...(written.kind === "record-container"
+          ? { recordUris: written.recordUris }
+          : {}),
       });
       return {
+        written,
         collections: [result],
         totalDurationMs: result.durationMs,
         totalFilesProcessed: result.filesProcessed,
@@ -290,7 +306,8 @@ export const executeResidentCapturePlan = async (
         ? {
             status: "pending",
             jobId: jobResult.jobId,
-            reason: "Sync job started; poll /api/jobs/:id for status.",
+            reason:
+              "Sync job started; poll /api/jobs/:id for status and result.written for the fetchable handle.",
           }
         : {
             status: "skipped",

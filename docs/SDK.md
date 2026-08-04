@@ -511,6 +511,16 @@ path, so opening an existing container reports `sync.status: "completed"` with
 a `sync.reason` naming the records, not `skipped`. As with a container capture,
 the receipt carries no `docid`.
 
+`sync.reason` also discloses a **partial record import**. An adapter that
+accepts at least one record while rejecting others produces an ordinary
+non-error file status, so `sync.status` stays `completed`; the rejected records
+
+- and a partial snapshot, whose unseen records were preserved rather than
+  refreshed - are stated in `sync.reason` alongside the container sentence. A
+  fully successful import is unchanged: no partial wording is added. `capture()`
+  (SDK), `gno capture` (CLI), `gno_capture` (MCP), and the REST capture/create
+  jobs share this wording.
+
 ### Status
 
 ```ts

@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 // node:fs/promises has no Bun equivalent for directory creation.
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 // node:os has no Bun temp-directory helper.
 import { tmpdir } from "node:os";
 // node:path has no Bun path utilities.
@@ -50,7 +50,11 @@ const configFor = (root: string): Config => ({
 let roots: string[] = [];
 
 const makeRoot = async (prefix: string): Promise<string> => {
-  const root = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random()}`);
+  // `mkdtemp` rather than a `Date.now()`/`Math.random()` name under the OS temp
+  // dir: the latter is a PREDICTABLE path in a world-writable directory, so
+  // another local user can pre-create it (or plant a symlink at it) and this
+  // suite then writes its fixtures - and its SQLite index - through their file.
+  const root = await mkdtemp(join(tmpdir(), `${prefix}-`));
   await mkdir(join(root, "notes", "archive"), { recursive: true });
   await Bun.write(join(root, "notes", "doc.md"), "# Source\n\nBody.\n");
   roots.push(root);

@@ -28,7 +28,7 @@ import {
   CaptureDestinationError,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
-  captureProofSyncReason,
+  captureSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -288,12 +288,17 @@ export async function capture(
         });
       }
       // A record container has no document at the written path, so the receipt
-      // carries no docid rather than one that disagrees with its URI.
+      // carries no docid rather than one that disagrees with its URI - and a
+      // container whose adapter REJECTED some of what was written says so too,
+      // instead of reporting a plain `completed`.
       return buildCaptureReceipt({
         plan,
         absPath,
         docid: syncResult?.docid ?? captureProofDocid(indexed),
-        sync: { status: "completed", reason: captureProofSyncReason(indexed) },
+        sync: {
+          status: "completed",
+          reason: captureSyncReason(indexed, syncResult?.recordImport),
+        },
       });
     });
   } finally {

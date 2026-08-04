@@ -26,7 +26,7 @@ import {
   CaptureDestinationError,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
-  captureProofSyncReason,
+  captureSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -317,7 +317,7 @@ export function handleCapture(
           docid,
           sync: {
             status: "completed",
-            reason: captureProofSyncReason(indexed),
+            reason: captureSyncReason(indexed, syncResult.recordImport),
           },
           overwritten: exists && args.overwrite === true,
           serverInstanceId: ctx.serverInstanceId,

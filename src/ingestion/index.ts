@@ -12,10 +12,14 @@ export type {
 } from "./capture-destination";
 export {
   CaptureDestinationError,
+  captureFileSyncResult,
   captureProofContainerSummary,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
+  captureRecordImportReason,
+  captureSyncReason,
+  captureWrittenHandle,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
 } from "./capture-destination";
@@ -53,6 +57,7 @@ export type {
   WalkConfig,
   WalkEntry,
   WalkerPort,
+  WrittenPathHandle,
 } from "./types";
 export { collectionToWalkConfig, DEFAULT_CHUNK_PARAMS } from "./types";
 // Walker

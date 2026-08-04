@@ -146,3 +146,155 @@ describe("REST write jobs demand an indexed document", () => {
     expect(job.error).toContain("not indexed");
   });
 });
+
+/**
+ * The 202 body is sent BEFORE the write is proven, so `uri` in it is a promise
+ * about a path, not a fetchable handle. For a record container that promise is
+ * false - the container is indexed as N logical records at virtual paths and
+ * `getDocumentByUri` is an exact lookup - and the completed JOB is the only
+ * channel that still reaches the same caller.
+ */
+describe("REST create hands back a resolvable handle for a container", () => {
+  let root: string;
+  let store: SqliteAdapter;
+  let ctxHolder: ContextHolder;
+  let events: Array<Record<string, unknown>>;
+
+  const RECORDS = `${[
+    { id: "one", title: "First", text: "Zephyr ships Friday" },
+    { id: "two", title: "Second", text: "Budget capped at forty" },
+  ]
+    .map((record) => JSON.stringify(record))
+    .join("\n")}\n`;
+
+  const create = async (relPath: string, content: string) => {
+    const res = await handleCreateDoc(
+      ctxHolder,
+      store,
+      new Request("http://localhost/api/docs", {
+        method: "POST",
+        body: JSON.stringify({ collection: "records", relPath, content }),
+      })
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { jobId: string; uri: string };
+    return { body, job: await settledJob(body.jobId) };
+  };
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "gno-create-handle-"));
+    await mkdir(join(root, "records"), { recursive: true });
+    store = new SqliteAdapter();
+    const opened = await store.open(join(root, "index.sqlite"), "unicode61");
+    if (!opened.ok) throw new Error(opened.error.message);
+    const config: Config = {
+      version: "1.0",
+      ftsTokenizer: "unicode61",
+      collections: [
+        {
+          name: "records",
+          path: join(root, "records"),
+          pattern: "**/*",
+          include: [],
+          exclude: [],
+          recordAdapters: {
+            jsonl: {
+              fieldMapping: { id: "/id", title: "/title", body: "/text" },
+            },
+          },
+        },
+      ],
+      contexts: [],
+    };
+    const registered = await store.syncCollections(config.collections);
+    if (!registered.ok) throw new Error(registered.error.message);
+    events = [];
+    ctxHolder = {
+      current: { config } as ContextHolder["current"],
+      config,
+      scheduler: null,
+      eventBus: {
+        emit: (event: Record<string, unknown>) => {
+          events.push(event);
+        },
+      },
+      watchService: null,
+    } as unknown as ContextHolder;
+  });
+
+  afterEach(async () => {
+    await store.close();
+    await safeRm(root);
+  });
+
+  test("the completed job names the records, not the unfetchable file URI", async () => {
+    const { body, job } = await create("export.jsonl", RECORDS);
+
+    expect(job.status).toBe("completed");
+    // DISCRIMINATING against 5e5ed7ca: the job result was a bare `SyncResult`
+    // with no handle at all, so a client polling a COMPLETED job still had
+    // nothing but the 202's `gno://records/export.jsonl` - a URI that resolves
+    // to no document.
+    const written = job.result?.written;
+    expect(written?.kind).toBe("record-container");
+    expect(written).not.toHaveProperty("uri");
+    const recordUris =
+      written?.kind === "record-container" ? written.recordUris : [];
+    expect(recordUris).toHaveLength(2);
+    expect(recordUris).not.toContain(body.uri);
+    // "Fetchable" is asserted against the store, not against the string shape.
+    for (const uri of recordUris) {
+      const row = await store.getDocumentByUri(uri);
+      expect(row.ok && row.value !== null).toBe(true);
+    }
+    const container = await store.getDocumentByUri(body.uri);
+    expect(container.ok && container.value).toBeNull();
+
+    // The emitted event carried the same false promise and now carries the
+    // same correction.
+    const emitted = events.find((event) => event.type === "document-changed");
+    expect(emitted?.kind).toBe("record-container");
+    expect(emitted?.recordUris).toEqual(recordUris);
+    expect(emitted?.uri).toBe(body.uri);
+  });
+
+  test("a clean container import says only that it is a container", async () => {
+    const { job } = await create("clean.jsonl", RECORDS);
+
+    // REST writes the caller's bytes verbatim, so this import really is fully
+    // successful - and a fully successful import must not gain a word.
+    expect(job.result?.written?.reason).toBe(
+      "Written as a record container: imported as 2 logical record documents at virtual paths; the container path itself has no document, so this receipt carries no docid."
+    );
+  });
+
+  test("a rejected record is disclosed on the completed job", async () => {
+    const { job } = await create(
+      "partial.jsonl",
+      `${RECORDS}{ this line is not JSON\n`
+    );
+
+    expect(job.status).toBe("completed");
+    // DISCRIMINATING against 5e5ed7ca: `filesAdded: 1` and a `completed` job
+    // were the whole story - the thrown-away line was reachable only by
+    // digging into `collections[0].files[0].recordImport.failures`.
+    expect(job.result?.written?.reason).toContain("Record import was partial");
+    expect(job.result?.written?.reason).toContain(
+      "1 record rejected by the adapter/jsonl adapter and NOT indexed (2 accepted)"
+    );
+  });
+
+  test("an ordinary document still hands back its fetchable URI", async () => {
+    const { body, job } = await create("plain.md", "# Plain\n\nBody.\n");
+
+    expect(job.status).toBe("completed");
+    const written = job.result?.written;
+    expect(written?.kind).toBe("document");
+    expect(written?.kind === "document" ? written.uri : "").toBe(body.uri);
+    // Unchanged for the ordinary case: nothing unusual to say.
+    expect(written?.reason).toBeUndefined();
+    const emitted = events.find((event) => event.type === "document-changed");
+    expect(emitted?.kind).toBe("document");
+    expect(emitted?.recordUris).toBeUndefined();
+  });
+});

@@ -2,11 +2,27 @@ export type DocumentEventOrigin = "watcher" | "save" | "create";
 
 export interface DocumentChangedEvent {
   type: "document-changed";
+  /**
+   * `gno://<collection>/<relPath>` - the path that changed. Fetchable as a
+   * document only when `kind` is absent or `"document"`; for a record container
+   * it names the FILE and resolves to no document (see `recordUris`).
+   */
   uri: string;
   collection: string;
   relPath: string;
   origin: DocumentEventOrigin;
   changedAt: string;
+  /**
+   * What `uri` actually is, when the emitter proved it. Absent from emitters
+   * that do not run the proof (the watcher), so consumers must treat an absent
+   * `kind` as "unknown", not as "document".
+   */
+  kind?: "document" | "record-container";
+  /**
+   * The fetchable URIs of a record container's logical records - the handles a
+   * consumer can use in place of the unresolvable `uri`.
+   */
+  recordUris?: string[];
 }
 
 export interface CapsuleReverifiedEvent {
