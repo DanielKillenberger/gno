@@ -20,7 +20,8 @@
  *   collection root. Nothing is written through an alias, and an escaping alias
  *   is still reported as a containment error.
  * - `requireActiveCaptureDocument` is the proof a caller must demand AFTER the
- *   write: an ACTIVE document must actually exist for the path. "The sync
+ *   write: an ACTIVE document must actually exist for the path's effective
+ *   source path (`COALESCE(record_source_path, rel_path)`). "The sync
  *   result was not an error" is not that proof - `skipped` and `unchanged` are
  *   both non-errors and neither implies an indexed document.
  *
@@ -364,9 +365,21 @@ export type ActiveCaptureDocument =
  * through a symlinked parent produces. A caller that accepts it reports a
  * successful capture, hands back a `gno://` URI that resolves to nothing, and
  * the user finds out later.
+ *
+ * The proof is by EFFECTIVE SOURCE PATH - `COALESCE(record_source_path,
+ * rel_path)`, the same notion the reconciliation seams use - not by `rel_path`
+ * alone. A write targeting a configured record-container format (a `.jsonl`
+ * export, a `.vtt` transcript) is imported as one or more LOGICAL documents
+ * whose `rel_path` is a virtual `#record/...` path, with the physical file
+ * recorded in `record_source_path`. Asking only `getDocument(collection,
+ * relPath)` answers "no document exists" for a completely successful container
+ * import, so a working capture reports FAILURE. `listRecordDocuments` is the
+ * index-served (`idx_documents_record_source_path`) seam for that half, and it
+ * is consulted only when the plain-path lookup did not already prove the write.
  */
 export async function requireActiveCaptureDocument(
-  store: Pick<StorePort, "getDocument">,
+  store: Pick<StorePort, "getDocument"> &
+    Partial<Pick<StorePort, "listRecordDocuments">>,
   collectionName: string,
   relPath: string
 ): Promise<ActiveCaptureDocument> {
@@ -375,17 +388,33 @@ export async function requireActiveCaptureDocument(
     return { ok: false, message: result.error.message };
   }
   const document = result.value;
+  if (document?.active) {
+    return { ok: true, document };
+  }
+
+  // Record containers: one written file, N active logical documents.
+  const records =
+    typeof store.listRecordDocuments === "function"
+      ? await store.listRecordDocuments(collectionName, relPath)
+      : null;
+  if (records?.ok) {
+    const activeRecord = records.value.find((row) => row.active);
+    if (activeRecord) {
+      return { ok: true, document: activeRecord };
+    }
+  }
+
   if (!document) {
+    if (records && !records.ok) {
+      return { ok: false, message: records.error.message };
+    }
     return {
       ok: false,
       message: `File written but not indexed: no document exists for ${relPath}. The path is not reachable to the indexer or is excluded from the collection.`,
     };
   }
-  if (!document.active) {
-    return {
-      ok: false,
-      message: `File written but not indexed: the document for ${relPath} is inactive.`,
-    };
-  }
-  return { ok: true, document };
+  return {
+    ok: false,
+    message: `File written but not indexed: the document for ${relPath} is inactive.`,
+  };
 }

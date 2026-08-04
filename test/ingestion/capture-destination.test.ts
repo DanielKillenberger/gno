@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { Config } from "../../src/config/types";
 import type { DocumentRow, StorePort } from "../../src/store/types";
 
 import {
@@ -25,6 +26,8 @@ import {
   prepareCaptureDestination,
   requireActiveCaptureDocument,
 } from "../../src/ingestion/capture-destination";
+import { SyncService } from "../../src/ingestion/sync";
+import { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import { safeRm } from "../helpers/cleanup";
 
 const documentStub = (active: boolean): DocumentRow =>
@@ -256,5 +259,183 @@ describe("requireActiveCaptureDocument", () => {
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.message).toBe("db gone");
+  });
+});
+
+/**
+ * The proof is by EFFECTIVE SOURCE PATH, not by `rel_path`.
+ *
+ * A capture whose destination is a configured record-container format is
+ * imported as LOGICAL documents under virtual `#record/...` rel paths, with the
+ * written file in `record_source_path`. A `rel_path`-only proof calls that
+ * successful import "not indexed" and the receipt reports FAILURE - so these
+ * run against a real store and a real sync, not a stub.
+ */
+describe("requireActiveCaptureDocument - record containers", () => {
+  let root: string;
+  let store: SqliteAdapter;
+  let collection: Config["collections"][number];
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "gno-capture-records-"));
+    store = new SqliteAdapter();
+    expect((await store.open(join(root, "index.db"), "unicode61")).ok).toBe(
+      true
+    );
+    collection = {
+      name: "captures",
+      path: root,
+      pattern: "**/*",
+      include: [],
+      exclude: [],
+      recordAdapters: {
+        jsonl: {
+          fieldMapping: {
+            id: "/id",
+            title: "/title",
+            body: "/text",
+            dateFields: { created: "/created" },
+          },
+        },
+        transcript: { format: "vtt" },
+      },
+    };
+    expect((await store.syncCollections([collection])).ok).toBe(true);
+  });
+
+  afterEach(async () => {
+    await store.close();
+    await safeRm(root);
+  });
+
+  const syncCollection = async () => {
+    const result = await new SyncService().syncCollection(collection, store, {
+      projectTypedEdges: false,
+    });
+    expect(result.filesErrored).toBe(0);
+    return result;
+  };
+
+  test("a captured .jsonl record container satisfies the proof", async () => {
+    const relPath = "export.jsonl";
+    await Bun.write(
+      join(root, relPath),
+      `${[
+        {
+          id: "launch",
+          title: "Launch decision",
+          text: "Project Zephyr launches Friday",
+          created: "2026-07-22T09:00:00Z",
+        },
+        {
+          id: "budget",
+          title: "Budget decision",
+          text: "Budget remains capped at forty units",
+          created: "2026-07-22T10:00:00Z",
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`
+    );
+    await syncCollection();
+
+    // The container itself has no `rel_path` document - only logical records.
+    const direct = await store.getDocument("captures", relPath);
+    expect(direct.ok && direct.value).toBeNull();
+
+    const result = await requireActiveCaptureDocument(
+      store,
+      "captures",
+      relPath
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.document.recordSourcePath).toBe(relPath);
+    expect(result.ok && result.document.active).toBe(true);
+    // Multiple logical records from one written file is the normal case.
+    const records = await store.listRecordDocuments("captures", relPath);
+    expect(
+      records.ok && records.value.filter((row) => row.active)
+    ).toHaveLength(2);
+  });
+
+  test("a captured .vtt transcript container satisfies the proof", async () => {
+    const relPath = "meeting.vtt";
+    await Bun.write(
+      join(root, relPath),
+      Bun.file(
+        join(import.meta.dir, "../fixtures/exports/transcript/sample.vtt")
+      )
+    );
+    await syncCollection();
+
+    const direct = await store.getDocument("captures", relPath);
+    expect(direct.ok && direct.value).toBeNull();
+
+    const result = await requireActiveCaptureDocument(
+      store,
+      "captures",
+      relPath
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.document.recordSourcePath).toBe(relPath);
+    expect(result.ok && result.document.active).toBe(true);
+  });
+
+  test("an ordinary markdown capture still satisfies the proof by rel_path", async () => {
+    const relPath = "note.md";
+    await Bun.write(join(root, relPath), "# Note\n\nordinary capture body\n");
+    await syncCollection();
+
+    const result = await requireActiveCaptureDocument(
+      store,
+      "captures",
+      relPath
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.document.relPath).toBe(relPath);
+    expect(result.ok && result.document.recordSourcePath).toBeFalsy();
+  });
+
+  test("an unindexed write still FAILS the proof - the fallback is not a rubber stamp", async () => {
+    await syncCollection();
+    // Written after the sync: on disk, in no index.
+    await Bun.write(join(root, "unindexed.jsonl"), '{"id":"a","text":"b"}\n');
+
+    const result = await requireActiveCaptureDocument(
+      store,
+      "captures",
+      "unindexed.jsonl"
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toContain("not indexed");
+  });
+
+  test("a deactivated record container FAILS the proof", async () => {
+    const relPath = "export.jsonl";
+    await Bun.write(
+      join(root, relPath),
+      '{"id":"one","title":"One","text":"first body"}\n'
+    );
+    await syncCollection();
+    expect(
+      (await requireActiveCaptureDocument(store, "captures", relPath)).ok
+    ).toBe(true);
+
+    // An authoritative empty snapshot deactivates every logical record.
+    await Bun.write(join(root, relPath), "");
+    await syncCollection();
+
+    const result = await requireActiveCaptureDocument(
+      store,
+      "captures",
+      relPath
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toContain("not indexed");
   });
 });
