@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -333,6 +340,75 @@ describe("listEligibleSubtreeFiles", () => {
     expect(await listEligibleSubtreeFiles("gone", walkConfig(root))).toEqual({
       status: "missing",
     });
+  });
+
+  /**
+   * Containment checked once before the walk is not containment. These drive
+   * the swap through the `beforeReadDirectory` seam - no sleeps, no racing -
+   * so the replacement lands exactly in the window between "this directory was
+   * proven contained" and "this directory is read".
+   *
+   * Against the pre-fix code both of these enumerate the OUTSIDE tree and
+   * return its files under collection-relative names, which `syncPaths` then
+   * follows and indexes. Both are discriminating, not direction pins.
+   */
+  test("refuses a nested directory swapped for an external symlink mid-walk", async () => {
+    const outside = join(base, "outside");
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "secret.md"), "leak");
+
+    await mkdir(join(root, "dir1", "sub"), { recursive: true });
+    await writeFile(join(root, "dir1", "top.md"), "a");
+    await writeFile(join(root, "dir1", "sub", "inner.md"), "b");
+
+    // The enumeration descends through the REALPATH of the root (`/tmp` is a
+    // symlink on macOS), so the seam reports resolved paths.
+    const swapTarget = join(await realpath(root), "dir1", "sub");
+    let swapped = false;
+    const outcome = await listEligibleSubtreeFiles("dir1", walkConfig(root), {
+      beforeReadDirectory: async (absPath) => {
+        // The `Dirent` for `sub` already said "directory" and `sub` has already
+        // been proven contained; replace it in exactly that window.
+        if (absPath === swapTarget && !swapped) {
+          swapped = true;
+          await safeRm(swapTarget);
+          await symlink(outside, swapTarget, "dir");
+        }
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(outcome.status).toBe("error");
+    // Nothing from outside the collection root is reported under a
+    // collection-relative name, at any status.
+    expect(JSON.stringify(outcome)).not.toContain("secret.md");
+  });
+
+  test("refuses when an ancestor of the read directory is swapped mid-walk", async () => {
+    const outside = join(base, "outside");
+    await mkdir(join(outside, "sub"), { recursive: true });
+    await writeFile(join(outside, "sub", "secret.md"), "leak");
+
+    await mkdir(join(root, "dir1", "sub"), { recursive: true });
+    await writeFile(join(root, "dir1", "sub", "inner.md"), "a");
+
+    const rootReal = await realpath(root);
+    const ancestor = join(rootReal, "dir1");
+    const nested = join(rootReal, "dir1", "sub");
+    const outcome = await listEligibleSubtreeFiles("dir1", walkConfig(root), {
+      beforeReadDirectory: async (absPath) => {
+        // `dir1` was proven contained and listed; swapping the ANCESTOR then
+        // makes the already-queued descent into `dir1/sub` resolve outside the
+        // root. The containment proof must be re-taken for THIS read.
+        if (absPath === nested) {
+          await safeRm(ancestor);
+          await symlink(outside, ancestor, "dir");
+        }
+      },
+    });
+
+    expect(outcome.status).toBe("error");
+    expect(JSON.stringify(outcome)).not.toContain("secret.md");
   });
 
   test("applies the collection's eligibility rules to nested candidates", async () => {

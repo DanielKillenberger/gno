@@ -395,6 +395,19 @@ proportional to the event.
   known application-originated writes. Ineligible files remain unindexed even when
   their event causes directory reconciliation.
 
+  Collection-root containment is enforced at TRAVERSAL time, not once before a
+  walk. Every directory the enumeration reads — the argument directory and each
+  nested directory it descends into — is proven, immediately before it is read,
+  to be a real directory (`lstat`, no-follow) whose resolved path lies inside the
+  collection root, and is proven afterwards to still be the same `(dev, ino)`.
+  A single up-front check is not sufficient: a directory replaced by a symlink
+  after the check but before its `readdir` (a checkout, a sync client, any tree
+  rewrite racing reconciliation) would be followed, and files from outside the
+  collection would be returned under collection-relative names and indexed by
+  `syncPaths`. Any such swap fails the whole enumeration closed. This changes
+  nothing about what is ELIGIBLE — a symlinked directory is still simply skipped,
+  exactly as `FileWalker.walk` and `Dirent.isDirectory()` skip it.
+
   Suppression is scoped to SYNCING, not to classification. Its purpose is that an
   application-originated write is not fed back into the watcher as a change, so a
   suppressed path that still exists on disk is never re-synced. It must not also
@@ -488,6 +501,17 @@ proportional to the event.
   directory result in one bounded reconciliation batch per debounce window. Unchanged
   files produce no duplicate document-change notifications and no redundant embedding
   scheduling. Adds and updates retain existing event/scheduler behavior.
+
+  The debounce DELAYS work; it never prevents it. Each event re-arms the single
+  flush timer, but only up to a hard ceiling measured from the window's first
+  queued event, so a process emitting unique names faster than the debounce
+  (editor temp files, build intermediates, a sync client) cannot starve the
+  flush: queued eligible changes are synced within that ceiling rather than
+  never. The ceiling also bounds queue growth in TIME — `hints` stays uncapped in
+  ENTRIES, which is what keeps a deleted directory's hint from being dropped as
+  if it were a temp name, and drains on the ceiling instead of growing for as
+  long as the churn lasts. A burst that finishes inside the ceiling still
+  coalesces into exactly one batch and one store round trip per seam.
 - **R6:** Queued work is evaluated against the current collection path, filters, sync
   options, and generation. A collection update, removal, root change, or service
   disposal cannot flush stale reconciliation work into the wrong configuration.

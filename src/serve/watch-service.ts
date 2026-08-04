@@ -112,7 +112,12 @@ export interface CollectionWatchCallbacks {
  * COST, and that is now gone: the whole hint set is discriminated in ONE
  * batched store lookup per flush, and the disk is enumerated only for hints
  * that the indexed side proved are real directories. What remains is a Set of
- * short strings living for at most one 300 ms debounce window.
+ * short strings living for at most one window - and a window is bounded in TIME
+ * rather than in entries: the debounce re-arms only up to `MAX_FLUSH_DELAY_MS`
+ * from its first event, so sustained churn drains the set on that ceiling
+ * instead of growing it for as long as the churn lasts. That bound is the right
+ * lever precisely because it is content-blind: unlike a size cap it cannot
+ * choose to drop the one hint that was a deletion.
  *
  * Only the root is stamped at queue time. Resolution is ALWAYS performed
  * against the current collection configuration, so a generation stamp would
@@ -256,6 +261,31 @@ interface SuppressionInterval {
  * an unproven path stays suppressed rather than being re-synced.
  */
 const MAX_SUPPRESSION_INTERVALS = 16;
+
+/** Quiet period a collection must see before its queued work flushes. */
+const FLUSH_DEBOUNCE_MS = 300;
+
+/**
+ * Hard ceiling on how long queued work may be held by the debounce, measured
+ * from the FIRST event of the window.
+ *
+ * The debounce coalesces; it must not be able to starve. A process emitting a
+ * unique name faster than `FLUSH_DEBOUNCE_MS` re-arms the timer forever, and
+ * without a ceiling the eligible edits queued beside that churn are never
+ * synced - not late, never - while the queues grow for as long as it lasts.
+ *
+ * `2000` is roughly seven debounce windows. It is chosen to be far longer than
+ * any human-scale burst (a save, a formatter pass, a small checkout all settle
+ * inside one window and still coalesce into exactly one batch, unchanged by
+ * this ceiling), and short enough that the worst case a user can provoke is
+ * two seconds of staleness rather than unbounded staleness. It also bounds
+ * `DirtyDirectoryEntry.hints`, whose whole argument for being uncapped is that
+ * it lives for one short window: under sustained churn the set now drains
+ * every 2 s instead of growing for the duration of the churn. Under that same
+ * churn the store cost stays amortized - one batched round trip per seam per
+ * ceiling, not one per event.
+ */
+const MAX_FLUSH_DELAY_MS = 2000;
 
 /**
  * Observation witnesses retained per reconciliation KEY for the suppression
@@ -739,6 +769,15 @@ export class CollectionWatchService {
     Map<string, DirtyDirectoryEntry>
   >();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Wall-clock moment the CURRENT window must flush by, per collection, set
+   * when the window's first event is queued and cleared when it flushes.
+   *
+   * Deliberately absent from `getState()`: it is a scheduling bound with no
+   * observable shape of its own - every effect it has is already visible as a
+   * batch arriving - and the public status schema does not change for it.
+   */
+  readonly #flushDeadlines = new Map<string, number>();
   readonly #syncing = new Set<string>();
   readonly #inFlightSyncs = new Set<Promise<void>>();
   /**
@@ -846,6 +885,9 @@ export class CollectionWatchService {
           clearTimeout(timer);
           this.#timers.delete(collectionName);
         }
+        // The queued work this deadline was holding a ceiling over has just
+        // been discarded; the next window starts from its own first event.
+        this.#flushDeadlines.delete(collectionName);
       }
     }
 
@@ -1276,6 +1318,7 @@ export class CollectionWatchService {
       watcher.close();
     }
     this.#timers.clear();
+    this.#flushDeadlines.clear();
     this.#watchers.clear();
     this.#watchRoots.clear();
     this.#collectionGenerations.clear();
@@ -1506,20 +1549,44 @@ export class CollectionWatchService {
     return !matchesCollectionExclusion(directory, collection.exclude);
   }
 
+  /**
+   * Re-arm the debounce, but never past this window's deadline.
+   *
+   * A pure debounce delays work; it must never PREVENT it. An editor or build
+   * process emitting unique ineligible temp names faster than the window
+   * cancels and restarts the only timer on every event, so the flush never
+   * fires: eligible changes queued alongside that churn stay unindexed for as
+   * long as it lasts, and the queues (including `DirtyDirectoryEntry.hints`)
+   * grow the whole time. The ceiling is what makes the debounce a delay again.
+   */
   #armFlushTimer(collectionName: string): void {
     const existingTimer = this.#timers.get(collectionName);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
+    const now = Date.now();
+    let deadline = this.#flushDeadlines.get(collectionName);
+    if (deadline === undefined) {
+      // Anchored at the FIRST queued event of this window, so the bound is on
+      // how long queued work can wait - not on how long churn has been running.
+      deadline = now + MAX_FLUSH_DELAY_MS;
+      this.#flushDeadlines.set(collectionName, deadline);
+    }
+    const delay = Math.max(0, Math.min(FLUSH_DEBOUNCE_MS, deadline - now));
     this.#timers.set(
       collectionName,
       setTimeout(() => {
         this.#startFlush(collectionName);
-      }, 300)
+      }, delay)
     );
   }
 
   #startFlush(collectionName: string): void {
+    // The window ends here whatever the flush then decides. Clearing it later -
+    // only once the queues are genuinely drained - would leave an expired
+    // deadline behind a flush that returned early (a sync already in flight),
+    // and every subsequent event would then arm a zero-delay timer and spin.
+    this.#flushDeadlines.delete(collectionName);
     if (this.#disposed) {
       return;
     }

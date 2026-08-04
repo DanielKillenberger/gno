@@ -10,12 +10,12 @@
  * @module src/ingestion/directory-children
  */
 
-// node:fs - Dirent type for the readdir below
-import type { Dirent } from "node:fs";
+// node:fs - Dirent/Stats types for the readdir and lstat calls below
+import type { Dirent, Stats } from "node:fs";
 
 // node:fs/promises - Bun has no readdir/realpath/stat equivalent (Bun.file()
 // answers only for regular files, so it cannot test a DIRECTORY's existence)
-import { readdir, realpath, stat } from "node:fs/promises";
+import { lstat, readdir, realpath, stat } from "node:fs/promises";
 // node:path - Bun has no path manipulation module
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -256,8 +256,136 @@ function shallowestRemovedChild(
 }
 
 /**
+ * Optional seams for the enumeration below.
+ *
+ * `beforeReadDirectory` is awaited immediately before each `readdir`, once that
+ * directory has been proven contained. It exists so the swap race the
+ * traversal-time containment check closes can be driven DETERMINISTICALLY in a
+ * test - replacing a directory with a symlink exactly inside the window - rather
+ * than raced against a sleep. Production callers never pass it, and a hook that
+ * throws is folded into the ordinary `error` outcome like any other failure, so
+ * the never-throws contract holds.
+ */
+export interface DirectoryEnumerationHooks {
+  beforeReadDirectory?: (absPath: string) => void | Promise<void>;
+}
+
+/** Everything the recursion carries that is the same at every level. */
+interface EnumerationContext {
+  config: WalkConfig;
+  recursive: boolean;
+  /** The collection root, fully resolved. Containment is measured against it. */
+  rootReal: string;
+  out: string[];
+  hooks: DirectoryEnumerationHooks | undefined;
+}
+
+/** One directory read that was proven contained at the moment it was read. */
+type ContainedRead =
+  | { status: "read"; entries: Dirent[] }
+  /** Not a directory any more (or never was): gone, or a symlink in its place. */
+  | { status: "missing" }
+  | { status: "error"; cause: unknown };
+
+/**
+ * Read one directory, proving AT READ TIME that it is a real directory inside
+ * the collection root - and that it was still the same directory afterwards.
+ *
+ * Containment established once before a walk is not containment: a directory
+ * replaced by a symlink after that check but before its `readdir` is followed by
+ * the `readdir`, and the files under it are then returned under
+ * collection-relative names and handed to `syncPaths`, which follows the same
+ * symlink and indexes content from outside the collection. A `Dirent` that said
+ * "directory" is evidence about the instant the parent was listed and nothing
+ * more, so descending on the strength of it has the same window.
+ *
+ * Three checks, in order, close it:
+ *
+ * 1. `lstat` - no-follow, so a symlink standing where a directory was is simply
+ *    not a directory here. That is the SAME policy `Dirent.isDirectory()`
+ *    applies to entries, so nothing changes about what is ELIGIBLE; it only
+ *    stops a stale `Dirent` from being trusted after the fact.
+ * 2. `realpath` + containment, immediately before the read. This is what proves
+ *    every `readdir` target - not just the top one - is inside the root at the
+ *    moment it is read, including when the swap happened to an ANCESTOR.
+ * 3. `lstat` again after the read, comparing `(dev, ino)`. A swap landing
+ *    between the containment proof and the `readdir` cannot change what that
+ *    `readdir` already returned, but it can change what it returned it FROM, so
+ *    the identity is re-proven and a changed inode fails the whole enumeration
+ *    closed rather than reporting foreign files.
+ */
+async function readContainedDirectory(
+  dirPath: string,
+  context: EnumerationContext
+): Promise<ContainedRead> {
+  let before: Stats;
+  try {
+    before = await lstat(dirPath);
+  } catch (cause) {
+    return isMissingError(cause)
+      ? { status: "missing" }
+      : { status: "error", cause };
+  }
+  if (!before.isDirectory()) {
+    return { status: "missing" };
+  }
+
+  let real: string;
+  try {
+    real = await realpath(dirPath);
+  } catch (cause) {
+    return isMissingError(cause)
+      ? { status: "missing" }
+      : { status: "error", cause };
+  }
+  if (escapesRoot(context.rootReal, real)) {
+    return {
+      status: "error",
+      cause: new Error(
+        `Directory path escapes the collection root: ${dirPath}`
+      ),
+    };
+  }
+
+  let entries: Dirent[];
+  try {
+    await context.hooks?.beforeReadDirectory?.(dirPath);
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch (cause) {
+    return isMissingError(cause)
+      ? { status: "missing" }
+      : { status: "error", cause };
+  }
+
+  let after: Stats;
+  try {
+    after = await lstat(dirPath);
+  } catch (cause) {
+    return isMissingError(cause)
+      ? { status: "missing" }
+      : { status: "error", cause };
+  }
+  if (
+    !(
+      after.isDirectory() &&
+      after.dev === before.dev &&
+      after.ino === before.ino
+    )
+  ) {
+    return {
+      status: "error",
+      cause: new Error(
+        `Directory was replaced while it was being read: ${dirPath}`
+      ),
+    };
+  }
+
+  return { status: "read", entries };
+}
+
+/**
  * Read one directory and collect its eligible files, descending only when
- * `recursive` is set.
+ * `context.recursive` is set.
  *
  * Returns `null` on success and a terminal outcome otherwise. A NESTED
  * directory that vanished mid-walk contributes nothing and is not an outcome:
@@ -266,42 +394,39 @@ function shallowestRemovedChild(
  * never read a partially readable subtree as an authoritative file list.
  *
  * Symlinks are never followed: `Dirent.isDirectory()` has `lstat` semantics, so
- * a symlinked directory is neither descended into nor listed. That is both
- * parity with `FileWalker.walk` and what makes the recursion loop-free.
+ * a symlinked directory is neither descended into nor listed, and
+ * `readContainedDirectory` re-proves that at the moment of the read. That is
+ * both parity with `FileWalker.walk` and what makes the recursion loop-free.
  */
 async function collectEligibleFiles(
-  dirReal: string,
+  dirPath: string,
   prefix: string,
-  config: WalkConfig,
-  recursive: boolean,
-  out: string[],
-  isTop: boolean
+  isTop: boolean,
+  context: EnumerationContext
 ): Promise<DirectoryChildrenOutcome | null> {
-  let entries: Dirent[];
-  try {
-    entries = await readdir(dirReal, { withFileTypes: true });
-  } catch (cause) {
-    if (isMissingError(cause)) {
-      return isTop ? { status: "missing" } : null;
-    }
-    return { status: "error", cause };
+  const read = await readContainedDirectory(dirPath, context);
+  if (read.status === "missing") {
+    return isTop ? { status: "missing" } : null;
+  }
+  if (read.status === "error") {
+    return { status: "error", cause: read.cause };
   }
 
-  const subdirectories: Array<{ real: string; prefix: string }> = [];
-  for (const entry of entries) {
+  const subdirectories: Array<{ path: string; prefix: string }> = [];
+  for (const entry of read.entries) {
     if (isHiddenSegment(entry.name)) {
       continue;
     }
     const childRelPath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isFile()) {
-      if (matchesWalkPath(childRelPath, config)) {
-        out.push(childRelPath);
+      if (matchesWalkPath(childRelPath, context.config)) {
+        context.out.push(childRelPath);
       }
       continue;
     }
-    if (recursive && entry.isDirectory()) {
+    if (context.recursive && entry.isDirectory()) {
       subdirectories.push({
-        real: join(dirReal, entry.name),
+        path: join(dirPath, entry.name),
         prefix: childRelPath,
       });
     }
@@ -309,12 +434,10 @@ async function collectEligibleFiles(
 
   for (const subdirectory of subdirectories) {
     const failure = await collectEligibleFiles(
-      subdirectory.real,
+      subdirectory.path,
       subdirectory.prefix,
-      config,
-      recursive,
-      out,
-      false
+      false,
+      context
     );
     if (failure) {
       return failure;
@@ -334,6 +457,8 @@ async function collectEligibleFiles(
  *     `Dirent.isFile()` uses `lstat` semantics, so this is exact parity;
  *   - dot-prefixed entries and dot-prefixed directories are skipped.
  *   Eligibility itself is never forked - it stays with `matchesWalkPath`.
+ * - Containment is proven at READ time, not once before the read - see
+ *   `readContainedDirectory`.
  * - `maxBytes` is deliberately NOT enforced here. `matchesWalkPath` is
  *   filesystem-free and the watcher's existing exact-path filter is equally
  *   size-blind; `syncPaths` owns size enforcement, and statting every candidate
@@ -342,9 +467,10 @@ async function collectEligibleFiles(
  */
 export function listEligibleDirectChildren(
   dirRelPath: string,
-  config: WalkConfig
+  config: WalkConfig,
+  hooks?: DirectoryEnumerationHooks
 ): Promise<DirectoryChildrenOutcome> {
-  return enumerateEligible(dirRelPath, config, false);
+  return enumerateEligible(dirRelPath, config, false, hooks);
 }
 
 /**
@@ -364,22 +490,25 @@ export function listEligibleDirectChildren(
  * after the watch began emit no events at all (bun#15939).
  *
  * It stays bounded: rooted at that one directory, never at the collection,
- * eligibility-filtered per candidate, contained by the same realpath check, and
- * symlink-free so it cannot walk out of the subtree or loop. It costs disk
+ * eligibility-filtered per candidate, contained by a realpath check re-proven at
+ * every level AS it descends (`readContainedDirectory`), and symlink-free so it
+ * cannot walk out of the subtree or loop. It costs disk
  * reads only - one `readdir` per recreated subdirectory - and adds no store
  * round trips at all.
  */
 export function listEligibleSubtreeFiles(
   dirRelPath: string,
-  config: WalkConfig
+  config: WalkConfig,
+  hooks?: DirectoryEnumerationHooks
 ): Promise<DirectoryChildrenOutcome> {
-  return enumerateEligible(dirRelPath, config, true);
+  return enumerateEligible(dirRelPath, config, true, hooks);
 }
 
 async function enumerateEligible(
   dirRelPath: string,
   config: WalkConfig,
-  recursive: boolean
+  recursive: boolean,
+  hooks: DirectoryEnumerationHooks | undefined
 ): Promise<DirectoryChildrenOutcome> {
   const normalizedDir = normalizeCollectionDirRelPath(dirRelPath);
   if (normalizedDir === null) {
@@ -413,6 +542,10 @@ async function enumerateEligible(
 
   // A symlinked directory can resolve outside the collection root even though
   // the relative argument looked contained. Fail closed rather than enumerate.
+  // This is the ARGUMENT check - it says the requested path was contained when
+  // it was resolved, which is why it can report the caller's `dirRelPath`. It is
+  // NOT what keeps the traversal contained; every directory actually read is
+  // re-proven contained at read time by `readContainedDirectory`.
   if (escapesRoot(rootReal, dirReal)) {
     return {
       status: "error",
@@ -431,14 +564,13 @@ async function enumerateEligible(
   }
 
   const relPaths: string[] = [];
-  const failure = await collectEligibleFiles(
-    dirReal,
-    prefix,
+  const failure = await collectEligibleFiles(dirReal, prefix, true, {
     config,
     recursive,
-    relPaths,
-    true
-  );
+    rootReal,
+    out: relPaths,
+    hooks,
+  });
   if (failure) {
     return failure;
   }

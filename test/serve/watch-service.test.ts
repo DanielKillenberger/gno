@@ -4633,3 +4633,109 @@ describe("CollectionWatchService bounds retained suppression history", () => {
     RED_TEST_TIMEOUT_MS
   );
 });
+
+/**
+ * The debounce must DELAY work, never prevent it.
+ *
+ * Every event re-arms the single flush timer, so a process emitting unique
+ * names faster than the 300 ms window (an editor's temp files, a build's
+ * intermediates, a sync client) cancelled and restarted that timer forever:
+ * the flush never ran, eligible edits queued beside the churn were never
+ * synced at all, and the queues - `DirtyDirectoryEntry.hints` in particular -
+ * grew for exactly as long as the churn lasted. A ceiling measured from the
+ * window's FIRST event is what bounds both, without changing what a normal
+ * burst does.
+ */
+describe("CollectionWatchService flush deadline", () => {
+  test(
+    "flushes queued work under churn faster than the debounce",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-starvation-"));
+      await Bun.write(join(root, "note.md"), "# note\n");
+      const { store } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+      let churn: ReturnType<typeof setInterval> | null = null;
+
+      try {
+        harness.service.start();
+        const startedAt = Date.now();
+        // The eligible edit that must not be starved.
+        harness.emit([["change", "note.md"]]);
+
+        // Unique ineligible temp names, comfortably faster than the debounce.
+        // Never the same name twice: coalescing is not what is under test, the
+        // timer re-arm is.
+        let emitted = 0;
+        churn = setInterval(() => {
+          emitted += 1;
+          harness.emit([["rename", `note.md.tmp.${emitted}`]]);
+        }, 50);
+
+        // Not a sleep standing in for synchronization: the loop waits on the
+        // batch itself and only bounds a hang. Pre-fix it runs to the bound
+        // and finds nothing, because no flush ever happens.
+        const hangBoundMs = 6000;
+        while (
+          harness.batches.length === 0 &&
+          Date.now() - startedAt < hangBoundMs
+        ) {
+          await Bun.sleep(25);
+        }
+        const elapsedMs = Date.now() - startedAt;
+        clearInterval(churn);
+        churn = null;
+
+        expect(emitted).toBeGreaterThan(5);
+        expect(harness.batches[0] ?? []).toContain("note.md");
+        // Delayed, not starved...
+        expect(elapsedMs).toBeGreaterThanOrEqual(300);
+        // ...and bounded by the ceiling, with slack for the sync itself.
+        expect(elapsedMs).toBeLessThan(4000);
+      } finally {
+        if (churn) {
+          clearInterval(churn);
+        }
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  test(
+    "still coalesces a burst spread across several debounce windows",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-burst-coalesce-"));
+      await Bun.write(join(root, "note.md"), "# note\n");
+      const { store, roundTrips } = createRecordingStore({});
+      const harness = createReconcileHarness(createCollection("notes", root), {
+        store,
+      });
+
+      try {
+        harness.service.start();
+        // Six events at 100 ms - each one re-arms the debounce, and the whole
+        // burst finishes inside the ceiling. The ceiling must not chop this
+        // into several batches: that would be a coalescing regression dressed
+        // up as a starvation fix.
+        for (let index = 0; index < 6; index += 1) {
+          harness.emit([["rename", `note.md.tmp.${index}`]]);
+          await Bun.sleep(100);
+        }
+        expect(await harness.settle()).toBe("settled");
+
+        expect(harness.batches).toEqual([["note.md"]]);
+        expect(roundTrips).toHaveLength(1);
+        expect(harness.started).toEqual([
+          { collection: "notes", directory: "" },
+        ]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+});
