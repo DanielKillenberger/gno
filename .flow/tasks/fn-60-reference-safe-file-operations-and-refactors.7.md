@@ -41,6 +41,6 @@ A successful filesystem commit is not rolled back merely because reindex is temp
 ## Done summary
 Implemented a transport-neutral atomic file-refactor apply service with durable metadata-only recovery receipts. Added structural and freshness validation, exclusive staging and move targets, byte-exact rollback, idempotent sync-only retries, deterministic abort/disconnect behavior, symlink/TOCTOU containment checks, bounded journal retention, and failure injection across every stage/commit boundary.
 ## Evidence
-- Commits: 64e6f0f2
+- Commits: 64e6f0f2e13262e65e654fe46940ee0c8ad6c767
 - Tests: bun test test/core/file-refactor-service.test.ts test/core/file-refactor-service-recovery.test.ts test/core/file-refactor-service-toctou.test.ts test/core/file-ops.test.ts (50 pass), bun test test/store/file-refactor-journal.test.ts test/store/migrations.test.ts (16 pass), bun test test/core/file-refactor-impact.test.ts test/core/file-refactor-planner.test.ts test/core/links.test.ts test/store/links.test.ts (117 pass), bun run lint:check
-- PRs:
+- PRs: https://github.com/gmickel/gno/pull/175

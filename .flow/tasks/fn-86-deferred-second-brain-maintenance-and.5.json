@@ -10,7 +10,7 @@
   "priority": 4,
   "spec": "fn-86-deferred-second-brain-maintenance-and",
   "spec_path": ".flow/tasks/fn-86-deferred-second-brain-maintenance-and.5.md",
-  "status": "todo",
+  "status": "done",
   "title": "Verify audit utility safety and all truth surfaces",
-  "updated_at": "2026-08-02T20:53:54.344797Z"
+  "updated_at": "2026-08-03T19:31:30.781585Z"
 }

@@ -10,7 +10,7 @@
   "priority": 2,
   "spec": "fn-71-bundled-image-attachments-in-publish-export",
   "spec_path": ".flow/tasks/fn-71-bundled-image-attachments-in-publish-export.2.md",
-  "status": "todo",
+  "status": "done",
   "title": "Build safe GNO attachment resolution and artifact bundling",
-  "updated_at": "2026-08-02T20:50:18.770542Z"
+  "updated_at": "2026-08-03T17:42:21.581663Z"
 }

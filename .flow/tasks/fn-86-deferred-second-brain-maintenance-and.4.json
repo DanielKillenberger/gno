@@ -11,7 +11,7 @@
   "priority": 3,
   "spec": "fn-86-deferred-second-brain-maintenance-and",
   "spec_path": ".flow/tasks/fn-86-deferred-second-brain-maintenance-and.4.md",
-  "status": "todo",
+  "status": "done",
   "title": "Expose audit reports through CLI and read-only MCP",
-  "updated_at": "2026-08-02T20:53:54.108811Z"
+  "updated_at": "2026-08-03T19:07:25.183231Z"
 }

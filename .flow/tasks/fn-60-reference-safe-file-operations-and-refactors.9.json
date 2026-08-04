@@ -11,7 +11,7 @@
   "priority": 5,
   "spec": "fn-60-reference-safe-file-operations-and-refactors",
   "spec_path": ".flow/tasks/fn-60-reference-safe-file-operations-and-refactors.9.md",
-  "status": "todo",
+  "status": "done",
   "title": "Prove refactor safety and reconcile every documentation surface",
-  "updated_at": "2026-08-02T20:57:14.908671Z"
+  "updated_at": "2026-08-04T05:57:39.949730Z"
 }

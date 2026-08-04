@@ -10,7 +10,7 @@
   "priority": 4,
   "spec": "fn-60-reference-safe-file-operations-and-refactors",
   "spec_path": ".flow/tasks/fn-60-reference-safe-file-operations-and-refactors.10.md",
-  "status": "todo",
+  "status": "done",
   "title": "Adopt canonical refactors in SDK and write-gated MCP",
-  "updated_at": "2026-08-02T20:57:14.669160Z"
+  "updated_at": "2026-08-04T05:57:39.656464Z"
 }

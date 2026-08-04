@@ -10,7 +10,7 @@
   "priority": 2,
   "spec": "fn-86-deferred-second-brain-maintenance-and",
   "spec_path": ".flow/tasks/fn-86-deferred-second-brain-maintenance-and.3.md",
-  "status": "todo",
+  "status": "done",
   "title": "Add provenance completeness and freshness audits",
-  "updated_at": "2026-08-02T20:53:53.868829Z"
+  "updated_at": "2026-08-03T18:41:08.671220Z"
 }

@@ -40,6 +40,6 @@ MCP annotations are non-authoritative. SDK direct calls must enforce the same do
 ## Done summary
 Implemented one canonical file-refactor adapter shared by REST, SDK, and MCP. Added preview/apply rename and move operations with exact schema-version, SHA-256 plan-digest, and confirmation binding; durable journal and collection locking; typed stale, denied, occupied, applied, and sync-pending outcomes; and truthful sync failure handling. Consolidated REST onto the same adapter, documented MCP contracts, and added cross-surface parity and regression coverage.
 ## Evidence
-- Commits: 051e74d5
+- Commits: 051e74d5e2a07268e7d5a427a3a9645cf57fca9e
 - Tests: bun run lint:check, bun test test/sdk test/mcp (222 pass, 0 fail), bun test test/serve (648 pass, 0 fail), bun test test/core/file-refactor-adapter.test.ts test/core/file-refactor-planner.test.ts test/mcp/tools/workspace-write.test.ts test/mcp/tools/workspace-write-export.test.ts test/sdk/client.test.ts test/sdk/file-refactor-parity.test.ts test/serve/api-docs-lifecycle.test.ts test/serve/file-refactor-http.test.ts (86 pass, 0 fail), git diff --check
-- PRs:
+- PRs: https://github.com/gmickel/gno/pull/175

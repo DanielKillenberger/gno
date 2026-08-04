@@ -10,7 +10,7 @@
   "priority": 5,
   "spec": "fn-71-bundled-image-attachments-in-publish-export",
   "spec_path": ".flow/tasks/fn-71-bundled-image-attachments-in-publish-export.6.md",
-  "status": "todo",
+  "status": "done",
   "title": "Authorize public and secret raster delivery",
-  "updated_at": "2026-08-02T20:58:24.605889Z"
+  "updated_at": "2026-08-03T17:42:23.199117Z"
 }

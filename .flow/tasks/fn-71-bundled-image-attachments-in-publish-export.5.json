@@ -13,7 +13,7 @@
   "priority": 5,
   "spec": "fn-71-bundled-image-attachments-in-publish-export",
   "spec_path": ".flow/tasks/fn-71-bundled-image-attachments-in-publish-export.5.md",
-  "status": "todo",
+  "status": "done",
   "title": "Prove cross-repo image publishing and reconcile release surfaces",
-  "updated_at": "2026-08-02T20:58:24.833131Z"
+  "updated_at": "2026-08-03T17:42:23.883134Z"
 }

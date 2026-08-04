@@ -43,4 +43,4 @@ Frozen the versioned, transport-neutral reference-refactor preview/apply contrac
 ## Evidence
 - Commits: 99ab9e5a3d44cac45fbec157dcba106763258fd9
 - Tests: bun test test/core/file-refactors.test.ts (13 pass), bun test test/core/links.test.ts (53 pass), bun test test/spec/schemas (258 pass), bun run lint:check
-- PRs:
+- PRs: https://github.com/gmickel/gno/pull/175

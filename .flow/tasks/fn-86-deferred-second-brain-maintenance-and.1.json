@@ -8,7 +8,7 @@
   "priority": 1,
   "spec": "fn-86-deferred-second-brain-maintenance-and",
   "spec_path": ".flow/tasks/fn-86-deferred-second-brain-maintenance-and.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Freeze deterministic read-only audit report contract",
-  "updated_at": "2026-08-02T20:53:53.376728Z"
+  "updated_at": "2026-08-03T18:30:05.905271Z"
 }

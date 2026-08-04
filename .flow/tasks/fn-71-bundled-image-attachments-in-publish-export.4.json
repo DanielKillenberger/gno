@@ -10,7 +10,7 @@
   "priority": 4,
   "spec": "fn-71-bundled-image-attachments-in-publish-export",
   "spec_path": ".flow/tasks/fn-71-bundled-image-attachments-in-publish-export.4.md",
-  "status": "todo",
+  "status": "done",
   "title": "Validate and transactionally ingest v1 assets on gno.sh",
-  "updated_at": "2026-08-02T20:58:24.373370Z"
+  "updated_at": "2026-08-03T17:42:22.649759Z"
 }

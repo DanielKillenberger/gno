@@ -10,7 +10,7 @@
   "priority": 2,
   "spec": "fn-86-deferred-second-brain-maintenance-and",
   "spec_path": ".flow/tasks/fn-86-deferred-second-brain-maintenance-and.2.md",
-  "status": "todo",
+  "status": "done",
   "title": "Add deterministic link integrity audit rules",
-  "updated_at": "2026-08-02T20:53:53.619476Z"
+  "updated_at": "2026-08-03T18:35:47.940625Z"
 }
