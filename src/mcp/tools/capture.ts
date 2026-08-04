@@ -175,6 +175,13 @@ export function handleCapture(
             collectionName,
             plan.relPath
           );
+          // A store failure is not "not indexed yet" — it is an unknown
+          // answer, and reporting it as a calm non-error receipt would hide
+          // an outage behind a normal-looking result. Same guard as the CLI,
+          // SDK and REST capture paths.
+          if (!indexed.ok && indexed.failure === "store-error") {
+            throw new Error(indexed.message);
+          }
           return buildCaptureReceipt({
             plan,
             absPath,
