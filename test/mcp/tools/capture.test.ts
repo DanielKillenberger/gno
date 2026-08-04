@@ -485,6 +485,109 @@ describe("gno_capture MCP - record containers", () => {
     expect(text).toContain("the container path itself has no document");
   });
 
+  /**
+   * Opening an existing file asks the same question the post-write proof asks -
+   * "is it indexed?" - and must ask it by EFFECTIVE SOURCE PATH. A container is
+   * indexed as N logical records at virtual paths with nothing at its own rel
+   * path, so a `getDocument`-only answer is "no" for a fully indexed file.
+   */
+  test("opening an existing container reports it as indexed", async () => {
+    const ctx = recordsContext();
+    const content = `${[
+      { id: "one", title: "First", text: "Zephyr ships Friday" },
+      { id: "two", title: "Second", text: "Budget capped at forty" },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n")}\n`;
+    const created = await handleCapture(
+      { collection: "records", path: "export.jsonl", content },
+      ctx
+    );
+    expect(created.isError).toBeUndefined();
+
+    const opened = await handleCapture(
+      {
+        collection: "records",
+        path: "export.jsonl",
+        content: "ignored on open",
+        collisionPolicy: "open_existing",
+      },
+      ctx
+    );
+
+    expect(opened.isError).toBeUndefined();
+    expect(opened.structuredContent?.openedExisting).toBe(true);
+    // DISCRIMINATING against 5d3c7939: the opened-existing branch asked only
+    // `getDocument(collection, relPath)`, which is null for a container, so
+    // this reported `skipped` / "not indexed yet" for a file indexed as two
+    // records.
+    expect(opened.structuredContent?.sync).toMatchObject({
+      status: "completed",
+    });
+    const reason = (
+      opened.structuredContent?.sync as { reason?: string } | undefined
+    )?.reason;
+    expect(reason).toContain("2 logical record documents");
+    expect(reason).not.toContain("not indexed");
+    // `docid` stays the schema-required empty string: the container path has no
+    // document of its own, and any one record would disagree with the URI.
+    expect(opened.structuredContent?.docid).toBe("");
+
+    const text = opened.content[0]?.text ?? "";
+    expect(text).not.toContain("Doc: ");
+    expect(text).toContain("Sync: completed");
+    expect(text).toContain("Note: Existing file is a record container");
+  });
+
+  test("opening an existing ordinary markdown file is still reported plainly", async () => {
+    const ctx = recordsContext();
+    const created = await handleCapture(
+      { collection: "records", path: "plain.md", content: "# Plain\n\nBody" },
+      ctx
+    );
+    expect(created.isError).toBeUndefined();
+
+    const opened = await handleCapture(
+      {
+        collection: "records",
+        path: "plain.md",
+        content: "ignored on open",
+        collisionPolicy: "open_existing",
+      },
+      ctx
+    );
+
+    expect(opened.structuredContent?.openedExisting).toBe(true);
+    expect(opened.structuredContent?.sync).toMatchObject({
+      status: "completed",
+      reason: "Existing capture already indexed.",
+    });
+    expect(opened.structuredContent?.docid).not.toBe("");
+  });
+
+  test("opening an existing UNINDEXED file is still reported as unindexed", async () => {
+    await Bun.write(join(tmpDir, "stray.jsonl"), '{"id":"a","text":"b"}\n');
+
+    const opened = await handleCapture(
+      {
+        collection: "records",
+        path: "stray.jsonl",
+        content: "ignored on open",
+        collisionPolicy: "open_existing",
+      },
+      recordsContext()
+    );
+
+    expect(opened.structuredContent?.openedExisting).toBe(true);
+    // The record-aware lookup must not become a rubber stamp: nothing synced
+    // this file, so it is on disk and in no index.
+    expect(opened.structuredContent?.sync).toMatchObject({
+      status: "skipped",
+      reason: "Existing capture opened from disk but is not indexed yet.",
+    });
+    expect(opened.structuredContent?.docid).toBe("");
+  });
+
   test("an ordinary markdown capture still prints Doc and no Note line", async () => {
     const result = await handleCapture(
       { collection: "records", path: "plain.md", content: "# Plain\n\nBody" },

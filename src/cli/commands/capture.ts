@@ -27,6 +27,7 @@ import { withWriteLock } from "../../core/file-lock";
 import {
   CaptureDestinationError,
   captureProofDocid,
+  captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
@@ -202,19 +203,27 @@ export async function capture(
     );
     return await withWriteLock(lockPath, async () => {
       if (plan.openedExisting) {
-        const existingDoc = await store.getDocument(
+        // "Is this file indexed?" is asked here exactly as the post-write proof
+        // asks it: by EFFECTIVE SOURCE PATH. A bare `getDocument` answers "no"
+        // for a record container that is fully indexed as N logical records at
+        // virtual paths, so an opened container was reported as unindexed.
+        const indexed = await requireActiveCaptureDocument(
+          store,
           collection.name,
           plan.relPath
         );
-        if (!existingDoc.ok) {
-          throw new Error(existingDoc.error.message);
+        if (!indexed.ok && indexed.failure === "store-error") {
+          throw new Error(indexed.message);
         }
         return buildCaptureReceipt({
           plan,
           absPath,
-          docid: existingDoc.value?.docid,
-          sync: existingDoc.value
-            ? { status: "completed" }
+          docid: indexed.ok ? captureProofDocid(indexed) : undefined,
+          sync: indexed.ok
+            ? {
+                status: "completed",
+                reason: captureProofOpenedExistingSyncReason(indexed),
+              }
             : {
                 status: "skipped",
                 reason: "Existing file is not indexed yet.",

@@ -24,6 +24,7 @@ import type { DocumentRow, StorePort } from "../../src/store/types";
 import {
   CaptureDestinationError,
   captureProofDocid,
+  captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -293,6 +294,43 @@ describe("requireActiveCaptureDocument", () => {
     expect(result.ok === false && result.message).not.toContain("inactive");
   });
 
+  /**
+   * The opened-existing callers need the two failures apart: a store that could
+   * not answer still has to surface as an error, not as the far calmer "this
+   * file is not indexed yet".
+   */
+  test("separates a store failure from an honest not-indexed answer", async () => {
+    const storeFailure = await requireActiveCaptureDocument(
+      storeStub(null, "db gone"),
+      "notes",
+      "note.md"
+    );
+    const missing = await requireActiveCaptureDocument(
+      storeStub(null),
+      "notes",
+      "note.md"
+    );
+    const inactive = await requireActiveCaptureDocument(
+      storeStub(documentStub(false)),
+      "notes",
+      "note.md"
+    );
+    const recordFailure = await requireActiveCaptureDocument(
+      storeStubWithRecords(documentStub(false), { failure: "index locked" }),
+      "notes",
+      "note.md"
+    );
+
+    expect(storeFailure.ok === false && storeFailure.failure).toBe(
+      "store-error"
+    );
+    expect(recordFailure.ok === false && recordFailure.failure).toBe(
+      "store-error"
+    );
+    expect(missing.ok === false && missing.failure).toBe("not-indexed");
+    expect(inactive.ok === false && inactive.failure).toBe("not-indexed");
+  });
+
   /** The failure fix must not turn an honest "inactive" into "unknown". */
   test("an inactive document with a successful, empty record query is still inactive", async () => {
     const result = await requireActiveCaptureDocument(
@@ -413,6 +451,14 @@ describe("requireActiveCaptureDocument - record containers", () => {
     expect(proof && captureProofSyncReason(proof)).toContain(
       "2 logical record documents"
     );
+    // The opened-existing surfaces state the SAME fact; only the tense differs,
+    // because nothing was written just now.
+    expect(proof && captureProofOpenedExistingSyncReason(proof)).toContain(
+      "Existing file is a record container"
+    );
+    expect(proof && captureProofOpenedExistingSyncReason(proof)).toContain(
+      "2 logical record documents"
+    );
     const physicalUri = `gno://captures/${relPath}`;
     expect(proven.some((row) => row.uri === physicalUri)).toBe(false);
     expect(proven.every((row) => row.relPath.startsWith(".gno/records/"))).toBe(
@@ -470,6 +516,9 @@ describe("requireActiveCaptureDocument - record containers", () => {
     const proof = result.ok ? result : null;
     expect(proof && captureProofDocid(proof)).toBe(document?.docid ?? "");
     expect(proof && captureProofSyncReason(proof)).toBeUndefined();
+    expect(
+      proof && captureProofOpenedExistingSyncReason(proof)
+    ).toBeUndefined();
   });
 
   test("an unindexed write still FAILS the proof - the fallback is not a rubber stamp", async () => {

@@ -8,6 +8,7 @@ import type { CaptureReceipt } from "../../src/core/capture";
 import { formatCaptureReceipt } from "../../src/cli/commands/capture";
 import { runCli } from "../../src/cli/run";
 import { captureProofSyncReason } from "../../src/ingestion";
+import { createDefaultConfig } from "../../src/sdk";
 import { safeRm } from "../helpers/cleanup";
 
 let stdoutData = "";
@@ -258,6 +259,179 @@ describe("gno capture", () => {
     expect(receipt.relPath).toBe("project-plan-2.md");
     expect(receipt.createdWithSuffix).toBe(true);
     expect(receipt.collisionPolicyResult).toBe("created_with_suffix");
+  });
+});
+
+/**
+ * Opening an existing file has to answer "is it indexed?" the same way the
+ * post-write proof does - by EFFECTIVE SOURCE PATH. A record container is
+ * indexed as N logical records at virtual `.gno/records/...` paths with nothing
+ * at its own rel path, so a `getDocument`-only answer is "no" for a container
+ * that is in fact fully indexed.
+ */
+describe("gno capture - opening an existing record container", () => {
+  let testDir: string;
+  let recordsDir: string;
+
+  const RECORDS = `${[
+    { id: "one", title: "First", text: "Zephyr ships Friday" },
+    { id: "two", title: "Second", text: "Budget capped at forty" },
+  ]
+    .map((record) => JSON.stringify(record))
+    .join("\n")}\n`;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `gno-capture-records-${Date.now()}-${Math.random()}`
+    );
+    recordsDir = join(testDir, "records");
+    await mkdir(recordsDir, { recursive: true });
+    await mkdir(join(testDir, "config"), { recursive: true });
+    process.env.GNO_CONFIG_DIR = join(testDir, "config");
+    process.env.GNO_DATA_DIR = join(testDir, "data");
+    process.env.GNO_CACHE_DIR = join(testDir, "cache");
+
+    const config = createDefaultConfig();
+    config.collections = [
+      {
+        name: "records",
+        path: recordsDir,
+        pattern: "**/*",
+        include: [],
+        exclude: [],
+        recordAdapters: {
+          jsonl: {
+            fieldMapping: { id: "/id", title: "/title", body: "/text" },
+          },
+        },
+      },
+    ];
+    await Bun.write(
+      join(testDir, "config", "index.yml"),
+      Bun.YAML.stringify(config)
+    );
+  });
+
+  afterEach(async () => {
+    await safeRm(testDir);
+    Reflect.deleteProperty(process.env, "GNO_CONFIG_DIR");
+    Reflect.deleteProperty(process.env, "GNO_DATA_DIR");
+    Reflect.deleteProperty(process.env, "GNO_CACHE_DIR");
+  });
+
+  const openExisting = (...extra: string[]) =>
+    cli(
+      "capture",
+      "ignored on open",
+      "--collection",
+      "records",
+      "--path",
+      "export.jsonl",
+      "--collision-policy",
+      "open_existing",
+      ...extra
+    );
+
+  test("reports the opened container as indexed, not as unindexed", async () => {
+    const created = await cli(
+      "capture",
+      RECORDS,
+      "--collection",
+      "records",
+      "--path",
+      "export.jsonl",
+      "--json"
+    );
+    expect(created.code).toBe(0);
+    expect(JSON.parse(created.stdout).sync.status).toBe("completed");
+
+    const opened = await openExisting("--json");
+
+    expect(opened.code).toBe(0);
+    const receipt = JSON.parse(opened.stdout);
+    expect(receipt.openedExisting).toBe(true);
+    // DISCRIMINATING against 5d3c7939: the opened-existing branch asked only
+    // `getDocument(collection, relPath)`, which is null for a container, so
+    // this receipt reported `skipped` / "Existing file is not indexed yet."
+    // for a file indexed as two records.
+    expect(receipt.sync.status).toBe("completed");
+    expect(receipt.sync.reason).toContain("2 logical record documents");
+    expect(receipt.sync.reason).not.toContain("not indexed");
+    // No docid: the container path has no document of its own, and any one of
+    // its records would disagree with the receipt URI.
+    expect(receipt.docid).toBeUndefined();
+  });
+
+  test("the text output states the container fact instead of a bare success", async () => {
+    const created = await cli(
+      "capture",
+      RECORDS,
+      "--collection",
+      "records",
+      "--path",
+      "export.jsonl",
+      "--json"
+    );
+    expect(created.code).toBe(0);
+
+    const opened = await openExisting();
+
+    expect(opened.code).toBe(0);
+    expect(opened.stdout).toContain("Opened existing capture.");
+    // DISCRIMINATING against 5d3c7939: this read "Sync: skipped" followed by
+    // "Note: Existing file is not indexed yet."
+    expect(opened.stdout).toContain("Sync: completed");
+    expect(opened.stdout).toContain(
+      "Note: Existing file is a record container"
+    );
+    expect(opened.stdout).not.toContain("is not indexed yet");
+  });
+
+  test("an opened ordinary markdown file is still reported plainly", async () => {
+    const created = await cli(
+      "capture",
+      "# Plain\n\nOrdinary body\n",
+      "--collection",
+      "records",
+      "--path",
+      "plain.md",
+      "--json"
+    );
+    expect(created.code).toBe(0);
+
+    const opened = await cli(
+      "capture",
+      "ignored on open",
+      "--collection",
+      "records",
+      "--path",
+      "plain.md",
+      "--collision-policy",
+      "open_existing",
+      "--json"
+    );
+
+    expect(opened.code).toBe(0);
+    const receipt = JSON.parse(opened.stdout);
+    expect(receipt.openedExisting).toBe(true);
+    expect(receipt.sync.status).toBe("completed");
+    expect(receipt.sync.reason).toBeUndefined();
+    expect(receipt.docid).toBeTruthy();
+  });
+
+  test("an unindexed existing file is still reported as unindexed", async () => {
+    await writeFile(join(recordsDir, "export.jsonl"), RECORDS);
+
+    const opened = await openExisting("--json");
+
+    expect(opened.code).toBe(0);
+    const receipt = JSON.parse(opened.stdout);
+    expect(receipt.openedExisting).toBe(true);
+    // The record-aware lookup must not become a rubber stamp: nothing ran a
+    // sync over this file, so it is on disk and in no index.
+    expect(receipt.sync.status).toBe("skipped");
+    expect(receipt.sync.reason).toBe("Existing file is not indexed yet.");
   });
 });
 

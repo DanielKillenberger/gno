@@ -867,6 +867,48 @@ describe("SDK client", () => {
     });
 
     expect(duplicated.relPath).toBe("generated/archive/duplicate-me.md");
+    // An ordinary duplicate has nothing unusual to report about its URI.
+    expect(
+      duplicated.warnings.some((warning) => warning.includes("not indexed"))
+    ).toBe(false);
+    expect(
+      duplicated.warnings.some((warning) =>
+        warning.includes("resolves to no document")
+      )
+    ).toBe(false);
+  });
+
+  test("duplicating into a container extension warns that the returned uri resolves to nothing", async () => {
+    // DISCRIMINATING against 5d3c7939: `duplicateNote` warned only when the
+    // proof FAILED. A copy to a configured container extension makes the proof
+    // SUCCEED as `record-container`, so the SDK returned an unresolvable `uri`
+    // and said nothing - while REST and MCP already warned for this exact case.
+    const source = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        relPath: "generated/duplicate-records.txt",
+        content: `${[
+          { id: "one", title: "First record", text: "Zephyr ships on Friday" },
+          { id: "two", title: "Second record", text: "Budget capped at forty" },
+        ]
+          .map((record) => JSON.stringify(record))
+          .join("\n")}\n`,
+      })
+    );
+
+    const duplicated = await client.duplicateNote({
+      ref: source.uri,
+      name: "duplicate-records.jsonl",
+    });
+
+    expect(duplicated.relPath).toBe("generated/duplicate-records.jsonl");
+    const containerWarning = duplicated.warnings.find((warning) =>
+      warning.includes("resolves to no document")
+    );
+    expect(containerWarning).toContain("2 logical record documents");
+    expect(containerWarning).toContain(duplicated.uri);
+    // The warning is the whole point: this URI does not resolve.
+    expect(client.get(duplicated.uri)).rejects.toThrow();
   });
 
   test("multi-gets several documents", async () => {

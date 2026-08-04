@@ -366,11 +366,18 @@ export async function prepareCaptureDestination(
  *   pair one arbitrary record's `docid` with the container's physical URI: the
  *   two would name different things, and `getDocumentByUri` (an exact lookup)
  *   resolves the physical URI to nothing.
+ *
+ * The failure side carries `failure` because "the store could not answer" and
+ * "the store answered: nothing indexed here" are different facts with different
+ * consequences. A post-write caller reports both as a failed capture, but a
+ * caller asking about a file it did NOT write (the opened-existing paths) has
+ * to keep propagating a store error as an error rather than downgrading it into
+ * the far calmer "not indexed yet".
  */
 export type ActiveCaptureDocument =
   | { ok: true; kind: "file"; document: DocumentRow }
   | { ok: true; kind: "record-container"; records: DocumentRow[] }
-  | { ok: false; message: string };
+  | { ok: false; failure: "store-error" | "not-indexed"; message: string };
 
 /** The success side of {@link ActiveCaptureDocument}. */
 export type ActiveCaptureProof = Extract<ActiveCaptureDocument, { ok: true }>;
@@ -415,6 +422,24 @@ export const captureProofSyncReason = (
 };
 
 /**
+ * The same fact, for a receipt that OPENED an existing file instead of writing
+ * one.
+ *
+ * The opened-existing paths ask exactly the question the post-write proof asks -
+ * "is this file indexed?" - and must ask it the same way, by effective source
+ * path. Only the sentence differs: nothing was written just now, so the reason
+ * cannot say "Written as".
+ */
+export const captureProofOpenedExistingSyncReason = (
+  proof: ActiveCaptureProof
+): string | undefined => {
+  const summary = captureProofContainerSummary(proof);
+  return summary === undefined
+    ? undefined
+    : `Existing file is a record container: ${summary}, so this receipt carries no docid.`;
+};
+
+/**
  * The proof a capture/create caller must demand after syncing its own write.
  *
  * `FileSyncResult.status !== "error"` is NOT proof. `skipped` and `unchanged`
@@ -453,7 +478,7 @@ export async function requireActiveCaptureDocument(
 ): Promise<ActiveCaptureDocument> {
   const result = await store.getDocument(collectionName, relPath);
   if (!result.ok) {
-    return { ok: false, message: result.error.message };
+    return { ok: false, failure: "store-error", message: result.error.message };
   }
   const document = result.value;
   if (document?.active) {
@@ -469,7 +494,11 @@ export async function requireActiveCaptureDocument(
   // not a direct row exists - never let a weaker, more confident-sounding
   // answer ("inactive", "no document exists") conceal it.
   if (records && !records.ok) {
-    return { ok: false, message: records.error.message };
+    return {
+      ok: false,
+      failure: "store-error",
+      message: records.error.message,
+    };
   }
   const activeRecords = records
     ? records.value.filter((row) => row.active)
@@ -481,11 +510,13 @@ export async function requireActiveCaptureDocument(
   if (!document) {
     return {
       ok: false,
+      failure: "not-indexed",
       message: `File written but not indexed: no document exists for ${relPath}. The path is not reachable to the indexer or is excluded from the collection.`,
     };
   }
   return {
     ok: false,
+    failure: "not-indexed",
     message: `File written but not indexed: the document for ${relPath} is inactive.`,
   };
 }

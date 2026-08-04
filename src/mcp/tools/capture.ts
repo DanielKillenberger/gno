@@ -25,6 +25,7 @@ import { normalizeCollectionName } from "../../core/validation";
 import {
   CaptureDestinationError,
   captureProofDocid,
+  captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
@@ -164,21 +165,35 @@ export function handleCapture(
         const exists = await existingFile.exists();
 
         if (plan.openedExisting) {
-          const docResult = await ctx.store.getDocument(
+          // "Is this file indexed?" is asked here exactly as the post-write
+          // proof asks it: by EFFECTIVE SOURCE PATH. A bare `getDocument`
+          // answers "no" for a record container that is fully indexed as N
+          // logical records at virtual paths, so an opened container was
+          // reported as unindexed.
+          const indexed = await requireActiveCaptureDocument(
+            ctx.store,
             collectionName,
             plan.relPath
           );
-          const existingDoc = docResult.ok ? docResult.value : undefined;
           return buildCaptureReceipt({
             plan,
             absPath,
-            docid: existingDoc?.docid ?? "",
-            sync: {
-              status: existingDoc ? "completed" : "skipped",
-              reason: existingDoc
-                ? "Existing capture already indexed."
-                : "Existing capture opened from disk but is not indexed yet.",
-            },
+            // `docid` is schema-required; a container has none of its own, so
+            // it reports the empty string this tool already uses for "not
+            // resolved" rather than one of its N record docids.
+            docid: (indexed.ok ? captureProofDocid(indexed) : undefined) ?? "",
+            sync: indexed.ok
+              ? {
+                  status: "completed",
+                  reason:
+                    captureProofOpenedExistingSyncReason(indexed) ??
+                    "Existing capture already indexed.",
+                }
+              : {
+                  status: "skipped",
+                  reason:
+                    "Existing capture opened from disk but is not indexed yet.",
+                },
             serverInstanceId: ctx.serverInstanceId,
           }) as McpCaptureResult;
         }

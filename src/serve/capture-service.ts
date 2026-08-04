@@ -29,6 +29,8 @@ import { writeCapturePlanFile } from "../core/capture-write";
 import { recordContentMutation } from "../core/mutation-generations";
 import {
   type CollectionSyncResult,
+  captureProofDocid,
+  captureProofOpenedExistingSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -196,20 +198,28 @@ export const executeResidentCapturePlan = async (
     };
   }
   if (plan.openedExisting) {
-    const existingDocument = await store.getDocument(
+    // "Is this file indexed?" is asked here exactly as the post-write proof
+    // asks it: by EFFECTIVE SOURCE PATH. A bare `getDocument` answers "no" for
+    // a record container that is fully indexed as N logical records at virtual
+    // paths, so an opened container was reported as unindexed.
+    const indexed = await requireActiveCaptureDocument(
+      store,
       collection.name,
       plan.relPath
     );
-    if (!existingDocument.ok) {
-      throw new Error(existingDocument.error.message);
+    if (!indexed.ok && indexed.failure === "store-error") {
+      throw new Error(indexed.message);
     }
     return {
       body: buildCaptureReceipt({
         plan,
         absPath: fullPath,
-        docid: existingDocument.value?.docid,
-        sync: existingDocument.value
-          ? { status: "completed" }
+        docid: indexed.ok ? captureProofDocid(indexed) : undefined,
+        sync: indexed.ok
+          ? {
+              status: "completed",
+              reason: captureProofOpenedExistingSyncReason(indexed),
+            }
           : {
               status: "skipped",
               reason: "Existing file is not indexed yet.",

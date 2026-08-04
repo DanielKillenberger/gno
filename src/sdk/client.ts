@@ -148,6 +148,7 @@ import {
   CaptureDestinationError,
   captureProofContainerSummary,
   captureProofDocid,
+  captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
   defaultSyncService,
   prepareCaptureDestination,
@@ -1516,6 +1517,27 @@ class GnoClientImpl implements GnoClient {
       );
     }
 
+    // Collision detection here sees INDEXED rel paths and nothing else.
+    //
+    // What that detects: an ordinary per-path document already indexed at the
+    // target rel path. What it does NOT detect:
+    //
+    // - a physical RECORD CONTAINER (`.jsonl`, `.vtt`, ... per the collection's
+    //   `recordAdapters`). Its rows are indexed at virtual `.gno/records/...`
+    //   rel paths with the physical file only in `record_source_path`, so the
+    //   container's own rel path is absent from this list;
+    // - any file on disk that is not indexed at all. Unlike `capture()`, this
+    //   path passes no `diskRelPaths` to the planner.
+    //
+    // Consequently `collisionPolicy` is NOT honored for those targets: `error`,
+    // `open_existing` and `create_with_suffix` all fall through to the create
+    // branch, and the `atomicWrite` below OVERWRITES the existing file. The
+    // same blind spot is shared by the duplicate paths and by `copyFile`, which
+    // can likewise overwrite an existing container target.
+    //
+    // Deliberately NOT fixed here: closing it changes collision semantics
+    // (which physical files count as "existing" for each policy) across every
+    // create/duplicate/copy surface, and is tracked as separate follow-up work.
     const existingList = await this.store.listDocuments(collection.name);
     if (!existingList.ok) {
       throw sdkError("STORE", existingList.error.message, {
@@ -1684,21 +1706,27 @@ class GnoClientImpl implements GnoClient {
 
     const fullPath = `${collection.path}/${plan.relPath}`;
     if (plan.openedExisting) {
-      const existingDoc = await this.store.getDocument(
+      // "Is this file indexed?" is asked here exactly as the post-write proof
+      // asks it: by EFFECTIVE SOURCE PATH. A bare `getDocument` answers "no"
+      // for a record container that is fully indexed as N logical records at
+      // virtual paths, so an opened container was reported as unindexed.
+      const indexed = await requireActiveCaptureDocument(
+        this.store,
         collection.name,
         plan.relPath
       );
-      if (!existingDoc.ok) {
-        throw sdkError("STORE", existingDoc.error.message, {
-          cause: existingDoc.error.cause,
-        });
+      if (!indexed.ok && indexed.failure === "store-error") {
+        throw sdkError("STORE", indexed.message);
       }
       return buildCaptureReceipt({
         plan,
         absPath: fullPath,
-        docid: existingDoc.value?.docid,
-        sync: existingDoc.value
-          ? { status: "completed" }
+        docid: indexed.ok ? captureProofDocid(indexed) : undefined,
+        sync: indexed.ok
+          ? {
+              status: "completed",
+              reason: captureProofOpenedExistingSyncReason(indexed),
+            }
           : {
               status: "skipped",
               reason: "Existing file is not indexed yet.",
@@ -1974,7 +2002,19 @@ class GnoClientImpl implements GnoClient {
       collection.name,
       plan.nextRelPath
     );
-    if (!indexed.ok) {
+    if (indexed.ok) {
+      // A container copy IS indexed - as N logical records at virtual paths,
+      // with nothing at the copy's own path. `uri` below therefore resolves to
+      // nothing, exactly like the unindexed case, and must say so rather than
+      // read as an ordinary duplicate. Same channel, same wording as the REST
+      // and MCP duplicate paths.
+      const containerSummary = captureProofContainerSummary(indexed);
+      if (containerSummary) {
+        warnings.push(
+          `File duplicated on disk and ${containerSummary}, so ${plan.nextUri} resolves to no document.`
+        );
+      }
+    } else {
       warnings.push(
         `File duplicated on disk, but it is not indexed: ${indexed.message}`
       );

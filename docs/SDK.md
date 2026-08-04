@@ -500,6 +500,17 @@ The written file is identified by `path`/`relPath` in both cases. The
 type-check until you narrow on `kind` - a URI that `client.get()` cannot
 resolve is not something the API hands back.
 
+`duplicateNote()` keeps its single `uri` field, so when the copy's destination
+is a container extension it reports the same fact through `warnings` instead -
+the copy is indexed as N records, and `uri` resolves to no document. REST
+`POST /api/docs/:id/duplicate` and MCP `gno_duplicate_note` use the same
+wording on their own warning channels.
+
+An `open_existing` capture answers "is this file indexed?" by effective source
+path, so opening an existing container reports `sync.status: "completed"` with
+a `sync.reason` naming the records, not `skipped`. As with a container capture,
+the receipt carries no `docid`.
+
 ### Status
 
 ```ts

@@ -14,6 +14,7 @@ export {
   CaptureDestinationError,
   captureProofContainerSummary,
   captureProofDocid,
+  captureProofOpenedExistingSyncReason,
   captureProofSyncReason,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
