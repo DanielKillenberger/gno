@@ -121,6 +121,7 @@ import {
   CaptureDestinationError,
   captureFileSyncResult,
   captureProofContainerSummary,
+  captureRecordImportReason,
   captureWrittenHandle,
   defaultSyncService,
   prepareCaptureDestination,
@@ -3059,7 +3060,7 @@ export async function handleDuplicateDoc(
     await copyFilePath(fullPath, nextFullPath);
     let warning: string | undefined;
     try {
-      await syncResidentCollection(
+      const syncResult = await syncResidentCollection(
         ctxHolder,
         collection,
         store,
@@ -3082,6 +3083,19 @@ export async function handleDuplicateDoc(
         const containerSummary = captureProofContainerSummary(indexed);
         if (containerSummary) {
           warning = `File duplicated on disk and ${containerSummary}, so ${plan.nextUri} resolves to no document.`;
+        }
+        // The copy is imported by the adapter exactly like the original was,
+        // so it can be PARTIAL for the same reasons - and the container
+        // sentence above says nothing about it. Same shared fragment every
+        // other surface discloses it with.
+        const partialImport = captureRecordImportReason(
+          captureFileSyncResult(syncResult, plan.nextRelPath)?.recordImport
+        );
+        if (partialImport) {
+          warning =
+            warning === undefined
+              ? partialImport
+              : `${warning} ${partialImport}`;
         }
       } else {
         warning = `File duplicated on disk, but it is not indexed: ${indexed.message}`;

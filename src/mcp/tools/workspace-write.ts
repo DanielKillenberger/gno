@@ -34,7 +34,9 @@ import {
 import { recordContentMutation } from "../../core/mutation-generations";
 import {
   CaptureDestinationError,
+  captureFileSyncResult,
   captureProofContainerSummary,
+  captureRecordImportReason,
   defaultSyncService,
   prepareCaptureDestination,
   requireActiveCaptureDocument,
@@ -474,6 +476,16 @@ export function handleDuplicateNote(
             warnings.push(
               `File duplicated on disk and ${containerSummary}, so ${plan.nextUri} resolves to no document.`
             );
+          }
+          // The copy is imported by the adapter exactly like the original was,
+          // so it can be PARTIAL for the same reasons - and the container
+          // sentence above says nothing about it. Same shared fragment every
+          // other surface discloses it with.
+          const partialImport = captureRecordImportReason(
+            captureFileSyncResult(syncResult, plan.nextRelPath)?.recordImport
+          );
+          if (partialImport) {
+            warnings.push(partialImport);
           }
         } else {
           warnings.push(

@@ -559,8 +559,10 @@ describe("SDK client", () => {
     });
 
     expect(result.relPath).toBe("generated/sdk-project.md");
-    // An ordinary note IS its document, so it keeps the fetchable-URI shape.
+    // An ordinary note IS its document, so it keeps the fetchable-URI shape -
+    // and carries no `reason` at all, container or import.
     expect(result.kind).toBe("document");
+    expect(result).not.toHaveProperty("reason");
 
     const created = await client.get("fixtures/generated/sdk-project.md");
     expect(created.content).toContain("## Goal");
@@ -609,8 +611,52 @@ describe("SDK client", () => {
       expect(fetched.content.length).toBeGreaterThan(0);
     }
 
+    // A CLEAN container says only the container fact - the partial-import
+    // sentence must not appear where nothing was rejected.
+    expect(created.reason).toContain("Written as a record container");
+    expect(created.reason).not.toContain("Record import was partial");
+
     // The reason the shape exists: the written path resolves to nothing.
     expect(client.get(`gno://fixtures/${relPath}`)).rejects.toThrow();
+  });
+
+  /**
+   * An adapter that accepts SOME of what was written is not an error: the
+   * container's file result is `added`/`updated` and the rejected records are
+   * disclosed only in `recordImport.failures`. A `reason` built from the
+   * container proof alone therefore reports a half-imported export as a clean
+   * one - the same defect the capture surfaces already closed.
+   */
+  test("createNote discloses a container whose adapter rejected a record", async () => {
+    // DISCRIMINATING against fc2213fa: there `createNote` composed its own
+    // container sentence from the proof and ignored `syncResult.recordImport`
+    // entirely, so this result read exactly like the clean container above -
+    // one sentence about record documents, no hint that a line was dropped.
+    const relPath = "generated/partial.jsonl";
+    const created = await client.createNote({
+      collection: "fixtures",
+      relPath,
+      content: `${JSON.stringify({
+        id: "one",
+        title: "First record",
+        text: "Zephyr ships on Friday",
+      })}\n{ this line is not JSON\n`,
+    });
+
+    expect(created.kind).toBe("record-container");
+    if (created.kind !== "record-container") {
+      throw new Error("expected a record-container result");
+    }
+    // Both facts, neither replacing the other.
+    expect(created.reason).toContain("Written as a record container");
+    expect(created.reason).toContain("Record import was partial");
+    expect(created.reason).toContain(
+      "rejected by the adapter/jsonl adapter and NOT indexed"
+    );
+    expect(created.reason).toContain("(1 accepted)");
+    // Only the accepted record is indexed, which is exactly what the sentence
+    // above claims.
+    expect(created.recordCount).toBe(1);
   });
 
   test("captures notes with provenance receipt through the SDK", async () => {
@@ -914,6 +960,49 @@ describe("SDK client", () => {
     expect(containerWarning).toContain(duplicated.uri);
     // The warning is the whole point: this URI does not resolve.
     expect(client.get(duplicated.uri)).rejects.toThrow();
+    // A CLEAN copy says only the container fact.
+    expect(
+      duplicated.warnings.some((warning) =>
+        warning.includes("Record import was partial")
+      )
+    ).toBe(false);
+  });
+
+  test("duplicating into a container extension discloses a partial import", async () => {
+    // DISCRIMINATING against fc2213fa: the duplicate paths warned about the
+    // container SHAPE only. The copy is imported by the adapter exactly like
+    // any other write, so it can reject records - and that was disclosed
+    // nowhere on this surface.
+    const source = expectDocumentNote(
+      await client.createNote({
+        collection: "fixtures",
+        relPath: "generated/duplicate-partial.txt",
+        content: `${JSON.stringify({
+          id: "one",
+          title: "First record",
+          text: "Zephyr ships on Friday",
+        })}\n{ this line is not JSON\n`,
+      })
+    );
+
+    const duplicated = await client.duplicateNote({
+      ref: source.uri,
+      name: "duplicate-partial.jsonl",
+    });
+
+    // Both facts, on the same channel, neither replacing the other.
+    expect(
+      duplicated.warnings.some((warning) =>
+        warning.includes("resolves to no document")
+      )
+    ).toBe(true);
+    const partial = duplicated.warnings.find((warning) =>
+      warning.includes("Record import was partial")
+    );
+    expect(partial).toContain(
+      "rejected by the adapter/jsonl adapter and NOT indexed"
+    );
+    expect(partial).toContain("(1 accepted)");
   });
 
   test("multi-gets several documents", async () => {

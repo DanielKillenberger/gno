@@ -146,9 +146,11 @@ import { normalizeStructuredQueryInput } from "../core/structured-query";
 import { parseAndValidateTagFilter } from "../core/tags";
 import {
   CaptureDestinationError,
+  captureFileSyncResult,
   captureProofContainerSummary,
   captureProofDocid,
   captureProofOpenedExistingSyncReason,
+  captureRecordImportReason,
   captureSyncReason,
   captureWrittenRecordPage,
   captureWrittenRecordPageReason,
@@ -1664,12 +1666,27 @@ class GnoClientImpl implements GnoClient {
     // continuation that does not exist or denying the mechanisms that do:
     // `list({ scope })` on the container's shared virtual record prefix, or
     // ordinary collection listing filtered on `source.relPath`.
+    //
+    // The container shape and a PARTIAL import are two independent facts, and
+    // this write can produce both: an adapter that accepts one record and
+    // rejects another leaves the file result a non-error, so a reason built
+    // from the container proof alone reports a half-imported export as a clean
+    // one. `captureSyncReason` is the single composer for that pair of facts -
+    // the same one CLI `gno capture`, MCP `gno_capture`, `capture()` and the
+    // REST create handle use - so the disclosure here is identical to theirs
+    // rather than a second wording that can drift.
     const page = captureWrittenRecordPage(indexed.records);
     const truncated = captureWrittenRecordPageReason(page);
+    const reason = [
+      captureSyncReason(indexed, syncResult.recordImport),
+      truncated,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join(" ");
     return {
       kind: "record-container",
       ...page,
-      reason: `Written as a record container: ${captureProofContainerSummary(indexed)}, so there is no single fetchable URI for it - fetch the records in recordUris instead.${truncated === undefined ? "" : ` ${truncated}`}`,
+      reason,
       ...writtenFile,
     };
   }
@@ -1989,7 +2006,7 @@ class GnoClientImpl implements GnoClient {
     const nextPath = `${collection.path}/${plan.nextRelPath}`;
     await prepareSdkWriteDestination(collection.path, plan.nextRelPath);
     await copyFilePath(currentPath, nextPath);
-    await defaultSyncService.syncCollection(
+    const syncResult = await defaultSyncService.syncCollection(
       collection,
       this.store,
       withContentTypeRules({ runUpdateCmd: false }, this.config)
@@ -2028,6 +2045,16 @@ class GnoClientImpl implements GnoClient {
         warnings.push(
           `File duplicated on disk and ${containerSummary}, so ${plan.nextUri} resolves to no document.`
         );
+      }
+      // The copy is imported by the adapter exactly like the original was, so
+      // it can be PARTIAL for the same reasons - and the container sentence
+      // above says nothing about it. Same shared fragment every other surface
+      // discloses it with.
+      const partialImport = captureRecordImportReason(
+        captureFileSyncResult(syncResult, plan.nextRelPath)?.recordImport
+      );
+      if (partialImport) {
+        warnings.push(partialImport);
       }
     } else {
       warnings.push(

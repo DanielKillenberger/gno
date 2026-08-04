@@ -280,6 +280,13 @@ export interface GnoCreatedNoteRecordContainer extends GnoCreateNoteFile {
    * Human-readable explanation of why there is no single document URI, and -
    * when the page is truncated - where the records it omits can be reached.
    *
+   * When the adapter rejected part of what was written, or reported a partial
+   * snapshot, that is stated here too: an adapter that accepts one record and
+   * rejects another still yields a non-error write, so the container sentence
+   * alone would read as a clean import. Composed by the same
+   * `captureSyncReason` every capture surface uses, so the wording is identical
+   * wherever a container is written.
+   *
    * There is no dedicated per-container enumeration endpoint, so `reason`
    * promises no continuation offset. It does not claim the omitted records are
    * unreachable either, because they are not: every URI in `recordUris` shares
