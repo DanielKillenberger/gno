@@ -3829,6 +3829,18 @@ export async function handleCreateDoc(
         // the ACTIVE document HERE - `syncCollection` not erroring is not proof
         // that the new file was indexed, and a "completed" job for an
         // unindexed path is the same silent success one step removed.
+        //
+        // What this proof does NOT establish, on the `overwrite=true` path:
+        // it asserts only that SOME active document exists at this relPath, not
+        // that it is the row this write produced. When the new file fails
+        // ingestion (exceeding the size limit, for example) the PREVIOUS
+        // indexed row for the same path is still active and satisfies the
+        // check, so the job reports `completed` while retrieval keeps serving
+        // the stale content. Closing that requires identity evidence for the
+        // new content (content hash / mtime / docid), which is a change to
+        // overwrite semantics and is deliberately NOT made here. This gap is
+        // pre-existing - the base implementation completed unconditionally -
+        // and is tracked as follow-up work.
         const indexed = await requireActiveCaptureDocument(
           store,
           collection.name,

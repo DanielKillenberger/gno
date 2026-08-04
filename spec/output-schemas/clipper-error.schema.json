@@ -10,6 +10,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["code", "message"],
+      "$comment": "`details` is emitted by exactly one path - the capture route's destination refusal, reported as VALIDATION/409 - so it is only valid paired with that code.",
+      "if": { "required": ["details"], "properties": { "details": {} } },
+      "then": { "properties": { "code": { "const": "VALIDATION" } } },
       "properties": {
         "code": {
           "enum": [

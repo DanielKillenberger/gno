@@ -372,21 +372,45 @@ export const CAPTURE_DESTINATION_REASONS = [
   "NOT_DIRECTORY",
 ] as const;
 
+/**
+ * The ONE error code that carries `details`.
+ *
+ * `details` is produced by exactly one server path - the capture route's
+ * destination refusal, reported as `VALIDATION`/409. Making `details` optional
+ * on its own would accept, say, a `CLIPPER_UNAUTHORIZED` carrying a `relPath`,
+ * which no server emits; pairing the two keeps the contract as closed on the
+ * client as it is on the wire.
+ */
+export const DETAILS_ERROR_CODE = "VALIDATION" as const;
+
+export const captureDestinationDetailsSchema = z
+  .object({
+    reason: z.enum(CAPTURE_DESTINATION_REASONS),
+    relPath: z.string().min(1),
+  })
+  .strict();
+
+export type CaptureDestinationDetails = z.infer<
+  typeof captureDestinationDetailsSchema
+>;
+
 export const clipperErrorSchema = z
   .object({
     error: z
       .object({
         code: z.enum(ERROR_CODES),
         message: z.string().min(1),
-        details: z
-          .object({
-            reason: z.enum(CAPTURE_DESTINATION_REASONS),
-            relPath: z.string().min(1),
-          })
-          .strict()
-          .optional(),
+        details: captureDestinationDetailsSchema.optional(),
       })
-      .strict(),
+      .strict()
+      .refine(
+        (error) =>
+          error.details === undefined || error.code === DETAILS_ERROR_CODE,
+        {
+          message: `Only ${DETAILS_ERROR_CODE} errors carry details`,
+          path: ["details"],
+        }
+      ),
   })
   .strict();
 
