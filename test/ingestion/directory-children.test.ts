@@ -234,22 +234,76 @@ describe("listEligibleDirectChildren", () => {
     });
   });
 
-  test("refuses a symlinked directory that resolves outside the collection root", async () => {
+  /**
+   * A symlinked entry point is `skipped` WHEREVER it points.
+   *
+   * The escaping case used to be classified by resolving the link first, which
+   * made it an enumeration `error` - and `error` is fail-closed, so the
+   * reconciliation produced no candidates and every document indexed under the
+   * replaced directory stayed active, while a full no-follow walk removes them
+   * all. "Refused to read" must not masquerade as "cannot determine".
+   *
+   * Containment is not weakened by answering earlier, and the second assertion
+   * is what says so: the target is never read, and never even resolved.
+   *
+   * Against 538e3047 the first assertion fails (`{status: "error"}` naming
+   * "escapes the collection root"). Discriminating, not a direction pin.
+   */
+  test("reports a symlink to a directory OUTSIDE the collection as skipped", async () => {
     const outside = join(base, "outside");
     await mkdir(outside);
     await writeFile(join(outside, "far.md"), "a");
-    await symlink(outside, join(root, "linkdir"));
+    await symlink(outside, join(root, "linkdir"), "dir");
 
+    const reads: string[] = [];
     const outcome = await listEligibleDirectChildren(
       "linkdir",
-      walkConfig(root)
+      walkConfig(root),
+      {
+        beforeReadDirectory: (absPath) => {
+          reads.push(absPath);
+        },
+      }
     );
 
-    expect(outcome.status).toBe("error");
-    expect(String((outcome as { cause: unknown }).cause)).toContain(
-      "escapes the collection root"
-    );
+    expect(outcome).toEqual({ status: "skipped", reason: "symlink" });
+    expect(reads).toEqual([]);
+    // The walker agrees: it never descends into the link, so nothing under
+    // `linkdir/` is indexed by a full sync either.
+    expect(
+      (await new FileWalker().walk(walkConfig(root))).entries.map(
+        (entry) => entry.relPath
+      )
+    ).toEqual([]);
   });
+
+  /**
+   * The `error` path is NOT softened generally: a directory that exists and is
+   * genuinely unreadable still fails closed, so no deactivation is inferred
+   * from it. Only the provably-symlink case became `skipped`. The unreadable
+   * case is pinned by "returns error with cause for an unreadable directory"
+   * above; this one pins that an unreadable path does not become `skipped` by
+   * some other route.
+   */
+  test.skipIf(process.getuid?.() === 0)(
+    "keeps an unreadable directory on the error path, never skipped",
+    async () => {
+      const locked = join(root, "locked");
+      await mkdir(locked);
+      await writeFile(join(locked, "note.md"), "a");
+      await chmod(locked, 0o000);
+
+      try {
+        const outcome = await listEligibleDirectChildren(
+          "locked",
+          walkConfig(root)
+        );
+        expect(outcome.status).toBe("error");
+      } finally {
+        await chmod(locked, 0o755);
+      }
+    }
+  );
 
   /**
    * The entry point itself must not be dereferenced.

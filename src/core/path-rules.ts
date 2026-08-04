@@ -126,3 +126,67 @@ export function matchesCollectionExclusion(
   }
   return false;
 }
+
+/**
+ * A segment no real tree contains, used to ask a glob what it says about paths
+ * BELOW a directory without enumerating that directory.
+ */
+const SUBTREE_PROBE_SEGMENT = "__gno_exclusion_subtree_probe__";
+
+/**
+ * Does some exclusion cover the whole SUBTREE under `dirRelPath`, and not just
+ * the directory's own name?
+ *
+ * `matchesCollectionExclusion` is a FILE-level question, and the two answers
+ * genuinely differ. With `exclude: ["*.md"]` a directory literally named
+ * `foo.md` matches, while `foo.md/child.txt` does not - and `FileWalker.walk`
+ * indexes `child.txt`, because the walker applies the same file-level rule to
+ * the file. Pruning the DIRECTORY on the file-level answer is therefore
+ * strictly stricter than the walk, and the strictness is not conservative: it
+ * makes the removed subtree unqueryable, so a recursive delete that reports only
+ * the bare directory leaves `child.txt` active and searchable forever.
+ *
+ * "Provably covers descendants" is decided per matching pattern:
+ *
+ * - A BARE pattern (no glob metacharacters) covers the subtree by construction.
+ *   It matched either as a path COMPONENT - every descendant contains that same
+ *   component - or as the path itself / a `pattern/` prefix - every descendant
+ *   starts with `pattern/`. Either way the same rule matches every path below.
+ *   `node_modules`, `.git`, `drafts` all take this branch, so directory pruning
+ *   and its amplification guarantee are untouched for the ordinary case.
+ * - A GLOB pattern is ASKED, on two synthetic descendants one and two levels
+ *   down. `node_modules/**` and a doubled-star pattern rooted above `build`
+ *   answer yes; `*.md` answers no for
+ *   both, which is exactly the difference that matters. Two depths rather than
+ *   one because a single-level answer does not distinguish `dir/*` (which
+ *   leaves `dir/a/b.txt` walkable) from `dir/**`.
+ *
+ * This never widens what is INDEXED - final file eligibility stays with
+ * `matchesWalkPath`. It only stops a directory whose descendants are still
+ * eligible from being pruned out of reconciliation.
+ */
+export function exclusionCoversSubtree(
+  dirRelPath: string,
+  excludes: readonly string[]
+): boolean {
+  const normalizedPath = dirRelPath.replaceAll("\\", "/");
+  if (normalizedPath === "") {
+    return false;
+  }
+  const childProbe = `${normalizedPath}/${SUBTREE_PROBE_SEGMENT}`;
+  const grandchildProbe = `${childProbe}/${SUBTREE_PROBE_SEGMENT}`;
+  for (const rawPattern of excludes) {
+    const pattern = rawPattern.replaceAll("\\", "/");
+    if (!matchesCollectionExclusion(normalizedPath, [pattern])) {
+      continue;
+    }
+    if (!hasGlobMeta(pattern)) {
+      return true;
+    }
+    const glob = new Bun.Glob(pattern);
+    if (glob.match(childProbe) && glob.match(grandchildProbe)) {
+      return true;
+    }
+  }
+  return false;
+}

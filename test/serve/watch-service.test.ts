@@ -1826,6 +1826,104 @@ describe("CollectionWatchService bounded reconciliation (fn-114 task .3)", () =>
   );
 
   /**
+   * Directory pruning must not be STRICTER than the walk.
+   *
+   * An exclusion can match a directory's own NAME without covering anything
+   * beneath it: with `exclude: ["*.md"]` a directory literally called `foo.md`
+   * matches, but `FileWalker.walk` still indexes `foo.md/child.txt`, because
+   * the walker asks the same file-level question about the FILE. Pruning the
+   * directory on the file-level answer therefore removes from reconciliation a
+   * subtree that is genuinely indexed - and a recursive delete of `foo.md/`
+   * reports only the bare directory (or one arbitrary child), so `child.txt`
+   * is never named by an event either and stays active and searchable with
+   * nothing on disk behind it.
+   *
+   * Against 538e3047 the reported path is pruned by
+   * `matchesCollectionExclusion`, no hint is retained, no descendant lookup
+   * happens and `harness.batches` is empty - so both assertions below fail.
+   * Discriminating, not a direction pin.
+   */
+  test(
+    "reconciles a removed directory whose NAME matches a file-level exclusion",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-excl-name-"));
+      // Post-delete disk state: `foo.md/` and its child are already gone.
+      const collection = createCollection("notes", root);
+      collection.pattern = "**/*";
+      collection.exclude = ["*.md"];
+
+      const { store, descendantCalls } = createSubtreeStore({
+        descendants: { "foo.md": ["foo.md/child.txt"] },
+      });
+      const harness = createReconcileHarness(collection, { store });
+
+      try {
+        harness.service.start();
+        harness.emit([["rename", "foo.md"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(descendantCalls).toContain("foo.md");
+        expect(harness.batches.flat()).toContain("foo.md/child.txt");
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
+   * The counterweight to the test above: an exclusion that DOES cover its
+   * descendants still prunes, so the bound on work for excluded-tree noise is
+   * unchanged and `node_modules` is never scanned.
+   *
+   * This one is deliberately NOT discriminating - it passes against 538e3047
+   * too. It exists to pin that the fix did not over-correct into reconciling
+   * every excluded tree.
+   */
+  test(
+    "still prunes a directory whose exclusion covers the whole subtree",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "gno-watch-excl-covering-"));
+      await mkdir(join(root, "sub"), { recursive: true });
+      const collection = createCollection("notes", root);
+      collection.exclude = ["node_modules"];
+      const { store, directCalls, descendantCalls } = createSubtreeStore({
+        descendants: {
+          "sub/node_modules": ["sub/node_modules/pkg/readme.md"],
+        },
+      });
+      const harness = createReconcileHarness(collection, { store });
+
+      try {
+        harness.service.start();
+        // Events entirely inside the excluded tree queue nothing at all -
+        // deterministic, no sleep required.
+        harness.emit([
+          ["change", "node_modules/pkg/readme.md"],
+          ["rename", "node_modules/pkg"],
+        ]);
+        expect(harness.service.getState().queuedCollections).toEqual([]);
+
+        // A removed excluded directory reported by name is the exact mirror of
+        // the `foo.md` case above - and here the exclusion DOES cover the
+        // subtree, so it is still pruned: no hint, no descendant lookup, no
+        // scan of the excluded tree.
+        harness.emit([["rename", "sub/node_modules"]]);
+        expect(await harness.settle()).toBe("settled");
+
+        expect(descendantCalls).not.toContain("sub/node_modules");
+        expect(directCalls).not.toContain("sub/node_modules");
+        expect(harness.batches.flat()).toEqual([]);
+      } finally {
+        await harness.service.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    RED_TEST_TIMEOUT_MS
+  );
+
+  /**
    * R6 - the enumeration window. Candidates are resolved BEFORE an async
    * enumeration and handed to `syncPaths` AFTER it, so the configuration they
    * were resolved against can disappear or move in between. Checking only for
@@ -4924,6 +5022,114 @@ describe("symlink replacement converges the indexed side", () => {
 
       // ...and that is the same conclusion a full walk reaches, which is the
       // whole point: the two halves of the product must not disagree.
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const afterFullSync = await store.getDocument(
+        collection.name,
+        "dir/note.md"
+      );
+      expect(afterFullSync.ok && afterFullSync.value?.active).toBe(false);
+    } finally {
+      await service?.dispose();
+      await store.close();
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  /**
+   * The same convergence when the replacement link ESCAPES the collection.
+   *
+   * This is the case traversal containment made worse. The enumeration
+   * classified the entry point by RESOLVING it first, so a link pointing
+   * outside the root was reported as an enumeration `error` rather than
+   * `skipped` - and `error` is fail-closed by design, so the reconciliation
+   * produced no candidates at all and every document indexed under `dir/`
+   * stayed active. A full no-follow walk removes all of them, which is exactly
+   * the divergence fn-114 exists to close.
+   *
+   * The fix classifies a provable symlink WITHOUT reading or resolving the
+   * target, so containment is not weakened - nothing is read through the link
+   * in either version. Genuine unreadable/IO failures keep the `error` path;
+   * that is pinned by "fails closed on an unreadable directory, reports it, and
+   * stays armed" above, which is unchanged.
+   *
+   * Against 538e3047 the first assertion fails (`dir/note.md` is still active).
+   * Discriminating, not a direction pin.
+   */
+  test("deactivates indexed children of a directory replaced by an ESCAPING symlink", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "gno-watch-symlink-out-"));
+    const root = join(tempDir, "collection");
+    // The link target lives OUTSIDE the collection root, and it really exists -
+    // so a following `stat` on `dir/note.md` succeeds throughout.
+    const outside = join(tempDir, "outside");
+    await mkdir(join(root, "dir"), { recursive: true });
+    await Bun.write(join(root, "dir", "note.md"), "# note\n");
+    await mkdir(outside, { recursive: true });
+    await Bun.write(join(outside, "note.md"), "# note\n");
+
+    const collection = createCollection("notes", root);
+    const store = new SqliteAdapter();
+    let service: CollectionWatchService | null = null;
+    try {
+      expect(
+        (await store.open(join(tempDir, "index.sqlite"), "porter")).ok
+      ).toBe(true);
+      expect((await store.syncCollections([collection])).ok).toBe(true);
+      await defaultSyncService.syncCollection(collection, store, {
+        runUpdateCmd: false,
+      });
+      const indexed = await store.getDocument(collection.name, "dir/note.md");
+      expect(indexed.ok && indexed.value?.active).toBe(true);
+
+      let watcherCallback:
+        | ((eventType: string, filename: string | null) => void)
+        | undefined;
+      let notifySettled: (() => void) | null = null;
+      service = new CollectionWatchService({
+        collections: [collection],
+        eventBus: null as never,
+        scheduler: null as never,
+        store: store as never,
+        callbacks: {
+          onSettled: () => {
+            const resolve = notifySettled;
+            notifySettled = null;
+            resolve?.();
+          },
+        },
+        watchFactory: ((
+          _path: string,
+          _options: { recursive: boolean },
+          callback: WatchListener<string>
+        ) => {
+          watcherCallback = callback as typeof watcherCallback;
+          return { close: () => undefined };
+        }) as never,
+      });
+      service.start();
+
+      await rm(join(root, "dir"), { recursive: true, force: true });
+      await symlink(outside, join(root, "dir"), "dir");
+
+      const settled = new Promise<"settled">((resolve) => {
+        notifySettled = () => resolve("settled");
+      });
+      watcherCallback?.("rename", "dir");
+      expect(
+        await Promise.race([
+          settled,
+          Bun.sleep(15_000).then(() => "NO_SETTLE_WITHIN_TIMEOUT" as const),
+        ])
+      ).toBe("settled");
+
+      const afterWatch = await store.getDocument(
+        collection.name,
+        "dir/note.md"
+      );
+      expect(afterWatch.ok && afterWatch.value?.active).toBe(false);
+
+      // The full walk reaches the same conclusion, which is the guarantee.
       await defaultSyncService.syncCollection(collection, store, {
         runUpdateCmd: false,
       });

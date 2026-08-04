@@ -395,6 +395,21 @@ proportional to the event.
   known application-originated writes. Ineligible files remain unindexed even when
   their event causes directory reconciliation.
 
+  Preserving `exclude` means preserving it at the level it is defined for. It is
+  a FILE-level rule, and the walker applies it to files; a DIRECTORY is pruned
+  from reconciliation only by an exclusion that provably covers everything
+  beneath it — a bare component/prefix pattern (`node_modules`, `drafts`), or a
+  glob that still matches at deeper levels. An exclusion matching only the
+  directory's own name (`*.md` against a directory literally called `foo.md`)
+  does not prune it, because `FileWalker.walk` still indexes `foo.md/child.txt`.
+  Pruning there would be stricter than the walk and would lose documents rather
+  than work: a recursive delete of `foo.md/` reports the bare directory or one
+  arbitrary child, and a pruned directory cannot be queried, so the unreported
+  descendants stay active and searchable with nothing on disk behind them. What
+  is INDEXED is unchanged — final file eligibility stays with `matchesWalkPath`
+  — and covered exclusions still prune, so the bound on excluded-tree noise
+  (R11) holds.
+
   Collection-root containment is enforced at TRAVERSAL time, not once before a
   walk. Every directory the enumeration reads — the argument directory and each
   nested directory it descends into — is proven, immediately before it is read,
@@ -434,10 +449,25 @@ proportional to the event.
   every component between it and the collection root are examined unresolved
   (`lstat`, no-follow) BEFORE anything is canonicalized, so an in-root alias
   (`root/alias -> root/real`) is not silently dereferenced into an enumeration
-  of its target. `realpath` is used only to prove containment (an alias
-  resolving OUTSIDE the root is still refused). The collection root itself is
-  still canonicalized — it is legitimately a symlink (`/tmp -> /private/tmp` on
-  macOS).
+  of its target. The collection root itself is still canonicalized — it is
+  legitimately a symlink (`/tmp -> /private/tmp` on macOS).
+
+  A symlink standing at or above the entry point is classified `skipped`
+  WITHOUT resolving it, and that is independent of where it points. An in-root
+  alias and one escaping the collection are equally unreachable to
+  `FileWalker.walk`, so both mean "the whole subtree is out of reach" and both
+  must widen the indexed side to the subtree. Resolving first and refusing an
+  escaping link as an enumeration `error` was strictly worse than the walk: an
+  `error` is fail-closed and infers no deactivation, so a directory replaced by
+  a link to a tree outside the collection stranded every document indexed
+  beneath it while a full `gno update` removed them all. Containment is
+  unweakened — nothing is read through the link either way; the target is not
+  even resolved — and "refused to read" is simply no longer allowed to
+  masquerade as "cannot determine". `realpath` still runs for a non-symlink
+  entry point and still refuses an argument that resolves outside the root,
+  which is what catches a component swapped between the no-follow check and the
+  read. Genuine unreadability (`EACCES`, `EIO`) keeps the `error` path under R9
+  and deactivates nothing.
 
   **The no-follow policy is enforced in the INGESTION path, not in the watcher.**
   It lives in `checkWalkPathVisibility` (`src/ingestion/walker.ts`), beside the
@@ -747,6 +777,16 @@ proportional to the event.
   filesystem-only and holds no store dependency, and the discriminator costs no
   per-path query — a whole debounce window's vanished paths are answered in one
   round trip per seam (R5).
+
+  It holds for an EXCLUDED-looking name too. A removed directory whose own name
+  matches a file-level exclusion but whose descendants the walker still indexes
+  (`exclude: ["*.md"]`, indexed `foo.md/child.txt`) is reconciled rather than
+  pruned, so `child.txt` deactivates. Directory pruning is limited to exclusions
+  that provably cover descendants — see R4.
+
+  It also holds when the directory was replaced by a symlink pointing OUTSIDE
+  the collection: that enumeration is `skipped`, not `error`, so the removed
+  subtree's indexed side is still consulted and deactivated — see R4.
 
   Two documented limitations remain, neither about depth:
 

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import type { CollectionPathSemantics } from "../../src/core/path-rules";
 
-import { normalizeCollectionDirRelPath } from "../../src/core/path-rules";
+import {
+  exclusionCoversSubtree,
+  matchesCollectionExclusion,
+  normalizeCollectionDirRelPath,
+} from "../../src/core/path-rules";
 
 const BOTH: CollectionPathSemantics[] = ["posix", "windows"];
 
@@ -74,5 +78,62 @@ describe("normalizeCollectionDirRelPath", () => {
         : normalizeCollectionDirRelPath("a:notes", "posix");
 
     expect(normalizeCollectionDirRelPath("a:notes")).toBe(expected);
+  });
+});
+
+/**
+ * `exclusionCoversSubtree` is the DIRECTORY-level question, and it is
+ * deliberately narrower than the file-level `matchesCollectionExclusion`.
+ * Pruning a directory on the file-level answer is stricter than the walk: with
+ * `exclude: ["*.md"]` the walker still indexes `foo.md/child.txt`, so a pruned
+ * `foo.md` makes a removed subtree unqueryable and strands `child.txt` active.
+ *
+ * The whole function is new at 538e3047, so every case here is discriminating
+ * by construction (it does not compile against the base). What each case pins
+ * is which SIDE of the rule a pattern lands on.
+ */
+describe("exclusionCoversSubtree", () => {
+  test("covers the subtree for bare component/prefix patterns", () => {
+    // Bare patterns match as a path COMPONENT or as a `pattern/` prefix, and
+    // both reach every descendant - so pruning stays exactly as strict as it
+    // was for the ordinary excluded trees, and the amplification bound holds.
+    for (const dir of ["node_modules", "a/node_modules", "node_modules/pkg"]) {
+      expect(matchesCollectionExclusion(dir, ["node_modules"])).toBe(true);
+      expect(exclusionCoversSubtree(dir, ["node_modules"])).toBe(true);
+    }
+    expect(exclusionCoversSubtree("drafts", ["drafts"])).toBe(true);
+    expect(exclusionCoversSubtree("archive/old", ["archive"])).toBe(true);
+  });
+
+  test("does NOT cover the subtree for a glob matching only the directory name", () => {
+    // The finding: `*.md` matches the directory `foo.md` but says nothing about
+    // `foo.md/child.txt`, which the walker still indexes.
+    expect(matchesCollectionExclusion("foo.md", ["*.md"])).toBe(true);
+    expect(exclusionCoversSubtree("foo.md", ["*.md"])).toBe(false);
+    expect(matchesCollectionExclusion("logs.log", ["*.log"])).toBe(true);
+    expect(exclusionCoversSubtree("logs.log", ["*.log"])).toBe(false);
+    // A single `*` matches one segment only, so descendants stay walkable.
+    expect(exclusionCoversSubtree("anything", ["*"])).toBe(false);
+  });
+
+  test("covers the subtree for a glob that matches at every depth", () => {
+    // Asked at two depths: one level is not enough to tell `dir/*` (which
+    // leaves `dir/a/b.txt` walkable) from a doubled-star pattern.
+    expect(exclusionCoversSubtree("anything", ["**"])).toBe(true);
+    expect(exclusionCoversSubtree("a/b", ["**"])).toBe(true);
+  });
+
+  test("ignores patterns that do not match the directory at all", () => {
+    expect(exclusionCoversSubtree("notes", ["node_modules"])).toBe(false);
+    expect(exclusionCoversSubtree("notes", [])).toBe(false);
+    // The collection root is never pruned.
+    expect(exclusionCoversSubtree("", ["**"])).toBe(false);
+  });
+
+  test("takes the covering pattern when several exclusions match", () => {
+    // `*.md` alone would not cover it, but `foo.md` (bare) does, and one
+    // covering pattern is enough.
+    expect(exclusionCoversSubtree("foo.md", ["*.md", "foo.md"])).toBe(true);
+    expect(exclusionCoversSubtree("foo.md", ["*.md", "other"])).toBe(false);
   });
 });

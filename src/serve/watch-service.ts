@@ -13,7 +13,7 @@ import type { DocumentEvent, DocumentEventBus } from "./doc-events";
 import type { EmbedScheduler } from "./embed-scheduler";
 
 import {
-  matchesCollectionExclusion,
+  exclusionCoversSubtree,
   normalizeCollectionDirRelPath,
 } from "../core/path-rules";
 import {
@@ -1564,7 +1564,21 @@ export class CollectionWatchService {
    * Cheap queue/flush-time noise filter. Authoritative eligibility still runs
    * per candidate path through `matchesWalkPath`; this only avoids doing
    * filesystem and store work for directories a full `gno update` would never
-   * walk at all (dot-prefixed) or that the collection excludes outright.
+   * walk INTO AT ALL - dot-prefixed, or excluded by a rule that also covers
+   * everything beneath them.
+   *
+   * The exclusion question asked here is `exclusionCoversSubtree`, NOT the
+   * file-level `matchesCollectionExclusion`. A directory whose own NAME matches
+   * an exclusion may still hold walkable descendants: with `exclude: ["*.md"]`
+   * the walker indexes `foo.md/child.txt`, so pruning the directory `foo.md`
+   * here is stricter than the walk. That extra strictness loses documents - a
+   * recursive delete of `foo.md/` reports the bare directory (or one arbitrary
+   * child), and a pruned directory cannot be reconciled, so `child.txt` stays
+   * active and searchable with nothing on disk behind it.
+   *
+   * Patterns that DO cover their subtree (`node_modules`, `.git`,
+   * `node_modules/**`) still prune exactly as before, so the bound on work for
+   * excluded-tree noise is unchanged.
    */
   #isReconcilableDirectory(directory: string, collection: Collection): boolean {
     if (directory === "") {
@@ -1573,7 +1587,7 @@ export class CollectionWatchService {
     if (directory.split("/").some((segment) => segment.startsWith("."))) {
       return false;
     }
-    return !matchesCollectionExclusion(directory, collection.exclude);
+    return !exclusionCoversSubtree(directory, collection.exclude);
   }
 
   /**

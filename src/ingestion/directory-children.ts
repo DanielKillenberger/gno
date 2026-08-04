@@ -54,6 +54,13 @@ export type DirectoryChildrenOutcome =
    * SUBTREE out of the walker's reach, not merely its top level - so the caller
    * must widen its indexed side to the subtree rather than to direct children.
    *
+   * Where the link POINTS makes no difference to this answer. An in-root alias
+   * and one escaping the collection entirely are equally unreachable to the
+   * walker, so both are `skipped` and neither is resolved. Classifying the
+   * escaping one as `error` instead - "refused to read" dressed as "cannot
+   * determine" - strands every document indexed under the old directory,
+   * because `error` correctly infers no deactivation at all.
+   *
    * What it does NOT mean is "deactivate this yourself". The no-follow policy
    * lives in `checkWalkPathVisibility` and `syncPaths` enforces it too, so paths
    * handed over from here deactivate through the ordinary batch - with its
@@ -727,6 +734,34 @@ async function enumerateEligible(
     return { status: "error", cause: entryCheck.cause };
   }
 
+  if (entryCheck.status === "symlink") {
+    // A symlink stands at the entry point or above it (`root/alias ->
+    // root/real`, or `root/alias -> /somewhere/else`). `FileWalker.walk` skips a
+    // symlinked directory outright, so a full sync indexes nothing under
+    // `alias/...`. What is NOT allowed is what the realpath-first version did:
+    // enumerate the TARGET and report its files under the alias' names.
+    //
+    // Answered here, BEFORE the argument is resolved, and deliberately WITHOUT
+    // consulting where the link points. Resolving first classified an ESCAPING
+    // link (a directory replaced by a symlink to a tree outside the collection)
+    // as an enumeration `error`, and an error is fail-closed: the reconciliation
+    // produces no candidates at all, so every document indexed under the old
+    // directory stays active even though a full no-follow walk removes them all.
+    // "Refused to read" must not masquerade as "cannot determine". Containment
+    // is not weakened by answering earlier - the point of the policy is that
+    // nothing is ever read THROUGH the link, and nothing is: the target is not
+    // even resolved. Genuine unreadable/IO failures (`EACCES`, `EIO`) are
+    // reported by `checkUnresolvedEntryPath` above and keep the `error` path.
+    //
+    // Reported as `skipped`, not as an empty `present`, because the two imply
+    // different WIDTHS of indexed side: an alias at or above the entry point
+    // makes the whole subtree unreachable, so direct children are not enough.
+    // The deactivation itself is not this module's business - `syncPaths`
+    // enforces the same `checkWalkPathVisibility` policy and marks these paths
+    // inactive through the ordinary batch. See `DirectoryChildrenOutcome`.
+    return { status: "skipped", reason: "symlink" };
+  }
+
   let dirReal: string;
   try {
     dirReal = await realpath(dirAbs);
@@ -736,15 +771,13 @@ async function enumerateEligible(
       : { status: "error", cause };
   }
 
-  // A symlinked directory can resolve outside the collection root even though
-  // the relative argument looked contained. Fail closed rather than enumerate.
-  // This is the ARGUMENT check - it says the requested path was contained when
-  // it was resolved, which is why it can report the caller's `dirRelPath`. It is
-  // NOT what keeps the traversal contained; every directory actually read is
-  // re-proven contained at read time by `readContainedDirectory`.
-  //
-  // On a symlinked entry point this resolution is used to CLASSIFY, never to
-  // enumerate: nothing is read through it either way (see below).
+  // No component below the root was a symlink a moment ago, so this resolution
+  // should be the identity. It is kept as the ARGUMENT check - it says the
+  // requested path was contained when it was resolved, which is why it can
+  // report the caller's `dirRelPath` - and it still catches a component swapped
+  // for an escaping link between the no-follow check and here. It is NOT what
+  // keeps the traversal contained; every directory actually read is re-proven
+  // contained at read time by `readContainedDirectory`.
   if (escapesRoot(rootReal, dirReal)) {
     return {
       status: "error",
@@ -752,21 +785,6 @@ async function enumerateEligible(
         `Directory path escapes the collection root: ${dirRelPath}`
       ),
     };
-  }
-
-  if (entryCheck.status === "symlink") {
-    // An in-root alias (`root/alias -> root/real`). `FileWalker.walk` skips a
-    // symlinked directory outright, so a full sync indexes nothing under
-    // `alias/...`. What is NOT allowed is what the realpath-first version did:
-    // enumerate the TARGET and report its files under the alias' names.
-    //
-    // Reported as `skipped`, not as an empty `present`, because the two imply
-    // different WIDTHS of indexed side: an alias at or above the entry point
-    // makes the whole subtree unreachable, so direct children are not enough.
-    // The deactivation itself is not this module's business - `syncPaths`
-    // enforces the same `checkWalkPathVisibility` policy and marks these paths
-    // inactive through the ordinary batch. See `DirectoryChildrenOutcome`.
-    return { status: "skipped", reason: "symlink" };
   }
 
   // No component below the root is a symlink, so the unresolved path IS the
