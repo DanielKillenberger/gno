@@ -1,5 +1,11 @@
 # fn-54-re-evaluate-markit-as-a-unified Re-evaluate markit as a unified document conversion backend
 
+> **Superseded:** The converter decision has moved to
+> [`fn-114-selective-anydoc-adoption-for-document`](./fn-114-selective-anydoc-adoption-for-document.md),
+> which incorporates the later AnyDoc Office and PDF differential evidence and
+> specifies selective Office adoption while retaining the incumbent PDF backend.
+> This document remains as the historical Markit assessment.
+
 ## Overview
 
 Revisit [`markit`](https://github.com/Michaelliv/markit) as a possible single replacement for GNO's current document-conversion stack once the upstream project has matured enough to trust in core ingest paths.

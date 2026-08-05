@@ -32,11 +32,8 @@ Not a full replacement.
 - [ ] Record a future-facing recommendation: no adoption, experimental partial adoption, or broader adoption.
 
 ## Done summary
-
-TBD
-
+Closed as superseded, not implemented. The April 2026 Markit maturity and fixture re-evaluation remains preserved in this task and its parent spec; fn-114 now owns the converter decision using the stronger AnyDoc Office/PDF differential.
 ## Evidence
-
 - Commits:
-- Tests:
+- Tests: Historical evidence preserved in task: upstream bun test passed; GNO PDF/DOCX/PPTX/XLSX fixture smoke passed; .xlsm and sparse-sheet blockers documented
 - PRs:
