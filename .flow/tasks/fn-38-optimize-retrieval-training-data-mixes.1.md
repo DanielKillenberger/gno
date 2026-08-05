@@ -16,9 +16,8 @@ Acceptance:
 - verify the run starts cleanly and reaches at least the first validation checkpoint
 
 ## Done summary
-
-TBD
-
+Blocked:
+Stale claim from 2026-03-09. No active Flow run and no implementation, review, or sync evidence. Gordon confirmed no task should currently be in progress.
 ## Evidence
 
 - Commits:

@@ -1,7 +1,7 @@
 # fn-112 task .6 PDF viewer smoke — artifact index
 
-- Started: 2026-08-01T21:30:15.107Z
-- Finished: 2026-08-01T21:31:52.767Z
+- Started: 2026-08-01T22:22:31.246Z
+- Finished: 2026-08-01T22:24:09.933Z
 - Platform: darwin/arm64 Bun 1.3.14
 - Failures: 0
 
@@ -34,42 +34,42 @@
 - INTERCEPTION: {"name":"INTERCEPTION","ok":true}
 
 ## Artifact hashes (sha256)
-- `evidence.json`: `4b439eac7a2c58d6b17f76597d3ab73782e9fb7a115bf7c3f2df9aac2c458996`
-- `INTERCEPTION__state-loading.png`: `3330a0c6411d70f9296e73627f6b07af5bf33a2955e00897e87c4d13de9c2c80`
-- `INTERCEPTION__state-empty.png`: `23ae0413c51eade23b695b8a5a3af116007d9b1b97e2a9a8c2e0c7a88282df08`
-- `INTERCEPTION__visual-dark-w900-overview.png`: `6921ff76a1d1ba28d43633280d1fd3c2dfc2d2c6fa2f8d775c1760ae97136776`
-- `INTERCEPTION__align-100.png`: `e0908d844d2528e9e46f5ca1f9fc99ef00aa6455d790a79d2036fc9252afd004`
-- `INTERCEPTION__state-network.png`: `c58bae60ee5b4cdcbf8d1fe6b238b9c765354ee14759e4c95e150eb160f34509`
-- `visual-theme-proof.json`: `4cce7aee68fa6d8f88c9915cd0a102da689203462875f2502d09e1f22a993cb1`
-- `INTERCEPTION__visual-dark-w1380-overview.png`: `9648a3e980ed9a78a1908d723435a25ed427834990808f72cd5a2c401adfabbc`
-- `INTERCEPTION__state-corrupt.png`: `9ac25dacdf8d68993034aba0757b1b627f8c4b477417629741120bc86192c1d3`
-- `console-log.json`: `6c8d30f4e60cd205d7387805ad978bb90d62e520d6dc0b3447c5402da53b07d4`
-- `INTERCEPTION__state-progressive.png`: `1ffe00a343ff6c89001236dc50663b6696de58eb0be70d87fea39feb90ffc676`
-- `CLEAN__viewer-links-rendered.png`: `914c55e138d30f9065cb0b69f8d6a045093fd817275a1a1f740d53a42047884b`
-- `CLEAN__js-action.png`: `de568e27c0bcef7e690f1cc2a33fe8f2ad19e6d13bd19d87d3f053a5698a9721`
-- `p6-metrics.json`: `19c731c631b70b290bcc5a6977e72f54471a0c7710a2805e838a6890fc5d4fb9`
+- `evidence.json`: `1a0972f57e5648ae64b7f1efbd0da282affa4e73c84ad7eeb6aea74af1f976fe`
+- `INTERCEPTION__state-loading.png`: `edb6885f6a054bf2a6c733d89a38945f2524382d0e5c38caa7fd81b0a0504714`
+- `INTERCEPTION__state-empty.png`: `805275113859a8e3b4677f2ad844ae9088f53b73ade91e8a44c97092805fc914`
+- `INTERCEPTION__visual-dark-w900-overview.png`: `fc83740d3ca14627113711ae44e69a4c01b09d0f0127511cf33f99c33249289c`
+- `INTERCEPTION__align-100.png`: `e3f883425edc80ab869b81ce2117abae81cf4bb818793ca8da5b83b95f80ca85`
+- `INTERCEPTION__state-network.png`: `2ddcb32bce63c60a9b972721d9194ceae9a59130ef3bb996da78480896020ae9`
+- `visual-theme-proof.json`: `63924df75c9f0877bf29dc0163bda151d8a91a6dbb4a4fc84b7cb63999f0f3a3`
+- `INTERCEPTION__visual-dark-w1380-overview.png`: `fc890849f19daaacf96477378a675738934946f98db9c32a47ec6bf84fcc5523`
+- `INTERCEPTION__state-corrupt.png`: `2f60752efb56bd5ab8a1bada36f165fb98d78cfc4fcc234bbb966cf52fa77c87`
+- `console-log.json`: `a9e0bb231105ba8bcce45e1b986c17eeddc64d89adbeaeae6bdd210cf65e6e97`
+- `INTERCEPTION__state-progressive.png`: `529f3cd9cf90687af171b597beefe4d08418bf616accea274b5da357a3eac27d`
+- `CLEAN__viewer-links-rendered.png`: `571e6765f6deb25c952c78dbaeeabe3d8052ea2b89c916818f7c669bbde0f3f1`
+- `CLEAN__js-action.png`: `008b75bad97044bdf897713f827d2a062319f5f92693cf3689c96fb075824ca5`
+- `p6-metrics.json`: `0a8019244c549b0ce416ea9c744214741397f113ec5ed4000187278de2bb00a7`
 - `server-stderr.log`: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
-- `INTERCEPTION__visual-dark-w1380-rail.png`: `52144915814c891b0e66204e6459ad6f3a23b9e4af3c2bdbab8515c8465f5b1e`
-- `INTERCEPTION__state-bootstrap.png`: `ae86478d0820b6771fab6262db54ec91a36a102655cffc3c778accd96eb7d616`
-- `INTERCEPTION__align-200.png`: `0517ce76ad46d855c450e5213adfe05e548e606d173c6001cb24affe5dcf103b`
-- `request-log.json`: `8e8fa7795332ed7ac911af31a33e155ab45cecfd0bb9c832d4fc1a783a6de4b4`
-- `INTERCEPTION__state-password.png`: `7a65bdf7aa9289171e46249349510b83b86498c65f33b4fab12a9388ae70aad9`
+- `INTERCEPTION__visual-dark-w1380-rail.png`: `09c0625f87393c39d6f90f3abd3e7454f56de4920b6c3bb0eb4519cf971a55c3`
+- `INTERCEPTION__state-bootstrap.png`: `09d3ff47030c25d632fe6713e1cc60363a05a7ec4770873a6010f8ff9ba408cd`
+- `INTERCEPTION__align-200.png`: `ffab6902f76412b7a139a356f625c3c25eeac4b8c6155f0c5c56135fbfd2761d`
+- `request-log.json`: `8ec6aa5b9ab1e3f50d71d5d452db6949fa8ff54b323bd0f8c447b81c034cde76`
+- `INTERCEPTION__state-password.png`: `55b0273d00727e59376377ede18fb7b737af5aa00c6673426a140b078faf5710`
 - `p4b-ladder.json`: `f657654e8d8afaebde8ebc488f97d4e6d7d82256f29adc38f02dab04119a2347`
-- `p3-metrics.json`: `8733c48aa839801d160c9c7a3aad1cd20a78fab17b4a2874dadb69981702df6c`
-- `progressive-control-log.json`: `63b241ba489feb65a9a1e5e6328e6a727f01caac85c61f9fc41718498566ac6b`
-- `p4a-metrics.json`: `4838982673420a1868b4c9418588416e537fe54ae1bfac0a57dd2285c15b188f`
-- `INTERCEPTION__align-fit-width.png`: `a06a7371254832fcd84be5d64339aa5c4cfe71dfb17878865555be7725f463e0`
-- `p5-metrics.json`: `3f00de2eb174a0773c5e6c378358096183e9907af22bbd65d93e5298883dac0f`
-- `CLEAN__cjk-cmap.png`: `97c380c582ecab670492413e744cb66a6ab1e47e7c8c16d319ed925ac49dfe6c`
-- `INTERCEPTION__visual-light-w1380-overview.png`: `86dcad60024cfb396136f7bc2b71f36fe6b5f07c2e39dff57ad6bbda458e8dee`
-- `INTERCEPTION__visual-dark-w900-rail.png`: `3c4c2eed1787bad2f3806a45dd7cb807eaed3ddfc2957b7961a89881ba2a5eda`
-- `p4b-events.json`: `56769f6b9fa4aeb66f04f70fc8971f4aa318d7c32e37a0400455646edd99061c`
-- `CLEAN__standard-font.png`: `db1de15fbae17003578ad6b2f29b3d04aa1764a3309566141833fc21f398b0e4`
-- `INTERCEPTION__visual-light-w900-overview.png`: `eb139f29258a0ec27037c0f1f8ea84b9eccbc67e7628f218daa06b5217702a5a`
-- `INTERCEPTION__visual-light-w900-rail.png`: `d4b87e83f0b2cf36d8088e1753236cf637b3b55325e9205d54d0e17a55bdbd42`
-- `p4a-samples.json`: `1a753e44f8fe48e6dd831b3bd3a156d8a1a37d8c6391f7b762676b2b9af4caee`
-- `INTERCEPTION__visual-light-w1380-rail.png`: `70f3301bc5dbf9c8248651cf5e5d05875274ed78e043a3e1fbbd0e7e36c1ffe7`
-- `server-stdout.log`: `dcd4d205030963f02bf3e6398fb923d665210079a40c57ed5b733d488d6c1d35`
+- `p3-metrics.json`: `84583b52e9425035e6b1c0afdf01e7b1276c16b78fb154ea943d47554259d664`
+- `progressive-control-log.json`: `48844db906225897fc73281ca30f2f23f3633cdaf1ad29325aca81a2e22c8733`
+- `p4a-metrics.json`: `22fa5e26b070b786602e4ce88f4f696b87ef80bcc61ad50688d66281e4b3e546`
+- `INTERCEPTION__align-fit-width.png`: `d60ee5db2b65e5d77bd034dce5c7ea91f7be8581ffdc85df85193a8dd92743ed`
+- `p5-metrics.json`: `c920f8a71770bf7acbe8a40f6416ce5b29368760bd6afbd7078a6f22a2466e84`
+- `CLEAN__cjk-cmap.png`: `4a41de15adc29f28e59f3993cdfbdffa83a764735f8eef6beb3fed4a4d663e5f`
+- `INTERCEPTION__visual-light-w1380-overview.png`: `6d778194e2d5d73d82e6ef6daedd657c3c0a69a37ff3f1ac34c186c9570996fe`
+- `INTERCEPTION__visual-dark-w900-rail.png`: `fd210248c84b9ac22e107da2e809ead1ba6d6266d6e6a32a9e386e7fc50e503d`
+- `p4b-events.json`: `76d6a1683231e813a076ecd8500a6d946be51dcd1c9f0e551197827790297062`
+- `CLEAN__standard-font.png`: `1f8cd6ef10d1efa3269c4217dd692ba1d5485474bf47c7abdfd8543ff09c4189`
+- `INTERCEPTION__visual-light-w900-overview.png`: `e4881a6a710b06e361a42f37c782d5b349e557021aa3cdc648c4008494991f71`
+- `INTERCEPTION__visual-light-w900-rail.png`: `08874e67b973f39639951f9fa9b1c7bb0ee5cef226f2222b87a73d1d76d6ff90`
+- `p4a-samples.json`: `ec8bdf82dcbb2531bea05e88831fce7e3e975c5be8979746cd72cade68462ef7`
+- `INTERCEPTION__visual-light-w1380-rail.png`: `cdd5828bad65d27fe86ec638d65f3e56ae749c20002067b65011c5ca9eae13a5`
+- `server-stdout.log`: `5ae4f553dc486bba520dcef03fbe179dd446db55bef568006e14d66394c44637`
 
 ## Failures
 - (none)

@@ -728,11 +728,10 @@ def _persist_external_claimed(flow_dir: Path, spec_id: str, *,
                 "linkState": "linked", "lastSyncedAt": now_iso(),
             })
     else:
-        # A caller-supplied durable is VERIFIED against GraphQL when available:
+        # A caller-supplied durable is VERIFIED against GraphQL when reachable:
         # persisting an unchecked id is how a typo becomes a wrong link. On
-        # mismatch -> conflict; GraphQL unavailable (including the supported
-        # keyless MCP route) -> trust the explicit MCP id. The MCP create result
-        # is the durable authority, and identifier_only would discard it.
+        # mismatch -> conflict; GraphQL unreachable -> trust the explicit id
+        # (the caller asserted it; identifier_only would discard information).
         check = resolve_linear_uuid(ex, identifier)
         if isinstance(check, dict) and str(check["id"]) != str(resolved_id):
             return TrackerError(
@@ -745,7 +744,7 @@ def _persist_external_claimed(flow_dir: Path, spec_id: str, *,
                     {"durable": check["id"], "role": "graphql"},
                 ]})
         if isinstance(check, TrackerError) and check.cls not in (
-                ErrorClass.AUTH, ErrorClass.TRANSPORT, ErrorClass.RATE_LIMITED):
+                ErrorClass.TRANSPORT, ErrorClass.RATE_LIMITED):
             return check
         if isinstance(check, dict):
             resolved_url = check.get("url") or resolved_url
