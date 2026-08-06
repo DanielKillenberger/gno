@@ -15,7 +15,7 @@
   "plan_reviewed_at": null,
   "ready": true,
   "spec_path": ".flow/specs/fn-115-fix-graph-stalls-and-http-rerank-pull.md",
-  "status": "open",
+  "status": "done",
   "title": "Fix graph stalls and HTTP rerank pull errors",
   "tracker": {
     "baseHashFlow": null,
@@ -28,5 +28,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-06T14:25:31.871667Z"
+  "updated_at": "2026-08-06T14:45:43.166632Z"
 }

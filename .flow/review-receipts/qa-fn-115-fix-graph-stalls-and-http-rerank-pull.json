@@ -1,0 +1,47 @@
+{
+  "branch": "main",
+  "findings": {
+    "backend": "interactive",
+    "baseSha": "be918e2b35de688c374a87f91a96541228d36123",
+    "headSha": "202634934153ec9bc85692983d41e51efea48364",
+    "items": [],
+    "reviewKind": "qa",
+    "round": 1,
+    "schemaVersion": 1,
+    "sourceReceiptId": "review-9a298f876bb46b2a360651d40fbd9c94930327f7973a43b116f5d418791069d2"
+  },
+  "head_sha": "202634934153ec9bc85692983d41e51efea48364",
+  "id": "fn-115-fix-graph-stalls-and-http-rerank-pull",
+  "mode": "interactive",
+  "open_p0p1": [],
+  "qa_outcome": "SHIP",
+  "rid_coverage": {
+    "covered": 5,
+    "rids": [
+      {
+        "coverage": "live",
+        "id": "R1"
+      },
+      {
+        "coverage": "live",
+        "id": "R2"
+      },
+      {
+        "coverage": "backend_cli",
+        "id": "R3"
+      },
+      {
+        "coverage": "backend_cli",
+        "id": "R4"
+      },
+      {
+        "coverage": "live",
+        "id": "R5"
+      }
+    ],
+    "total": 5
+  },
+  "timestamp": "2026-08-06T14:45:19Z",
+  "type": "qa_verdict",
+  "verdict": "SHIP"
+}
