@@ -432,6 +432,21 @@ function isCodeSignableExtension(path: string): boolean {
   );
 }
 
+/**
+ * Limit expensive `file` probes to paths that the signing policy can act on.
+ * A packaged runtime contains tens of thousands of assets; probing every one
+ * serially adds minutes without changing which binaries are signed.
+ */
+export function isPotentialSigningPath(
+  appPath: string,
+  candidatePath: string
+): boolean {
+  return (
+    isCodeSignableExtension(candidatePath) ||
+    dirname(candidatePath) === join(appPath, "Contents", "MacOS")
+  );
+}
+
 function isMachOBinary(path: string): boolean {
   const result = Bun.spawnSync(["file", "-b", path], {
     stderr: "pipe",
@@ -468,9 +483,9 @@ export function bundledBunPath(appPath: string): string {
  * Pure target classification. Takes candidates produced by the impure
  * discovery pass and splits them into the two signing passes.
  *
- * Anything Mach-O that is neither extension-matched nor a `Contents/MacOS`
- * executable lands in `skipped`. In practice that is exactly one file: the
- * vendored `Contents/Resources/app/gno-runtime/node_modules/
+ * Anything Mach-O supplied to this classifier that is neither
+ * extension-matched nor a `Contents/MacOS` executable lands in `skipped`. The
+ * inventory tests include the vendored `Contents/Resources/app/gno-runtime/node_modules/
  * @oven/bun-darwin-aarch64/bin/bun`. Skipping it is deliberate, not an
  * oversight - it already carries a valid upstream Bun Developer ID signature
  * with its own entitlements, and it is never executed at runtime (the launcher
@@ -564,7 +579,9 @@ async function discoverSigningCandidates(
   appPath: string
 ): Promise<SigningCandidate[]> {
   const allPaths = await walk(appPath);
-  return allPaths.map((path) => ({ path, isMachO: isMachOBinary(path) }));
+  return allPaths
+    .filter((candidatePath) => isPotentialSigningPath(appPath, candidatePath))
+    .map((path) => ({ path, isMachO: isMachOBinary(path) }));
 }
 
 export async function signNestedBinaries(

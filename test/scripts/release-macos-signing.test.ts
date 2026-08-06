@@ -7,6 +7,7 @@ import {
   classifyNestedSigningTargets,
   hasHardenedRuntimeFlag,
   hasJitEntitlement,
+  isPotentialSigningPath,
   readEntitlementBoolean,
   type SigningCandidate,
 } from "../../desktop/electrobun-shell/scripts/release-macos";
@@ -146,6 +147,22 @@ describe("classifyNestedSigningTargets", () => {
 
     expect(targets.machOExecutables).toEqual([]);
     expect(targets.skipped).toEqual([decoy]);
+  });
+});
+
+describe("isPotentialSigningPath", () => {
+  test("probes only extension candidates and direct Contents/MacOS entries", () => {
+    expect(isPotentialSigningPath(APP, `${APP}/Contents/MacOS/bun`)).toBe(true);
+    expect(
+      isPotentialSigningPath(
+        APP,
+        `${APP}/Contents/Resources/app/native/addon.node`
+      )
+    ).toBe(true);
+    expect(isPotentialSigningPath(APP, VENDORED_BUN)).toBe(false);
+    expect(
+      isPotentialSigningPath(APP, `${APP}/Contents/Resources/app/index.js`)
+    ).toBe(false);
   });
 });
 
