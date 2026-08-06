@@ -51,5 +51,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gno-desktop-beta-windows-build
+          # Per-commit CI build (~0.65 GB each). Disposable as soon as the next
+          # one lands, so it gets the shortest useful window. Left at the repo
+          # default of 90d, this one step had accumulated 164 live copies /
+          # ~104 GB. This repo is public, so that storage is free and was fully
+          # discounted -- but it still showed as ~$151/mo of gross metered usage,
+          # and it would bill immediately if the repo ever went private.
+          retention-days: 7
           path: |
             desktop/electrobun-shell/build/dev-win-x64/**

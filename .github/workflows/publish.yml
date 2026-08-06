@@ -134,6 +134,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gno-desktop-beta-windows-release
+          # Release candidate someone may still be installing: longer than a CI
+          # build, still far short of the 90d default that let these pile up.
+          retention-days: 30
           path: ${{ steps.archive_windows.outputs.zip_path }}
 
   package-macos-desktop:
@@ -261,6 +264,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gno-desktop-beta-macos-release
+          retention-days: 30
           if-no-files-found: error
           path: |
             ${{ github.workspace }}/desktop/electrobun-shell/artifacts/release-macos/*.zip
@@ -304,6 +308,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: npm-package
+          retention-days: 30
           path: /tmp/gno-package-smoke-*/pack/gmickel-gno-*.tgz
           if-no-files-found: ignore
 
@@ -311,6 +316,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: browser-clipper
+          retention-days: 30
           path: browser-extension/artifacts/*
           if-no-files-found: error
 
