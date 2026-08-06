@@ -253,9 +253,11 @@ Desktop-specific proof:
 - basic indexing/search flow works in the packaged app
 - the signed `Contents/MacOS/bun` carries `com.apple.security.cs.allow-jit` and
   the hardened-runtime flag, asserted post-sign and pre-notarization
-- the stapled artifact launches on a clean Apple Silicon machine. Signature
-  verification, stapler validation and Gatekeeper assessment all pass on a build
-  that crashes instantly, so none of them substitute for launching it.
+- the stapled artifact launches in self-test mode from the mounted final DMG on
+  a clean Apple Silicon release runner, reaches `/api/status`, exits cleanly,
+  and produces no Bun crash report. Signature verification, stapler validation
+  and Gatekeeper assessment all pass on a build that crashes instantly, so none
+  of them substitute for launching it.
 
 ## Current Recommendation Summary
 

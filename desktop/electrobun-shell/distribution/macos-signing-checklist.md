@@ -65,13 +65,15 @@ filename alone, or it will read that copy and report a false pass.
 with the bundle's own entitlements and silently strips per-binary ones. It is
 retained on `--verify`, where it is correct.
 
-### Manual clean-machine launch check
+### Clean-runner launch check
 
-Not covered by CI, and required before announcing a build. On an Apple Silicon
-machine that has not run a dev build:
+The credentialed macOS packaging job performs this check against the mounted,
+stapled DMG on a clean Apple Silicon runner. It is required before announcing a
+build:
 
-1. mount the stapled DMG and launch the app
-2. confirm it reaches its running server state rather than exiting silently
+1. mount the stapled DMG and run the packaged app in self-test mode
+2. confirm it reaches `/api/status` and exits successfully rather than exiting
+   silently or timing out
 3. confirm no new `bun` crash report appeared in
    `~/Library/Logs/DiagnosticReports/`
 

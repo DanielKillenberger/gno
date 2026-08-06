@@ -201,6 +201,62 @@ jobs:
           test -d "$ELECTROBUN_ARTIFACT_DIR"
           find "$ELECTROBUN_ARTIFACT_DIR" -maxdepth 3 -type f -print | sort
 
+      - name: Launch-test signed macOS desktop release
+        env:
+          RELEASE_DIR: ${{ github.workspace }}/desktop/electrobun-shell/artifacts/release-macos
+        run: |
+          set -euo pipefail
+          DMG_PATH="$(find "$RELEASE_DIR" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$DMG_PATH"
+
+          MOUNT_DIR="$(mktemp -d "$RUNNER_TEMP/gno-desktop-mount.XXXXXX")"
+          CRASH_MARKER="$(mktemp "$RUNNER_TEMP/gno-desktop-crash-marker.XXXXXX")"
+          cleanup() {
+            hdiutil detach "$MOUNT_DIR" -quiet || true
+            rmdir "$MOUNT_DIR" || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach "$DMG_PATH" -readonly -nobrowse -mountpoint "$MOUNT_DIR"
+          APP_PATH="$(find "$MOUNT_DIR" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP_PATH"
+          EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")"
+          APP_EXECUTABLE="$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
+          test -x "$APP_EXECUTABLE"
+
+          GNO_ELECTROBUN_SELFTEST=1 "$APP_EXECUTABLE" &
+          APP_PID=$!
+          APP_STATUS=""
+          for _attempt in $(seq 1 60); do
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              if wait "$APP_PID"; then
+                APP_STATUS=0
+              else
+                APP_STATUS=$?
+              fi
+              break
+            fi
+            sleep 1
+          done
+          if [[ -z "$APP_STATUS" ]]; then
+            kill "$APP_PID" 2>/dev/null || true
+            wait "$APP_PID" 2>/dev/null || true
+            echo "Signed desktop self-test timed out" >&2
+            exit 1
+          fi
+          if [[ "$APP_STATUS" -ne 0 ]]; then
+            echo "Signed desktop self-test exited $APP_STATUS" >&2
+            exit "$APP_STATUS"
+          fi
+
+          sleep 2
+          CRASH_DIR="$HOME/Library/Logs/DiagnosticReports"
+          if [[ -d "$CRASH_DIR" ]] && find "$CRASH_DIR" -type f \( -name 'bun*.crash' -o -name 'bun*.ips' \) -newer "$CRASH_MARKER" -print -quit | grep -q .; then
+            echo "Signed desktop self-test produced a Bun crash report" >&2
+            find "$CRASH_DIR" -type f \( -name 'bun*.crash' -o -name 'bun*.ips' \) -newer "$CRASH_MARKER" -print
+            exit 1
+          fi
+
       - name: Upload macOS desktop package
         uses: actions/upload-artifact@v7
         with:
