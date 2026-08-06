@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed the Web knowledge graph blocking the Bun event loop while resolving
   large link inventories by reusing the semantics-equivalent bulk resolver
-  instead of running correlated document subqueries for every link.
+  instead of running correlated document subqueries for every link. Thanks
+  @fightp86 for the report and benchmark.
 - Fixed false `Failed: rerank` errors when Web UI presets use an HTTP(S)
   reranking endpoint; model-pull flows now skip external rerank services
-  instead of treating their URLs as downloadable model artifacts.
+  instead of treating their URLs as downloadable model artifacts. Thanks
+  @fightp86 for the report and root-cause analysis.
 
 ## [1.34.0] - 2026-08-04
 
