@@ -1922,6 +1922,8 @@ gno models pull [--all|--embed|--rerank|--gen] [--force]
 **Behavior:**
 
 - Skips models that are already cached (checksum match) unless `--force` is used
+- Skips HTTP(S) rerank endpoints as external services; they are called directly
+  and are never downloaded or cached, including with `--force`
 - Default (no flags): pulls all models
 
 **Exit Codes:**

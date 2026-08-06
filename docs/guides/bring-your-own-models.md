@@ -229,6 +229,8 @@ For `http:` URIs:
 
 - GNO does not download anything
 - it calls the configured server directly
+- `gno models pull` reports HTTP(S) rerankers as external-endpoint skips,
+  including when `--force` is set
 
 ## Switching Safely
 

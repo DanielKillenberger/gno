@@ -10,6 +10,7 @@ import type { DownloadProgress, ModelType } from "../../../llm/types";
 import { getModelsCachePath } from "../../../app/constants";
 import { loadConfig } from "../../../config";
 import { ModelCache } from "../../../llm/cache";
+import { isHttpRerankUri } from "../../../llm/httpRerank";
 import { getActivePreset } from "../../../llm/registry";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ export interface ModelPullResult {
   error?: string;
   path?: string;
   skipped?: boolean;
+  skipReason?: "cached" | "external";
 }
 
 export interface ModelsPullResult {
@@ -117,6 +119,20 @@ export async function modelsPull(
     const uri =
       type === "expand" ? (preset.expand ?? preset.gen) : preset[type];
 
+    // HTTP rerankers are services, not model artifacts. They are loaded
+    // directly by LlmAdapter and must never enter the local model cache path.
+    if (type === "rerank" && isHttpRerankUri(uri)) {
+      results.push({
+        type,
+        uri,
+        ok: true,
+        skipped: true,
+        skipReason: "external",
+      });
+      skipped += 1;
+      continue;
+    }
+
     // Check if already cached (skip unless --force)
     if (!options.force) {
       const isCached = await cache.isCached(uri);
@@ -128,6 +144,7 @@ export async function modelsPull(
           ok: true,
           path: path ?? undefined,
           skipped: true,
+          skipReason: "cached",
         });
         skipped += 1;
         continue;
@@ -176,13 +193,17 @@ export async function modelsPull(
  */
 export function formatModelsPull(result: ModelsPullResult): string {
   const lines: string[] = [];
+  let externalSkipped = 0;
   const label = (type: ModelType) =>
     type === "gen" ? "answer" : type === "expand" ? "expand" : type;
 
   for (const r of result.results) {
     if (r.ok) {
       if (r.skipped) {
-        lines.push(`${label(r.type)}: skipped (already cached)`);
+        if (r.skipReason === "external") externalSkipped += 1;
+        const reason =
+          r.skipReason === "external" ? "external endpoint" : "already cached";
+        lines.push(`${label(r.type)}: skipped (${reason})`);
       } else {
         lines.push(`${label(r.type)}: downloaded`);
       }
@@ -196,10 +217,18 @@ export function formatModelsPull(result: ModelsPullResult): string {
     lines.push(`${result.failed} model(s) failed to download.`);
   } else if (result.skipped === result.results.length) {
     lines.push("");
-    lines.push("All models already cached. Use --force to re-download.");
+    lines.push(
+      externalSkipped > 0
+        ? "No model downloads needed."
+        : "All models already cached. Use --force to re-download."
+    );
   } else {
     lines.push("");
-    lines.push("All models downloaded successfully.");
+    lines.push(
+      externalSkipped > 0
+        ? "All downloadable models downloaded successfully."
+        : "All models downloaded successfully."
+    );
   }
 
   return lines.join("\n");

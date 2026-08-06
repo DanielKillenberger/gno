@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed false `Failed: rerank` errors when Web UI presets use an HTTP(S)
+  reranking endpoint; model-pull flows now skip external rerank services
+  instead of treating their URLs as downloadable model artifacts.
+
 ## [1.34.0] - 2026-08-04
 
 ### Added

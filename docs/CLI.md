@@ -1138,6 +1138,10 @@ firewall, captive portal, or HTML error page is cached instead of a GGUF, GNO
 removes the bad cached file and reports a specific recovery error. Explicit
 `file:` or absolute model paths are validated but never deleted.
 
+HTTP(S) rerank endpoints are external services, so `models pull` reports them
+as skipped and never sends them through the local model cache, even with
+`--force`.
+
 ### Using A Fine-Tuned GGUF
 
 If you have exported a fine-tuned GGUF, point a custom preset at it:
