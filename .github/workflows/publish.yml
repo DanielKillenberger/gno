@@ -227,6 +227,22 @@ jobs:
           APP_EXECUTABLE="$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
           test -x "$APP_EXECUTABLE"
 
+          SELFTEST_ROOT="$(mktemp -d "$RUNNER_TEMP/gno-desktop-selftest.XXXXXX")"
+          NOTES_DIR="$SELFTEST_ROOT/notes"
+          export GNO_CONFIG_DIR="$SELFTEST_ROOT/config"
+          export GNO_DATA_DIR="$SELFTEST_ROOT/data"
+          export GNO_CACHE_DIR="$SELFTEST_ROOT/cache"
+          export GNO_NO_AUTO_DOWNLOAD=1
+          export HF_HUB_OFFLINE=1
+          mkdir -p "$NOTES_DIR"
+          printf '# Signed desktop self-test\n' > "$NOTES_DIR/hello.md"
+
+          PACKAGED_BUN="$APP_PATH/Contents/MacOS/bun"
+          PACKAGED_GNO="$APP_PATH/Contents/Resources/app/gno-runtime/src/index.ts"
+          test -x "$PACKAGED_BUN"
+          test -f "$PACKAGED_GNO"
+          "$PACKAGED_BUN" "$PACKAGED_GNO" init "$NOTES_DIR" --name notes
+
           GNO_ELECTROBUN_SELFTEST=1 "$APP_EXECUTABLE" &
           APP_PID=$!
           APP_STATUS=""

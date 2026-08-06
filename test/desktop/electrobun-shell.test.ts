@@ -44,4 +44,15 @@ describe("electrobun shell scaffold", () => {
     expect(config).toContain('preBuild: "./scripts/stage-gno-runtime.ts"');
     expect(config).toContain('".generated/gno-runtime"');
   });
+
+  test("signed macOS launch gate initializes a hermetic packaged profile", async () => {
+    const workflow = await Bun.file(".github/workflows/publish.yml").text();
+    expect(workflow).toContain(
+      'PACKAGED_GNO="$APP_PATH/Contents/Resources/app/gno-runtime/src/index.ts"'
+    );
+    expect(workflow).toContain(
+      '"$PACKAGED_BUN" "$PACKAGED_GNO" init "$NOTES_DIR" --name notes'
+    );
+    expect(workflow).toContain('GNO_ELECTROBUN_SELFTEST=1 "$APP_EXECUTABLE" &');
+  });
 });
