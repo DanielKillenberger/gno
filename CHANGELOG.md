@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened raster ingestion against malformed container streams, incomplete
   GIF pixel data, PNG decompression bombs, unsafe traversal and symlink paths,
   exclusion bypasses, ambiguous references, and upload-budget drift.
+
 ## [1.32.0] - 2026-08-03
 
 ### Added
