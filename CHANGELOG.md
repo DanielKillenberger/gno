@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reranking endpoint; model-pull flows now skip external rerank services
   instead of treating their URLs as downloadable model artifacts. Thanks
   @fightp86 for the report and root-cause analysis.
+- Embedded `com.apple.security.cs.allow-jit` when signing the macOS desktop
+  shell, so the signed app launches instead of crashing on start. The bundled
+  Bun runtime was signed with the hardened runtime and no entitlements, which
+  made JavaScriptCore trap on the first JIT write. The release path now signs
+  the nested Mach-O executables explicitly, no longer passes `--deep` (which
+  strips per-binary entitlements), and fails before notarization if the
+  entitlement or the hardened-runtime flag is missing. Thanks
+  @DanielKillenberger for the report, root-cause analysis, and fix.
 
 ## [1.34.0] - 2026-08-04
 

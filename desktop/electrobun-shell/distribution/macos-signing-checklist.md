@@ -29,15 +29,61 @@ What it does:
 
 1. builds the shell
 2. runs packaged-runtime verification
-3. signs the `.app` with hardened runtime
-4. submits a zip to `notarytool`
-5. staples the app
-6. validates with:
+3. signs the nested Mach-O binaries and then the `.app` with hardened runtime,
+   embedding `com.apple.security.cs.allow-jit` from
+   `desktop/electrobun-shell/macos/gno-desktop.entitlements` into
+   `Contents/MacOS/bun`
+4. asserts, before notarization is submitted, that `Contents/MacOS/bun` carries
+   that entitlement set to `<true/>` and still has the hardened runtime flag
+5. submits a zip to `notarytool`
+6. staples the app
+7. validates with:
+   - the entitlement + hardened-runtime assertion above, re-run on the
+     zip-round-tripped copy
    - `codesign --verify --deep --strict`
    - `xcrun stapler validate`
    - `spctl --assess`
-7. creates a final versioned zip from the stapled app
-8. optionally creates and notarizes a DMG
+8. creates a final versioned zip from the stapled app
+9. optionally creates and notarizes a DMG
+
+### Why the entitlement assertion exists
+
+`codesign --verify`, `stapler validate` and `spctl --assess` cannot detect a
+missing entitlement. The 1.29.6 build passed all three, was correctly signed and
+notarized, and still crashed instantly on launch: the bundled `bun` had the
+hardened runtime with no entitlements, so JavaScriptCore trapped in
+`pthread_jit_write_protect_np`. Only a readback of the signature catches this,
+which is why step 4 exists and why it runs before notarization rather than after.
+
+Note that the entitlement is applied to `Contents/MacOS/bun` by explicit path. A
+second, already-entitled `bun` is vendored under
+`Contents/Resources/app/gno-runtime/node_modules/@oven/`; it keeps its upstream
+Bun signature and is not executed at runtime. Never let a check match on the
+filename alone, or it will read that copy and report a false pass.
+
+`--deep` is deliberately absent from the signing calls. It re-signs nested code
+with the bundle's own entitlements and silently strips per-binary ones. It is
+retained on `--verify`, where it is correct.
+
+### Clean-runner launch check
+
+The credentialed macOS packaging job performs this check against the mounted,
+stapled DMG on a clean Apple Silicon runner. It is required before announcing a
+build:
+
+1. mount the stapled DMG and run the packaged app in self-test mode
+2. confirm it reaches `/api/status` and exits successfully rather than exiting
+   silently or timing out
+3. confirm no new `bun` crash report appeared in
+   `~/Library/Logs/DiagnosticReports/`
+
+The failure signature to recognize is process `bun`, `EXC_BREAKPOINT` /
+`SIGTRAP`, faulting frame `pthread_jit_write_protect_np`. From the user's side
+this looks like nothing happening at all: no dialog, no log, no error.
+
+If the app instead fails to load a bundled dylib, or dies with `SIGKILL (Code
+Signature Invalid)`, that is a different problem: those are the failure modes of
+an ad-hoc signature, not of a Developer ID one.
 
 Flags:
 

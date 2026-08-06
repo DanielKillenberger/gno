@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-01T10:40:38.902323Z",
+  "depends_on": [
+    "fn-116-macos-release-bundled-bun-signed.1"
+  ],
+  "id": "fn-116-macos-release-bundled-bun-signed.2",
+  "priority": null,
+  "spec": "fn-116-macos-release-bundled-bun-signed",
+  "spec_path": ".flow/tasks/fn-116-macos-release-bundled-bun-signed.2.md",
+  "status": "done",
+  "title": "Assert the JIT entitlement post-sign and fail the release before notarization",
+  "updated_at": "2026-08-01T10:56:55.118430Z"
+}
