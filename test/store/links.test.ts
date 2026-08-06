@@ -939,6 +939,40 @@ describe("SqliteAdapter links", () => {
   });
 
   describe("getGraph", () => {
+    test("collection graphs exclude resolved cross-collection edges without marking them unresolved", async () => {
+      const sourceId = await createTestDoc("notes", "source.md", "Source");
+      await createTestDoc("docs", "target.md", "Target");
+      await adapter.setDocLinks(
+        sourceId,
+        [
+          {
+            targetRef: "Target",
+            targetRefNorm: "target",
+            targetCollection: "docs",
+            linkType: "wiki",
+            startLine: 1,
+            startCol: 1,
+            endLine: 1,
+            endCol: 10,
+          },
+        ],
+        "parsed"
+      );
+
+      const scoped = await adapter.getGraph({
+        collection: "notes",
+        linkedOnly: false,
+      });
+      const unscoped = await adapter.getGraph();
+      expect(scoped.ok).toBe(true);
+      expect(unscoped.ok).toBe(true);
+      if (!scoped.ok || !unscoped.ok) return;
+
+      expect(scoped.value.links).toHaveLength(0);
+      expect(scoped.value.report.unresolvedLinks.total).toBe(0);
+      expect(unscoped.value.links).toHaveLength(1);
+    });
+
     test("reports hubs, bridge candidates, isolates, unresolved links, and edge breakdown", async () => {
       const hubId = await createTestDoc("notes", "hub.md", "Hub");
       const spokeAId = await createTestDoc("notes", "spoke-a.md", "Spoke A");

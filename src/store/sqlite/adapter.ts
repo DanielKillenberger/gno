@@ -128,11 +128,7 @@ import {
   classifyResolvedGraphEdge,
   mergeGraphEdgeAudit,
 } from "../../core/graph-edge-confidence";
-import {
-  buildWikiBestMatchSubquery,
-  buildWikiBestRankMatchCountSubquery,
-  buildWikiBestRankSubquery,
-} from "../../core/graph-resolver";
+import { buildWikiBestMatchSubquery } from "../../core/graph-resolver";
 import { buildContentPrefilterNeedles } from "../../core/link-relevance";
 import { normalizeWikiName, stripWikiMdExt } from "../../core/links";
 import {
@@ -179,6 +175,7 @@ import {
   getLatestFileRefactorReceiptByPlanDigest as getStoredLatestFileRefactorReceiptByPlanDigest,
 } from "./file-refactor-journal-store";
 import { loadFts5Snowball } from "./fts5-snowball";
+import { resolveGraphLinkTargets } from "./graph-link-resolver";
 import { queryGraphNeighborsForSeeds } from "./graph-neighbors";
 import {
   appendExportManifest as appendStoredTraceExportManifest,
@@ -4757,9 +4754,13 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         match_count: number | null;
       }
 
-      interface UnresolvedByTypeRow {
+      interface GraphLinkResolutionRow {
+        source_id: number;
+        source_docid: string;
+        source_collection: string;
+        target_ref_norm: string;
+        target_collection: string | null;
         link_type: "wiki" | "markdown";
-        unresolved: number;
       }
 
       interface NodeMetaRow {
@@ -4771,104 +4772,68 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
         rel_path: string;
       }
 
-      const edgeParams: string[] = [];
-      let edgeCollectionClause = "";
+      const linkParams: string[] = [];
+      let sourceCollectionClause = "";
       if (collection) {
-        edgeCollectionClause = "AND src.collection = ? AND tgt.collection = ?";
-        edgeParams.push(collection, collection);
+        sourceCollectionClause = "AND src.collection = ?";
+        linkParams.push(collection);
       }
 
-      const resolvedEdgeQuery = `
+      const graphLinkRows = db
+        .query<GraphLinkResolutionRow, string[]>(
+          `
         SELECT
           src.id as source_id,
           src.docid as source_docid,
-          tgt.id as target_id,
-          tgt.docid as target_docid,
-          dl.link_type,
-          CASE dl.link_type
-            WHEN 'wiki' THEN (${buildWikiBestRankSubquery(
-              "COALESCE(dl.target_collection, src.collection)",
-              "dl.target_ref_norm"
-            )})
-            WHEN 'markdown' THEN 5
-          END as match_rank,
-          CASE dl.link_type
-            WHEN 'wiki' THEN (${buildWikiBestRankMatchCountSubquery(
-              "COALESCE(dl.target_collection, src.collection)",
-              "dl.target_ref_norm"
-            )})
-            WHEN 'markdown' THEN 1
-          END as match_count
+          src.collection as source_collection,
+          dl.target_ref_norm,
+          dl.target_collection,
+          dl.link_type
         FROM documents src
         JOIN doc_links dl ON dl.source_doc_id = src.id
-        JOIN documents tgt ON tgt.id = CASE dl.link_type
-          WHEN 'wiki' THEN (${buildWikiBestMatchSubquery(
-            "COALESCE(dl.target_collection, src.collection)",
-            "dl.target_ref_norm"
-          )})
-          WHEN 'markdown' THEN (
-            SELECT md.id FROM documents md
-            WHERE md.active = 1
-              AND md.collection = COALESCE(dl.target_collection, src.collection)
-              AND md.rel_path = dl.target_ref_norm
-            ORDER BY md.id LIMIT 1
-          )
-        END
-        WHERE src.active = 1 AND tgt.active = 1
-          ${edgeCollectionClause}
-        ORDER BY src.id ASC, tgt.id ASC, dl.link_type ASC
-      `;
-
-      const resolvedEdgeRows = db
-        .query<ResolvedEdgeRow, string[]>(resolvedEdgeQuery)
-        .all(...edgeParams);
-
-      const unresolvedParams: string[] = [];
-      let unresolvedCollectionClause = "";
-      if (collection) {
-        unresolvedCollectionClause = "AND src.collection = ?";
-        unresolvedParams.push(collection);
-      }
-      const unresolvedQuery = `
-        SELECT
-          link_type,
-          COUNT(*) as unresolved
-        FROM (
-          SELECT
-            dl.link_type,
-            CASE dl.link_type
-              WHEN 'wiki' THEN (
-                ${buildWikiBestMatchSubquery(
-                  "COALESCE(dl.target_collection, src.collection)",
-                  "dl.target_ref_norm"
-                )}
-              )
-              WHEN 'markdown' THEN (
-                SELECT t.id FROM documents t
-                WHERE t.active = 1
-                  AND t.collection = COALESCE(dl.target_collection, src.collection)
-                  AND t.rel_path = dl.target_ref_norm
-                ORDER BY t.id LIMIT 1
-              )
-            END as target_id
-          FROM documents src
-          JOIN doc_links dl ON dl.source_doc_id = src.id
-          WHERE src.active = 1
-            ${unresolvedCollectionClause}
+        WHERE src.active = 1
+          ${sourceCollectionClause}
+        ORDER BY src.id ASC, dl.id ASC
+      `
         )
-        WHERE target_id IS NULL
-        GROUP BY link_type
-      `;
-      const unresolvedRows = db
-        .query<UnresolvedByTypeRow, string[]>(unresolvedQuery)
-        .all(...unresolvedParams);
+        .all(...linkParams);
+      const resolutions = resolveGraphLinkTargets(
+        db,
+        graphLinkRows.map((row) => ({
+          targetRefNorm: row.target_ref_norm,
+          targetCollection: row.target_collection ?? row.source_collection,
+          linkType: row.link_type,
+        }))
+      );
+      const resolvedEdgeRows: ResolvedEdgeRow[] = [];
       const unresolvedByType: Record<"wiki" | "markdown", number> = {
         wiki: 0,
         markdown: 0,
       };
-      for (const row of unresolvedRows) {
-        unresolvedByType[row.link_type] = row.unresolved;
+      for (const [index, row] of graphLinkRows.entries()) {
+        const resolution = resolutions[index];
+        if (!resolution) {
+          unresolvedByType[row.link_type] += 1;
+          continue;
+        }
+        const targetCollection = row.target_collection ?? row.source_collection;
+        if (collection && targetCollection !== collection) continue;
+        resolvedEdgeRows.push({
+          source_id: row.source_id,
+          source_docid: row.source_docid,
+          target_id: resolution.targetId,
+          target_docid: resolution.targetDocid,
+          link_type: row.link_type,
+          match_rank: resolution.matchRank,
+          match_count: resolution.matchCount,
+        });
       }
+      resolvedEdgeRows.sort(
+        (left, right) =>
+          left.source_id - right.source_id ||
+          left.target_id - right.target_id ||
+          left.link_type.localeCompare(right.link_type)
+      );
       const totalEdgesUnresolved =
         unresolvedByType.wiki + unresolvedByType.markdown;
 

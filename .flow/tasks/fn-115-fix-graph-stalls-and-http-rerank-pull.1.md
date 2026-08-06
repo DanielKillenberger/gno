@@ -10,9 +10,8 @@ Make models pull and Web UI pull lifecycle treat HTTP rerank endpoints as extern
 - HTTP and HTTPS rerank endpoints never call ModelCache isCached/getCachedPath/download, including force/all flows.\n- Result/formatting clearly reports an external-endpoint skip without a failure.\n- Local path, file:, and hf: model behavior remains unchanged; focused CLI and serve tests pass.\n- Specs/docs/changelog reflect the behavior.
 
 ## Done summary
-TBD
-
+HTTP(S) rerank endpoints now bypass cache/download paths and report a successful external-endpoint skip across CLI and resident Web model pulls. Updated CLI contract/docs and added HTTP/HTTPS plus all-model regressions.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: d68ee512
+- Tests: bun test test/cli/models-pull.test.ts test/serve/model-pull-lifecycle.test.ts, bun run lint:check, bun run docs:verify
 - PRs:
