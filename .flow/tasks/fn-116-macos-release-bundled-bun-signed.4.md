@@ -42,22 +42,18 @@ None. This task produces evidence, not code.
 
 
 ## Done summary
-Blocked:
-Blocked on credentials held only by the maintainer.
+Credentialed maintainer gate passed on GitHub Actions dry run 31134357270 for SHA f11df2a6273155367b814cc77d0a8757117f99b6 (package-macos-desktop job 92731599057, Apple Silicon macos-latest).
 
-This task requires the project's Developer ID signing certificate and notarytool
-credentials to produce a notarized build, and the `package-macos-desktop` CI job
-cannot supply them on a fork (it reads `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`,
-`KEYCHAIN_PASSWORD` and the three `APPLE_NOTARY_*` secrets from the `release`
-environment).
-
-It carries R6 and R7 deliberately, so fn-116 stays open after the code merges. The
-contributor verified everything that ad-hoc signing can verify; what remains is
-whether notarization still succeeds with `com.apple.security.cs.allow-jit` present
-and whether the stapled artifact launches on a clean Apple Silicon machine.
-
-Unblocks when a maintainer runs the credentialed release path.
+Exact path and evidence:
+- Trigger: gh api repos/gmickel/gno/actions/workflows/publish.yml/dispatches -f ref=main -f "inputs[publish]=false".
+- Developer ID identity: Developer ID Application: Gordon Mickel (435YLH52L5); notarytool credentials validated.
+- Signing gate: bundled Contents/MacOS/bun signed with the JIT entitlement; post-sign verification printed "JIT entitlement present, hardened runtime set" before notarization. The same assertion passed again after extracting the final stapled zip.
+- Gatekeeper/stapling: app and final zip were accepted with source=Notarized Developer ID; app and DMG staple validation succeeded.
+- DMG notarization submission: b3c74acf-4b42-4ee0-b0c9-e5ba3f8328a9; status Accepted at 2026-08-07T00:42:49Z.
+- Clean launch: CI mounted gno-desktop-beta-1.34.0.dmg read-only at a new temporary mount, initialized an isolated one-note GNO profile using the packaged Bun/runtime, and launched the mounted app with GNO_ELECTROBUN_SELFTEST=1. The app spawned packaged Bun, reported GNO server running at http://127.0.0.1:3927, completed the /api/status self-test path, shut down normally, and the job succeeded.
+- Crash gate: after normal exit the workflow scanned ~/Library/Logs/DiagnosticReports for new bun*.crash or bun*.ips files newer than its pre-launch marker. No report was found; otherwise the job would have failed.
+- Result: package-macos-desktop succeeded in 14m46s; whole publish=false workflow succeeded. allow-jit alone is sufficient; no broader entitlement was required.
 ## Evidence
-- Commits:
-- Tests:
-- PRs:
+- Commits: 695e7068, fa64560a, 1971d446, bc10313b, f11df2a6
+- Tests: GitHub Actions dry run 31134357270, package-macos-desktop job 92731599057: success, DMG notary submission b3c74acf-4b42-4ee0-b0c9-e5ba3f8328a9: Accepted, mounted-DMG GNO_ELECTROBUN_SELFTEST /api/status: success, no-new-Bun-crash-report gate: success
+- PRs: https://github.com/gmickel/gno/pull/177, https://github.com/gmickel/gno/actions/runs/31134357270
