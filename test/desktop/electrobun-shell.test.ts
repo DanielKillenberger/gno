@@ -45,8 +45,24 @@ describe("electrobun shell scaffold", () => {
     expect(config).toContain('".generated/gno-runtime"');
   });
 
-  test("signed macOS launch gate initializes a hermetic packaged profile", async () => {
+  test("bundled Bun carries both required hardened-runtime entitlements", async () => {
+    const entitlements = await Bun.file(
+      "desktop/electrobun-shell/macos/gno-desktop.entitlements"
+    ).text();
+    expect(entitlements).toContain("com.apple.security.cs.allow-jit");
+    expect(entitlements).toContain(
+      "com.apple.security.cs.disable-library-validation"
+    );
+  });
+
+  test("signed macOS launch gate exercises Homebrew SQLite in a hermetic profile", async () => {
     const workflow = await Bun.file(".github/workflows/publish.yml").text();
+    expect(workflow).toContain(
+      "Install Homebrew SQLite for signed-app compatibility test"
+    );
+    expect(workflow).toContain(
+      "test -f /opt/homebrew/opt/sqlite3/lib/libsqlite3.dylib"
+    );
     expect(workflow).toContain(
       'PACKAGED_GNO="$APP_PATH/Contents/Resources/app/gno-runtime/src/index.ts"'
     );

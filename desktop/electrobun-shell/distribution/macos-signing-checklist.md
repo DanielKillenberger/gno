@@ -30,11 +30,12 @@ What it does:
 1. builds the shell
 2. runs packaged-runtime verification
 3. signs the nested Mach-O binaries and then the `.app` with hardened runtime,
-   embedding `com.apple.security.cs.allow-jit` from
+   embedding `com.apple.security.cs.allow-jit` and
+   `com.apple.security.cs.disable-library-validation` from
    `desktop/electrobun-shell/macos/gno-desktop.entitlements` into
    `Contents/MacOS/bun`
 4. asserts, before notarization is submitted, that `Contents/MacOS/bun` carries
-   that entitlement set to `<true/>` and still has the hardened runtime flag
+   both entitlements set to `<true/>` and still has the hardened runtime flag
 5. submits a zip to `notarytool`
 6. staples the app
 7. validates with:
@@ -46,7 +47,7 @@ What it does:
 8. creates a final versioned zip from the stapled app
 9. optionally creates and notarizes a DMG
 
-### Why the entitlement assertion exists
+### Why the entitlement assertions exist
 
 `codesign --verify`, `stapler validate` and `spctl --assess` cannot detect a
 missing entitlement. The 1.29.6 build passed all three, was correctly signed and
@@ -54,6 +55,13 @@ notarized, and still crashed instantly on launch: the bundled `bun` had the
 hardened runtime with no entitlements, so JavaScriptCore trapped in
 `pthread_jit_write_protect_np`. Only a readback of the signature catches this,
 which is why step 4 exists and why it runs before notarization rather than after.
+
+GNO intentionally selects Homebrew SQLite on macOS because Apple's SQLite does
+not permit the native extensions used for vector search and stemming. Homebrew's
+library is signed under a different Team ID. Hardened-runtime library validation
+therefore rejects it unless the packaged Bun executable carries
+`com.apple.security.cs.disable-library-validation`. This entitlement is not
+applied to the app bundle, launcher, helper tools, or nested libraries.
 
 Note that the entitlement is applied to `Contents/MacOS/bun` by explicit path. A
 second, already-entitled `bun` is vendored under
@@ -67,9 +75,9 @@ retained on `--verify`, where it is correct.
 
 ### Clean-runner launch check
 
-The credentialed macOS packaging job performs this check against the mounted,
-stapled DMG on a clean Apple Silicon runner. It is required before announcing a
-build:
+The credentialed macOS packaging job installs Homebrew SQLite and performs this
+check against the mounted, stapled DMG on a clean Apple Silicon runner. It is
+required before announcing a build:
 
 1. mount the stapled DMG and run the packaged app in self-test mode
 2. confirm it reaches `/api/status` and exits successfully rather than exiting
@@ -81,9 +89,10 @@ The failure signature to recognize is process `bun`, `EXC_BREAKPOINT` /
 `SIGTRAP`, faulting frame `pthread_jit_write_protect_np`. From the user's side
 this looks like nothing happening at all: no dialog, no log, no error.
 
-If the app instead fails to load a bundled dylib, or dies with `SIGKILL (Code
-Signature Invalid)`, that is a different problem: those are the failure modes of
-an ad-hoc signature, not of a Developer ID one.
+If the app dies while loading `/opt/homebrew/opt/sqlite3/lib/libsqlite3.dylib`
+with a different-Team-ID library-validation error, the Bun entitlement was
+missing or stripped. A bundled dylib failure or `SIGKILL (Code Signature
+Invalid)` instead points to an invalid nested or ad-hoc signature.
 
 Flags:
 

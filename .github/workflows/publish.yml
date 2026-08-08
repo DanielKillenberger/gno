@@ -152,6 +152,11 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install Homebrew SQLite for signed-app compatibility test
+        run: |
+          brew install sqlite3
+          test -f /opt/homebrew/opt/sqlite3/lib/libsqlite3.dylib
+
       - name: Import Developer ID certificate
         env:
           APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
@@ -241,6 +246,7 @@ jobs:
           PACKAGED_GNO="$APP_PATH/Contents/Resources/app/gno-runtime/src/index.ts"
           test -x "$PACKAGED_BUN"
           test -f "$PACKAGED_GNO"
+          test -f /opt/homebrew/opt/sqlite3/lib/libsqlite3.dylib
           "$PACKAGED_BUN" "$PACKAGED_GNO" init "$NOTES_DIR" --name notes
 
           GNO_ELECTROBUN_SELFTEST=1 "$APP_EXECUTABLE" &

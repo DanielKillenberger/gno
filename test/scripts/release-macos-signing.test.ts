@@ -5,6 +5,7 @@ import {
   buildNestedSignArgv,
   bundledBunPath,
   classifyNestedSigningTargets,
+  hasDisabledLibraryValidation,
   hasHardenedRuntimeFlag,
   hasJitEntitlement,
   isPotentialSigningPath,
@@ -14,6 +15,8 @@ import {
 
 const APP = "/tmp/release/GNO Desktop Beta-dev.app";
 const JIT_KEY = "com.apple.security.cs.allow-jit";
+const LIBRARY_VALIDATION_KEY =
+  "com.apple.security.cs.disable-library-validation";
 const VENDORED_BUN = `${APP}/Contents/Resources/app/gno-runtime/node_modules/@oven/bun-darwin-aarch64/bin/bun`;
 
 function machO(path: string): SigningCandidate {
@@ -380,6 +383,27 @@ describe("hasJitEntitlement", () => {
     const xml = `<plist version="1.0"><dict><key>com.apple.security.cs.other</key><false/><key>things</key><array><string>x</string></array><key>${JIT_KEY}</key><true/></dict></plist>`;
 
     expect(hasJitEntitlement(xml)).toBe(true);
+  });
+});
+
+describe("hasDisabledLibraryValidation", () => {
+  test("passes only when disable-library-validation is true", () => {
+    const enabled = entitlementsPlist(
+      `  <key>${LIBRARY_VALIDATION_KEY}</key>\n  <true/>`
+    );
+    const disabled = entitlementsPlist(
+      `  <key>${LIBRARY_VALIDATION_KEY}</key>\n  <false/>`
+    );
+
+    expect(hasDisabledLibraryValidation(enabled)).toBe(true);
+    expect(hasDisabledLibraryValidation(disabled)).toBe(false);
+    expect(hasDisabledLibraryValidation("")).toBe(false);
+  });
+
+  test("does not accept allow-jit as a substitute", () => {
+    const xml = entitlementsPlist(`  <key>${JIT_KEY}</key>\n  <true/>`);
+
+    expect(hasDisabledLibraryValidation(xml)).toBe(false);
   });
 });
 

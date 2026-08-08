@@ -8,12 +8,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import shellConfig from "../electrobun.config";
 
 /**
- * The only entitlement the packaged app requires. Bun's JavaScriptCore calls
- * pthread_jit_write_protect_np, which traps with EXC_BREAKPOINT under the
- * hardened runtime unless the JIT entitlement is present. Verified sufficient
- * in isolation on a real artifact - do not widen this set.
+ * Runtime entitlements required by the packaged Bun executable. JavaScriptCore
+ * needs JIT permission under the hardened runtime. GNO also deliberately loads
+ * the user's Homebrew SQLite so native extensions work on macOS; that dylib has
+ * Homebrew's Team ID, so library validation must be disabled on this executable.
+ * Keep both entitlements scoped to Contents/MacOS/bun.
  */
 const JIT_ENTITLEMENT_KEY = "com.apple.security.cs.allow-jit";
+const LIBRARY_VALIDATION_ENTITLEMENT_KEY =
+  "com.apple.security.cs.disable-library-validation";
 
 type CliOptions = {
   appOnly: boolean;
@@ -366,6 +369,16 @@ export function hasJitEntitlement(entitlementsXml: string): boolean {
   return readEntitlementBoolean(entitlementsXml, JIT_ENTITLEMENT_KEY) === true;
 }
 
+/** True only when cross-Team-ID library loading is explicitly enabled. */
+export function hasDisabledLibraryValidation(entitlementsXml: string): boolean {
+  return (
+    readEntitlementBoolean(
+      entitlementsXml,
+      LIBRARY_VALIDATION_ENTITLEMENT_KEY
+    ) === true
+  );
+}
+
 /**
  * Detect the hardened-runtime CodeDirectory flag in `codesign -dvvv` output,
  * which reports e.g. `flags=0x10000(runtime)` on stderr. `codesign --verify`
@@ -388,7 +401,7 @@ export function hasHardenedRuntimeFlag(codesignOutput: string): boolean {
  */
 export function assertBundledBunHardening(appPath: string): void {
   const bunPath = bundledBunPath(appPath);
-  console.log(`>>> Asserting ${JIT_ENTITLEMENT_KEY} on ${bunPath}`);
+  console.log(`>>> Asserting required runtime entitlements on ${bunPath}`);
 
   const entitlements = runCommandCaptureBoth(
     ["codesign", "-d", "--entitlements", "-", "--xml", bunPath],
@@ -406,6 +419,12 @@ export function assertBundledBunHardening(appPath: string): void {
         `codesign -d --entitlements - --xml exited ${entitlements.exitCode} with stdout: ${JSON.stringify(entitlements.stdout)}`
     );
   }
+  if (!hasDisabledLibraryValidation(entitlements.stdout)) {
+    throw new Error(
+      `Entitlement gate failed for ${bunPath}: expected ${LIBRARY_VALIDATION_ENTITLEMENT_KEY} set to <true/>. ` +
+        `codesign -d --entitlements - --xml exited ${entitlements.exitCode} with stdout: ${JSON.stringify(entitlements.stdout)}`
+    );
+  }
 
   const display = runCommandCaptureBothChecked(
     ["codesign", "-dvvv", bunPath],
@@ -418,7 +437,9 @@ export function assertBundledBunHardening(appPath: string): void {
     );
   }
 
-  console.log(`>>> ${bunPath}: JIT entitlement present, hardened runtime set`);
+  console.log(
+    `>>> ${bunPath}: required runtime entitlements present, hardened runtime set`
+  );
 }
 
 async function findBuiltAppBundle(root: string): Promise<string> {
@@ -528,8 +549,8 @@ export function classifyNestedSigningTargets(
 
 /**
  * Pure argv builder for a nested-code signature. `entitlements` is passed only
- * for the binary that demonstrably needs the JIT entitlement; entitlements are
- * meaningless on dylibs and on the helper executables.
+ * for the Bun binary that needs JIT and cross-Team-ID Homebrew SQLite loading;
+ * entitlements are meaningless on dylibs and on the helper executables.
  */
 export function buildNestedSignArgv(
   target: string,
@@ -553,7 +574,7 @@ export function buildNestedSignArgv(
  * Pure argv builder for the final bundle seal.
  *
  * `--deep` is deliberately absent: it re-signs nested code with the bundle's
- * entitlement set, which strips the JIT entitlement applied above. Verified
+ * entitlement set, which strips the runtime entitlements applied above. Verified
  * empirically, and it matches Apple DTS guidance that `--deep` is a mistake for
  * anything but a quick local experiment.
  */
@@ -601,7 +622,7 @@ export async function signNestedBinaries(
     const entitlements = target === bunPath ? entitlementsPath : null;
     console.log(
       `>>> Signing nested executable ${target}${
-        entitlements ? " (with JIT entitlement)" : ""
+        entitlements ? " (with runtime entitlements)" : ""
       }`
     );
     runCommand(

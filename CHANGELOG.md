@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the notarized macOS desktop app failing before launch on developer Macs
+  with Homebrew SQLite installed. GNO intentionally loads Homebrew SQLite for
+  native extension support, but hardened-runtime library validation rejected
+  the library's different Team ID. The narrowly scoped bundled Bun runtime now
+  permits that load, and the credentialed mounted-DMG release test installs
+  Homebrew SQLite so this compatibility path cannot regress silently.
+
 ## [1.34.2] - 2026-08-07
 
 ### Fixed
