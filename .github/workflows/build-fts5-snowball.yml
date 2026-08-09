@@ -15,7 +15,7 @@ jobs:
           - os: macos-latest
             artifact: fts5stemmer.dylib
             platform: darwin-arm64
-          - os: macos-15
+          - os: macos-15-intel
             artifact: fts5stemmer.dylib
             platform: darwin-x64
           - os: windows-latest
@@ -30,6 +30,16 @@ jobs:
 
       - name: Clone fts5-snowball
         run: git clone --recursive https://github.com/abiliojr/fts5-snowball.git
+
+      - name: Verify build architecture
+        if: runner.os == 'macOS'
+        run: |
+          EXPECTED_ARCH=${{ matrix.platform == 'darwin-x64' && 'x86_64' || 'arm64' }}
+          ACTUAL_ARCH=$(uname -m)
+          test "$ACTUAL_ARCH" = "$EXPECTED_ARCH" || {
+            echo "Expected $EXPECTED_ARCH runner for ${{ matrix.platform }}, got $ACTUAL_ARCH"
+            exit 1
+          }
 
       # Linux build
       - name: Build (Linux)
@@ -79,6 +89,8 @@ jobs:
           cat Makefile
           make
           ls -la fts5stemmer.dylib
+          file fts5stemmer.dylib
+          file fts5stemmer.dylib | grep -q "${{ matrix.platform == 'darwin-x64' && 'x86_64' || 'arm64' }}"
 
       # Windows build (per gist emirotin/60bd3fb245b96e9fb1dd5069457c7991)
       - name: Setup MSYS2 (Windows)
