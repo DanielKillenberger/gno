@@ -8,6 +8,7 @@ import {
   hasDisabledLibraryValidation,
   hasHardenedRuntimeFlag,
   hasJitEntitlement,
+  hasUnsignedExecutableMemoryEntitlement,
   isPotentialSigningPath,
   readEntitlementBoolean,
   type SigningCandidate,
@@ -15,6 +16,8 @@ import {
 
 const APP = "/tmp/release/GNO Desktop Beta-dev.app";
 const JIT_KEY = "com.apple.security.cs.allow-jit";
+const UNSIGNED_EXECUTABLE_MEMORY_KEY =
+  "com.apple.security.cs.allow-unsigned-executable-memory";
 const LIBRARY_VALIDATION_KEY =
   "com.apple.security.cs.disable-library-validation";
 const VENDORED_BUN = `${APP}/Contents/Resources/app/gno-runtime/node_modules/@oven/bun-darwin-aarch64/bin/bun`;
@@ -404,6 +407,27 @@ describe("hasDisabledLibraryValidation", () => {
     const xml = entitlementsPlist(`  <key>${JIT_KEY}</key>\n  <true/>`);
 
     expect(hasDisabledLibraryValidation(xml)).toBe(false);
+  });
+});
+
+describe("hasUnsignedExecutableMemoryEntitlement", () => {
+  test("passes only when allow-unsigned-executable-memory is true", () => {
+    const enabled = entitlementsPlist(
+      `  <key>${UNSIGNED_EXECUTABLE_MEMORY_KEY}</key>\n  <true/>`
+    );
+    const disabled = entitlementsPlist(
+      `  <key>${UNSIGNED_EXECUTABLE_MEMORY_KEY}</key>\n  <false/>`
+    );
+
+    expect(hasUnsignedExecutableMemoryEntitlement(enabled)).toBe(true);
+    expect(hasUnsignedExecutableMemoryEntitlement(disabled)).toBe(false);
+    expect(hasUnsignedExecutableMemoryEntitlement("")).toBe(false);
+  });
+
+  test("does not accept allow-jit as a substitute", () => {
+    const xml = entitlementsPlist(`  <key>${JIT_KEY}</key>\n  <true/>`);
+
+    expect(hasUnsignedExecutableMemoryEntitlement(xml)).toBe(false);
   });
 });
 

@@ -30,12 +30,14 @@ What it does:
 1. builds the shell
 2. runs packaged-runtime verification
 3. signs the nested Mach-O binaries and then the `.app` with hardened runtime,
-   embedding `com.apple.security.cs.allow-jit` and
+   embedding `com.apple.security.cs.allow-jit`,
+   `com.apple.security.cs.allow-unsigned-executable-memory`, and
    `com.apple.security.cs.disable-library-validation` from
    `desktop/electrobun-shell/macos/gno-desktop.entitlements` into
    `Contents/MacOS/bun`
 4. asserts, before notarization is submitted, that `Contents/MacOS/bun` carries
-   both entitlements set to `<true/>` and still has the hardened runtime flag
+   all three entitlements set to `<true/>` and still has the hardened runtime
+   flag
 5. submits a zip to `notarytool`
 6. staples the app
 7. validates with:
@@ -55,6 +57,13 @@ notarized, and still crashed instantly on launch: the bundled `bun` had the
 hardened runtime with no entitlements, so JavaScriptCore trapped in
 `pthread_jit_write_protect_np`. Only a readback of the signature catches this,
 which is why step 4 exists and why it runs before notarization rather than after.
+
+macOS 27 also validates executable JIT pages created during Electrobun Worker
+startup. With `allow-jit` alone it kills Bun with `SIGKILL (Code Signature
+Invalid)`, termination namespace `CODESIGNING`, indicator `Invalid Page`.
+`com.apple.security.cs.allow-unsigned-executable-memory` is therefore required
+for the launched Bun/JSC process. It remains scoped to `Contents/MacOS/bun`; the
+app bundle, launcher, helper tools, and nested libraries do not receive it.
 
 GNO intentionally selects Homebrew SQLite on macOS because Apple's SQLite does
 not permit the native extensions used for vector search and stemming. Homebrew's
@@ -82,8 +91,9 @@ required before announcing a build:
 1. mount the stapled DMG and run the packaged app in self-test mode
 2. confirm it reaches `/api/status` and exits successfully rather than exiting
    silently or timing out
-3. confirm no new `bun` crash report appeared in
-   `~/Library/Logs/DiagnosticReports/`
+3. confirm no new visible or in-progress hidden `bun` crash report appeared in
+   either `~/Library/Logs/DiagnosticReports/` or
+   `/Library/Logs/DiagnosticReports/`
 
 The failure signature to recognize is process `bun`, `EXC_BREAKPOINT` /
 `SIGTRAP`, faulting frame `pthread_jit_write_protect_np`. From the user's side
@@ -91,8 +101,11 @@ this looks like nothing happening at all: no dialog, no log, no error.
 
 If the app dies while loading `/opt/homebrew/opt/sqlite3/lib/libsqlite3.dylib`
 with a different-Team-ID library-validation error, the Bun entitlement was
-missing or stripped. A bundled dylib failure or `SIGKILL (Code Signature
-Invalid)` instead points to an invalid nested or ad-hoc signature.
+missing or stripped. A `CODESIGNING / Invalid Page` kill in a generated
+executable-memory region points to a missing or stripped
+`allow-unsigned-executable-memory` entitlement. Other bundled-dylib or
+code-signature failures can still indicate an invalid nested or ad-hoc
+signature.
 
 Flags:
 

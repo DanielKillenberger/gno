@@ -274,11 +274,26 @@ jobs:
             exit "$APP_STATUS"
           fi
 
-          sleep 2
-          CRASH_DIR="$HOME/Library/Logs/DiagnosticReports"
-          if [[ -d "$CRASH_DIR" ]] && find "$CRASH_DIR" -type f \( -name 'bun*.crash' -o -name 'bun*.ips' \) -newer "$CRASH_MARKER" -print -quit | grep -q .; then
+          CRASH_DIRS=()
+          for CRASH_DIR in "$HOME/Library/Logs/DiagnosticReports" "/Library/Logs/DiagnosticReports"; do
+            if [[ -d "$CRASH_DIR" && -r "$CRASH_DIR" ]]; then
+              CRASH_DIRS+=("$CRASH_DIR")
+            fi
+          done
+
+          CRASH_REPORTS=""
+          for _attempt in $(seq 1 10); do
+            if [[ ${#CRASH_DIRS[@]} -gt 0 ]]; then
+              CRASH_REPORTS="$(find "${CRASH_DIRS[@]}" -maxdepth 1 -type f \( -name 'bun*.crash' -o -name 'bun*.ips' -o -name '.bun*.crash' -o -name '.bun*.ips' \) -newer "$CRASH_MARKER" -print 2>/dev/null || true)"
+            fi
+            if [[ -n "$CRASH_REPORTS" ]]; then
+              break
+            fi
+            sleep 1
+          done
+          if [[ -n "$CRASH_REPORTS" ]]; then
             echo "Signed desktop self-test produced a Bun crash report" >&2
-            find "$CRASH_DIR" -type f \( -name 'bun*.crash' -o -name 'bun*.ips' \) -newer "$CRASH_MARKER" -print
+            printf '%s\n' "$CRASH_REPORTS"
             exit 1
           fi
 

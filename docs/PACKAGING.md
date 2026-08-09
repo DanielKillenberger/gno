@@ -113,12 +113,14 @@ Why:
 - compatible with notarization/stapling flow
 - clearer support story than loose unsigned bundles
 
-The signed `.app` must carry `com.apple.security.cs.allow-jit` on the bundled
-Bun runtime. Bun's JavaScriptCore needs the JIT entitlement under the hardened
-runtime; without it the app is correctly signed, correctly notarized, and still
-crashes on launch. The release path asserts the entitlement after signing and
-before notarization is submitted, so a build that lost it cannot become a
-release artifact.
+The signed `.app` must carry `com.apple.security.cs.allow-jit` and
+`com.apple.security.cs.allow-unsigned-executable-memory` on the bundled Bun
+runtime. Bun's JavaScriptCore needs the JIT permissions under the hardened
+runtime; without them the app can be correctly signed and notarized while still
+crashing on launch. The executable-memory entitlement is required when
+Electrobun creates its Worker on macOS 27. The release path asserts both after
+signing and before notarization is submitted, so a build that lost either
+cannot become a release artifact.
 
 Allowed internal/manual artifact:
 
@@ -251,8 +253,9 @@ Desktop-specific proof:
 - `fts5-snowball` loads for the claimed platform/arch
 - `sqlite-vec` loads for the claimed platform/arch
 - basic indexing/search flow works in the packaged app
-- the signed `Contents/MacOS/bun` carries `com.apple.security.cs.allow-jit` and
-  the hardened-runtime flag, asserted post-sign and pre-notarization
+- the signed `Contents/MacOS/bun` carries `com.apple.security.cs.allow-jit`,
+  `com.apple.security.cs.allow-unsigned-executable-memory`, and the
+  hardened-runtime flag, asserted post-sign and pre-notarization
 - the stapled artifact launches in self-test mode from the mounted final DMG on
   a clean Apple Silicon release runner, reaches `/api/status`, exits cleanly,
   and produces no Bun crash report. Signature verification, stapler validation

@@ -9,12 +9,16 @@ import shellConfig from "../electrobun.config";
 
 /**
  * Runtime entitlements required by the packaged Bun executable. JavaScriptCore
- * needs JIT permission under the hardened runtime. GNO also deliberately loads
- * the user's Homebrew SQLite so native extensions work on macOS; that dylib has
- * Homebrew's Team ID, so library validation must be disabled on this executable.
- * Keep both entitlements scoped to Contents/MacOS/bun.
+ * needs JIT permission under the hardened runtime. Electrobun's Worker startup
+ * also executes generated Bun/JSC pages that macOS 27 otherwise kills as an
+ * invalid code-signing page. GNO deliberately loads the user's Homebrew SQLite
+ * so native extensions work on macOS; that dylib has Homebrew's Team ID, so
+ * library validation must be disabled on this executable. Keep all three
+ * entitlements scoped to Contents/MacOS/bun.
  */
 const JIT_ENTITLEMENT_KEY = "com.apple.security.cs.allow-jit";
+const UNSIGNED_EXECUTABLE_MEMORY_ENTITLEMENT_KEY =
+  "com.apple.security.cs.allow-unsigned-executable-memory";
 const LIBRARY_VALIDATION_ENTITLEMENT_KEY =
   "com.apple.security.cs.disable-library-validation";
 
@@ -369,6 +373,18 @@ export function hasJitEntitlement(entitlementsXml: string): boolean {
   return readEntitlementBoolean(entitlementsXml, JIT_ENTITLEMENT_KEY) === true;
 }
 
+/** True only when Bun/JSC generated executable pages are explicitly enabled. */
+export function hasUnsignedExecutableMemoryEntitlement(
+  entitlementsXml: string
+): boolean {
+  return (
+    readEntitlementBoolean(
+      entitlementsXml,
+      UNSIGNED_EXECUTABLE_MEMORY_ENTITLEMENT_KEY
+    ) === true
+  );
+}
+
 /** True only when cross-Team-ID library loading is explicitly enabled. */
 export function hasDisabledLibraryValidation(entitlementsXml: string): boolean {
   return (
@@ -416,6 +432,12 @@ export function assertBundledBunHardening(appPath: string): void {
   if (!hasJitEntitlement(entitlements.stdout)) {
     throw new Error(
       `Entitlement gate failed for ${bunPath}: expected ${JIT_ENTITLEMENT_KEY} set to <true/>. ` +
+        `codesign -d --entitlements - --xml exited ${entitlements.exitCode} with stdout: ${JSON.stringify(entitlements.stdout)}`
+    );
+  }
+  if (!hasUnsignedExecutableMemoryEntitlement(entitlements.stdout)) {
+    throw new Error(
+      `Entitlement gate failed for ${bunPath}: expected ${UNSIGNED_EXECUTABLE_MEMORY_ENTITLEMENT_KEY} set to <true/>. ` +
         `codesign -d --entitlements - --xml exited ${entitlements.exitCode} with stdout: ${JSON.stringify(entitlements.stdout)}`
     );
   }
@@ -549,8 +571,9 @@ export function classifyNestedSigningTargets(
 
 /**
  * Pure argv builder for a nested-code signature. `entitlements` is passed only
- * for the Bun binary that needs JIT and cross-Team-ID Homebrew SQLite loading;
- * entitlements are meaningless on dylibs and on the helper executables.
+ * for the Bun binary that needs JIT executable memory and cross-Team-ID
+ * Homebrew SQLite loading; entitlements are meaningless on dylibs and on the
+ * helper executables.
  */
 export function buildNestedSignArgv(
   target: string,

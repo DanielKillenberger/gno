@@ -64,10 +64,12 @@ Required before shipping a signed macOS beta:
 - release storage location for signed artifacts
 - the macOS entitlements file
   (`desktop/electrobun-shell/macos/gno-desktop.entitlements`), which grants the
-  bundled Bun runtime `com.apple.security.cs.allow-jit`. Without it the signed
-  app crashes on launch under the hardened runtime. The release path now asserts
-  this entitlement is present before notarization is submitted and fails the
-  build if it is not, so this is a gated requirement rather than a convention.
+  bundled Bun runtime `com.apple.security.cs.allow-jit` and
+  `com.apple.security.cs.allow-unsigned-executable-memory`. Without them the
+  signed app crashes on launch under the hardened runtime; macOS 27 specifically
+  kills Electrobun Worker startup as `CODESIGNING / Invalid Page` when the
+  executable-memory permission is absent. The release path asserts both before
+  notarization and fails the build if either is missing.
 - a clean-runner launch check after stapling. The credentialed packaging job
   mounts the final DMG, runs the packaged app self-test through `/api/status`,
   and rejects new Bun crash reports. Signing and notarization succeeding does

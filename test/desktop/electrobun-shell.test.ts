@@ -45,11 +45,14 @@ describe("electrobun shell scaffold", () => {
     expect(config).toContain('".generated/gno-runtime"');
   });
 
-  test("bundled Bun carries both required hardened-runtime entitlements", async () => {
+  test("bundled Bun carries all required hardened-runtime entitlements", async () => {
     const entitlements = await Bun.file(
       "desktop/electrobun-shell/macos/gno-desktop.entitlements"
     ).text();
     expect(entitlements).toContain("com.apple.security.cs.allow-jit");
+    expect(entitlements).toContain(
+      "com.apple.security.cs.allow-unsigned-executable-memory"
+    );
     expect(entitlements).toContain(
       "com.apple.security.cs.disable-library-validation"
     );
@@ -70,5 +73,7 @@ describe("electrobun shell scaffold", () => {
       '"$PACKAGED_BUN" "$PACKAGED_GNO" init "$NOTES_DIR" --name notes'
     );
     expect(workflow).toContain('GNO_ELECTROBUN_SELFTEST=1 "$APP_EXECUTABLE" &');
+    expect(workflow).toContain(".bun*.ips");
+    expect(workflow).toContain("/Library/Logs/DiagnosticReports");
   });
 });

@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the notarized macOS desktop app being killed during Electrobun Worker
+  startup on macOS 27 with `CODESIGNING / Invalid Page`. The bundled Bun now
+  receives narrowly scoped executable-memory permission in addition to its JIT
+  permission, and the release gate checks both user and system crash-report
+  directories, including reports still being written under hidden `.bun`
+  filenames. Thanks @DanielKillenberger for the original macOS launch report.
+
 ## [1.34.3] - 2026-08-09
 
 ### Fixed
