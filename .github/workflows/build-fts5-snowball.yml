@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Clone fts5-snowball
+        shell: bash
         run: |
           git clone https://github.com/abiliojr/fts5-snowball.git
           git -C fts5-snowball checkout "$FTS5_SNOWBALL_COMMIT"
