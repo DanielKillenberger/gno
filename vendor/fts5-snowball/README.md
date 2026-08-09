@@ -15,7 +15,11 @@ Prebuilt [fts5-snowball](https://github.com/abiliojr/fts5-snowball) SQLite exten
 
 Built via GitHub Actions: `.github/workflows/build-fts5-snowball.yml`
 
-Source: https://github.com/abiliojr/fts5-snowball (commit from main branch)
+Source: https://github.com/abiliojr/fts5-snowball at commit
+`f2a5450af5ce810cc3f981ff1ea8de2b4ff82a67`.
+
+The macOS build jobs verify the runner architecture, the emitted Mach-O
+architecture, and a real stemming query through Homebrew SQLite before upload.
 
 ## Supported Languages
 

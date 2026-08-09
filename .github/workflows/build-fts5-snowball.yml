@@ -1,5 +1,8 @@
 name: Build fts5-snowball
 
+env:
+  FTS5_SNOWBALL_COMMIT: f2a5450af5ce810cc3f981ff1ea8de2b4ff82a67
+
 on:
   workflow_dispatch:
 
@@ -29,7 +32,11 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Clone fts5-snowball
-        run: git clone --recursive https://github.com/abiliojr/fts5-snowball.git
+        run: |
+          git clone https://github.com/abiliojr/fts5-snowball.git
+          git -C fts5-snowball checkout "$FTS5_SNOWBALL_COMMIT"
+          git -C fts5-snowball submodule update --init --recursive
+          test "$(git -C fts5-snowball rev-parse HEAD)" = "$FTS5_SNOWBALL_COMMIT"
 
       - name: Verify build architecture
         if: runner.os == 'macOS'
@@ -58,6 +65,8 @@ jobs:
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
         run: |
           cd fts5-snowball
           # Patch Makefile for Homebrew paths (per issue #12)
@@ -91,6 +100,13 @@ jobs:
           ls -la fts5stemmer.dylib
           file fts5stemmer.dylib
           file fts5stemmer.dylib | grep -q "${{ matrix.platform == 'darwin-x64' && 'x86_64' || 'arm64' }}"
+          vtool -show-build fts5stemmer.dylib | grep -q 'minos 13.0'
+          "$SQLITE_PREFIX/bin/sqlite3" ':memory:' \
+            ".load ./fts5stemmer" \
+            "CREATE VIRTUAL TABLE docs USING fts5(content, tokenize='snowball english');" \
+            "INSERT INTO docs(content) VALUES ('running');" \
+            "SELECT CASE count(*) WHEN 1 THEN 'snowball-ok' ELSE 'snowball-failed' END FROM docs WHERE docs MATCH 'run';" \
+            | grep -q '^snowball-ok$'
 
       # Windows build (per gist emirotin/60bd3fb245b96e9fb1dd5069457c7991)
       - name: Setup MSYS2 (Windows)
