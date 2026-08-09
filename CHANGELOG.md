@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Replaced Windows' `more.com` fallback with an in-process pager that supports
+  backward scrolling and search without requiring an external binary. Thanks
+  @dawsonhuang0 for the report and suggested direction ([#160](https://github.com/gmickel/gno/issues/160)).
+
 ## [1.34.4] - 2026-08-09
 
 ### Fixed

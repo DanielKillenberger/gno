@@ -3496,16 +3496,16 @@ Error codes match exit codes: `VALIDATION` (exit 1), `RUNTIME` (exit 2), `NOT_RU
 
 ## Environment Variables
 
-| Variable                   | Description                                      |
-| -------------------------- | ------------------------------------------------ |
-| `GNO_CONFIG_DIR`           | Override config directory                        |
-| `GNO_DATA_DIR`             | Override data directory (DB location)            |
-| `GNO_CACHE_DIR`            | Override cache directory (models)                |
-| `NO_COLOR`                 | Disable colored output (standard)                |
-| `PAGER`                    | Pager for long output (default: less -R, more)   |
-| `GNO_SKILLS_HOME_OVERRIDE` | Override home dir for skill user scope (testing) |
-| `CLAUDE_SKILLS_DIR`        | Override Claude skills directory                 |
-| `CODEX_SKILLS_DIR`         | Override Codex skills directory                  |
+| Variable                   | Description                                                           |
+| -------------------------- | --------------------------------------------------------------------- |
+| `GNO_CONFIG_DIR`           | Override config directory                                             |
+| `GNO_DATA_DIR`             | Override data directory (DB location)                                 |
+| `GNO_CACHE_DIR`            | Override cache directory (models)                                     |
+| `NO_COLOR`                 | Disable colored output (standard)                                     |
+| `PAGER`                    | Pager for long output (default: less -R on Unix, built-in on Windows) |
+| `GNO_SKILLS_HOME_OVERRIDE` | Override home dir for skill user scope (testing)                      |
+| `CLAUDE_SKILLS_DIR`        | Override Claude skills directory                                      |
+| `CODEX_SKILLS_DIR`         | Override Codex skills directory                                       |
 
 ---
 

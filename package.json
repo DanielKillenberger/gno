@@ -176,6 +176,7 @@
     "embla-carousel-react": "8.6.0",
     "franc": "6.2.0",
     "jsonc-parser": "3.3.1",
+    "less-pager-mini": "1.12.1",
     "lucide-react": "1.28.0",
     "markitdown-ts": "0.0.10",
     "mdast-util-from-markdown": "2.0.3",

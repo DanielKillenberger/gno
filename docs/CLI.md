@@ -86,7 +86,7 @@ Case and canonically equivalent Unicode spellings share one NFC/case-folded
 identity. That identity may use at most 242 UTF-8 bytes, keeping the complete
 `index-<identity>.sqlite` filename within the portable 255-byte component limit.
 
-**Pager**: Long output is automatically piped through a pager when in terminal mode. Uses `$PAGER` if set, otherwise `less -R` (Unix) or `more` (Windows). Disable with `--no-pager`.
+**Pager**: Long output is automatically piped through a pager when in terminal mode. Uses `$PAGER` if set, otherwise `less -R` on Unix or GNO's in-process less-compatible pager on Windows. The Windows pager supports backward scrolling and search without requiring an external binary. Disable with `--no-pager`.
 
 **Offline mode**: Use `--offline` or set `HF_HUB_OFFLINE=1` to prevent auto-downloading models. Set `GNO_NO_AUTO_DOWNLOAD=1` to disable auto-download while still allowing explicit `gno models pull`.
 

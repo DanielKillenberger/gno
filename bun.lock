@@ -28,6 +28,7 @@
         "embla-carousel-react": "8.6.0",
         "franc": "6.2.0",
         "jsonc-parser": "3.3.1",
+        "less-pager-mini": "1.12.1",
         "lucide-react": "1.28.0",
         "markitdown-ts": "0.0.10",
         "mdast-util-from-markdown": "2.0.3",
@@ -968,6 +969,8 @@
 
     "chalk": ["chalk@5.6.2", "", {}, "sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA=="],
 
+    "char-width": ["char-width@1.0.0", "", {}, "sha512-d82CdiyM1U6MNtiUOu9bOTCqu95x3dFz9q3frXwe/1+YnavIDEiLryaD7cgYziGzcXqNU27x8kvJ7FAj8NthVg=="],
+
     "character-entities": ["character-entities@2.0.2", "", {}, "sha512-shx7oQ0Awen/BRIdkjkvz54PnEEI/EjwXDSIZp86/KKdbafHh1Df/RYGBhn4hbe2+uKC9FnT5UCEdyPz3ai9hQ=="],
 
     "character-entities-html4": ["character-entities-html4@2.1.0", "", {}, "sha512-1v7fgQRj6hnSwFpq1Eu0ynr/CDEw0rXo2B61qXrLNdHZmPKgb7fqS1a2JwF0rISo9q77jDI8VMEHoApn8qDoZA=="],
@@ -1489,6 +1492,8 @@
     "lefthook-windows-arm64": ["lefthook-windows-arm64@2.1.10", "", { "os": "win32", "cpu": "arm64" }, "sha512-5Q6etF0Fla2DDA4ilDySrdNgiR5+W7cJZwnZ69Je3kvWCaWm4wnkuc8FEdjp3kiL2x3ZXipdI00f5vpO8aWmog=="],
 
     "lefthook-windows-x64": ["lefthook-windows-x64@2.1.10", "", { "os": "win32", "cpu": "x64" }, "sha512-c/XH8YZtylG4XaxzqFfXluvq2LXq2W/p54Bnzn3+Z7E5X2Fk3JlFJAibulMbIt2+w8T7UI/r97ok5GqE4kGaeA=="],
+
+    "less-pager-mini": ["less-pager-mini@1.12.1", "", { "dependencies": { "char-width": "^1.0.0" }, "bin": { "lmn": "dist/cli.js" } }, "sha512-34lEVKkSRzFABGuJs0+STMLZKeAUkTvQRCMrzqCjPayOAQ095ybzzGxam7QV3p5e6+iQJ6fGjf62m8ROOq5/iA=="],
 
     "lie": ["lie@3.3.0", "", { "dependencies": { "immediate": "~3.0.5" } }, "sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ=="],
 

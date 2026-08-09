@@ -1,6 +1,6 @@
 /**
  * Pager utility for long CLI output.
- * Pipes output through less/more when terminal height exceeded.
+ * Pipes output through less or an in-process Windows pager when terminal height exceeded.
  *
  * @module src/cli/pager
  */
@@ -25,26 +25,32 @@ export interface PagerOptions {
 
 /**
  * Find available pager command.
- * Priority: $PAGER env → less (with -R for colors) → more
+ * Priority: $PAGER env → built-in Windows pager → less (with -R for colors)
  */
-function findPager(): string[] | null {
+export type PagerTarget =
+  | { kind: "external"; command: string[] }
+  | { kind: "internal" };
+
+export function findPager(
+  env: NodeJS.ProcessEnv = process.env,
+  platformName: NodeJS.Platform = platform()
+): PagerTarget {
   // Check $PAGER env first (cross-platform)
-  const pagerEnv = process.env.PAGER;
+  const pagerEnv = env.PAGER;
   if (pagerEnv) {
     // Split in case user has args like "less -R"
-    return pagerEnv.split(/\s+/);
+    return { kind: "external", command: pagerEnv.split(/\s+/) };
   }
 
   // Platform-specific fallbacks
-  const isWindows = platform() === "win32";
+  const isWindows = platformName === "win32";
 
   if (isWindows) {
-    // Windows: use more.com (basic but universally available)
-    return ["more.com"];
+    return { kind: "internal" };
   }
 
   // Unix: prefer less with -R (preserve ANSI colors)
-  return ["less", "-R"];
+  return { kind: "external", command: ["less", "-R"] };
 }
 
 /**
@@ -136,15 +142,24 @@ export class Pager {
     }
 
     // Try to spawn pager
-    const pagerCmd = findPager();
-    if (!pagerCmd) {
-      // No pager available, write directly
-      process.stdout.write(content + "\n");
+    const pagerTarget = findPager();
+    if (pagerTarget.kind === "internal") {
+      await this.runInProcessPager(content);
       return;
     }
 
     // Spawn pager and pipe content
-    await this.spawnPager(pagerCmd, content);
+    await this.spawnPager(pagerTarget.command, content);
+  }
+
+  /** Use a less-compatible terminal UI on Windows without an external binary. */
+  private async runInProcessPager(content: string): Promise<void> {
+    try {
+      const { default: pager } = await import("less-pager-mini");
+      await pager(content, { LESS: "-R" });
+    } catch {
+      process.stdout.write(content + "\n");
+    }
   }
 
   /**
