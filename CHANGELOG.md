@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced Windows' `more.com` fallback with an in-process pager that supports
   backward scrolling and search without requiring an external binary. Thanks
   @dawsonhuang0 for the report and suggested direction ([#160](https://github.com/gmickel/gno/issues/160)).
+- Fixed the vendored `darwin-x64` FTS5 Snowball extension being an ARM64 binary,
+  which prevented stemming from loading on Intel Macs. The reproducible build
+  now uses an explicit Intel runner and verifies the architecture plus a real
+  stemming query before upload. Thanks @miaogaolin for the report and diagnosis
+  ([#110](https://github.com/gmickel/gno/issues/110)).
 
 ## [1.34.4] - 2026-08-09
 

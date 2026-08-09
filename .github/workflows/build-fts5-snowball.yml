@@ -67,7 +67,7 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         env:
-          MACOSX_DEPLOYMENT_TARGET: '13.0'
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: |
           cd fts5-snowball
           # Patch Makefile for Homebrew paths (per issue #12)
