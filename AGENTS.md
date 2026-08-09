@@ -461,12 +461,12 @@ Work is NOT complete until pushed to remote.
 <!-- BEGIN FLOW-NEXT -->
 ## Flow-Next
 
-This project uses Flow-Next. Use `.flow/bin/flowctl` for ALL task tracking. Do NOT create markdown TODOs or use TodoWrite. Re-anchor (re-read spec + task status) before every task.
+This project uses Flow-Next. Use `.flow/bin/flowctl` for ALL task tracking. Do NOT create markdown TODOs or use TodoWrite. Cold session: `.flow/bin/flowctl brief` first — one bounded call (specs, ready tasks, memory); go deeper with `show`/`cat`/`anchor <task-id>`.
 
 ```bash
-.flow/bin/flowctl list # specs + tasks
-.flow/bin/flowctl show fn-N.M # view task
-.flow/bin/flowctl start fn-N.M # claim -> implement -> commit
+.flow/bin/flowctl list                # specs + tasks
+.flow/bin/flowctl show fn-N.M         # view task
+.flow/bin/flowctl start fn-N.M        # claim -> implement -> commit
 .flow/bin/flowctl done fn-N.M --summary-file s.md --evidence-json e.json
 # e.json: {"commits": ["<sha>"], "tests": ["<command>"], "prs": []}
 ```
@@ -474,8 +474,7 @@ This project uses Flow-Next. Use `.flow/bin/flowctl` for ALL task tracking. Do N
 **Creating a spec:** write it directly - do NOT use `$flow-next-plan` (task breakdown only). Scaffold cascade (first match wins): `SPEC.md` -> `spec.md` -> `.flow/templates/spec.md` -> bundled template.
 
 ```bash
-.flow/bin/flowctl spec create --title "Short title" --json
-.flow/bin/flowctl spec set-plan <spec-id> --file plan.md
+.flow/bin/flowctl spec create --title "Short title" --plan-file plan.md --json
 ```
 
 Then `$flow-next-plan <spec-id>`.

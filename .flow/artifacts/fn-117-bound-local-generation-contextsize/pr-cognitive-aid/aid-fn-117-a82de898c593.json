@@ -1,0 +1,288 @@
+{
+  "artifactId": "aid-fn-117-a82de898c593",
+  "baseSha": "f9e4effd28e67239156eb863f18be938ec2cab4e",
+  "changeWalkthrough": {
+    "groups": [
+      {
+        "files": [],
+        "kind": "problem",
+        "ordinal": 1,
+        "rIds": [],
+        "sourceRefs": [
+          "s-spec"
+        ],
+        "summary": "Local GGUF generation never passed contextSize to createContext, so node-llama-cpp's \"auto\" default grew the KV cache to fill available VRAM up to the model's trained context length — OOM on small GPUs (issue #189, ~2.5 GB overhead beyond a 2.4 GB model on an 8 GB card). Grounded answers and claim verification were both unbounded; expansion and embedding were already capped.",
+        "taskIds": [],
+        "title": "Unbounded VRAM growth in local generation"
+      },
+      {
+        "files": [
+          {
+            "additions": 31,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 3,
+            "path": "src/llm/nodeLlamaCpp/generation.ts",
+            "rIds": [
+              "R1",
+              "R2",
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-r2",
+              "s-r3",
+              "s-task1"
+            ],
+            "summary": "Adds resolveGenContextSize and wires it into generate(); createContext no longer receives undefined.",
+            "taskIds": [
+              "fn-117-bound-local-generation-contextsize.1"
+            ]
+          }
+        ],
+        "kind": "step",
+        "ordinal": 2,
+        "rIds": [
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "sourceRefs": [
+          "s-r1",
+          "s-r2",
+          "s-r3",
+          "s-task1",
+          "s-c1"
+        ],
+        "summary": "resolveGenContextSize computes prompt tokens + output budget + 512-token margin, floors at 1024, and caps at the model's trained context size; generate() now always passes an explicit contextSize. Explicit caller-supplied sizes (expansion path) keep prior behavior.",
+        "taskIds": [
+          "fn-117-bound-local-generation-contextsize.1"
+        ],
+        "title": "Bound the generation context to actual need"
+      },
+      {
+        "files": [
+          {
+            "additions": 57,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/llm/node-generation-context-size.test.ts",
+            "rIds": [
+              "R4"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r4",
+              "s-task1"
+            ],
+            "summary": "New unit suite covering resolveGenContextSize bounds.",
+            "taskIds": [
+              "fn-117-bound-local-generation-contextsize.1"
+            ]
+          }
+        ],
+        "kind": "step",
+        "ordinal": 3,
+        "rIds": [
+          "R4"
+        ],
+        "sourceRefs": [
+          "s-r4",
+          "s-task1",
+          "s-c1"
+        ],
+        "summary": "Five cases pin the resolver: margin math, the 1024 floor, the trained-context cap, and unknown or non-positive trained sizes.",
+        "taskIds": [
+          "fn-117-bound-local-generation-contextsize.1"
+        ],
+        "title": "Regression tests for the sizing resolver"
+      },
+      {
+        "files": [
+          {
+            "additions": 7,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "CHANGELOG.md",
+            "rIds": [
+              "R5"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r5",
+              "s-task1"
+            ],
+            "summary": "Fixed entry for the unbounded generation contextSize.",
+            "taskIds": [
+              "fn-117-bound-local-generation-contextsize.1"
+            ]
+          },
+          {
+            "additions": 6,
+            "attentionClass": "mechanical",
+            "changeType": "copied",
+            "deletions": 6,
+            "path": ".flow/specs/fn-117-bound-local-generation-contextsize.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow spec record.",
+            "taskIds": []
+          },
+          {
+            "additions": 71,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/specs/fn-117-bound-local-generation-contextsize.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow spec markdown.",
+            "taskIds": []
+          },
+          {
+            "additions": 14,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-117-bound-local-generation-contextsize.1.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task record.",
+            "taskIds": []
+          },
+          {
+            "additions": 35,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-117-bound-local-generation-contextsize.1.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task markdown.",
+            "taskIds": []
+          }
+        ],
+        "kind": "step",
+        "ordinal": 4,
+        "rIds": [
+          "R5"
+        ],
+        "sourceRefs": [
+          "s-r5",
+          "s-task1",
+          "s-c1"
+        ],
+        "summary": "CHANGELOG [Unreleased] entry credits @fightp86 and links issue #189; the remaining files are flow-next spec/task records for this change.",
+        "taskIds": [
+          "fn-117-bound-local-generation-contextsize.1"
+        ],
+        "title": "Changelog and flow-next state"
+      },
+      {
+        "files": [],
+        "kind": "verify",
+        "ordinal": 5,
+        "rIds": [],
+        "sourceRefs": [
+          "s-task1"
+        ],
+        "summary": "bun test green (4034 pass / 0 fail) and bun run lint:check clean (type-aware) per the task evidence.",
+        "taskIds": [
+          "fn-117-bound-local-generation-contextsize.1"
+        ],
+        "title": "Verification"
+      }
+    ],
+    "proof": [
+      {
+        "label": "Tests",
+        "sourceRefs": [
+          "s-task1"
+        ],
+        "value": "bun test — 4034 pass / 0 fail"
+      },
+      {
+        "label": "Lint",
+        "sourceRefs": [
+          "s-task1"
+        ],
+        "value": "bun run lint:check clean (type-aware)"
+      },
+      {
+        "label": "R-ID coverage",
+        "sourceRefs": [
+          "s-task1",
+          "s-r1",
+          "s-r2",
+          "s-r3",
+          "s-r4",
+          "s-r5"
+        ],
+        "value": "5/5 acceptance criteria satisfied by fn-117-bound-local-generation-contextsize.1"
+      }
+    ],
+    "thesis": "Local GGUF generation now sizes its node-llama-cpp context to the actual prompt plus output budget (capped at the trained context size) instead of the VRAM-filling \"auto\" default, fixing OOM on small GPUs (issue #189)."
+  },
+  "generatedAt": "2026-08-07T20:29:52Z",
+  "headSha": "a82de898c593201f0be259dbd8da9f4f59583fee",
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "s-spec",
+      "kind": "spec",
+      "ref": "fn-117-bound-local-generation-contextsize"
+    },
+    {
+      "id": "s-task1",
+      "kind": "task",
+      "ref": "fn-117-bound-local-generation-contextsize.1"
+    },
+    {
+      "id": "s-r1",
+      "kind": "rid",
+      "ref": "R1"
+    },
+    {
+      "id": "s-r2",
+      "kind": "rid",
+      "ref": "R2"
+    },
+    {
+      "id": "s-r3",
+      "kind": "rid",
+      "ref": "R3"
+    },
+    {
+      "id": "s-r4",
+      "kind": "rid",
+      "ref": "R4"
+    },
+    {
+      "id": "s-r5",
+      "kind": "rid",
+      "ref": "R5"
+    },
+    {
+      "id": "s-diff",
+      "kind": "diff_metadata",
+      "ref": "f9e4effd28e67239156eb863f18be938ec2cab4e..a82de898c593201f0be259dbd8da9f4f59583fee"
+    },
+    {
+      "id": "s-c1",
+      "kind": "commit",
+      "ref": "b578db5661ba56f41eec6fbea725de17acb6be4e"
+    }
+  ],
+  "specId": "fn-117-bound-local-generation-contextsize"
+}

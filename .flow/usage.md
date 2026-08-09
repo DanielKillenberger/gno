@@ -22,7 +22,7 @@ Task tracking for AI agents. All state lives in `.flow/`.
 
 ## Chart (optional pre-capture discovery)
 
-One oversized/unclear idea; one decision (`<chart-id>.D<n>`) per invocation; never a pilot stage. `chart frontier` is the sole work-mode selection input; `chart claim` then `chart resolve --answer-file` close it; every work invocation ends with one greppable `CHART_VERDICT=...` line. Chart never writes specs; capture ingests the briefing.
+One oversized/unclear idea whose **destination is nameable but route is not** (a direction like "make X more Y" is refused - narrow it or run prospect); one decision (`<chart-id>.D<n>`) per invocation; never a pilot stage. `chart frontier` is the sole work-mode selection input; `chart claim` then `chart resolve --answer-file` close it; every work invocation ends with one greppable `CHART_VERDICT=...` line. Chart never writes specs; capture ingests the briefing.
 
 ## Common Commands
 
@@ -32,9 +32,10 @@ The typical flow. Everything else (deps, block/reset, memory, glossary, config, 
 .flow/bin/flowctl list                          # all specs + tasks grouped
 .flow/bin/flowctl show fn-1-add-oauth.2         # spec or task detail (cat for raw markdown)
 .flow/bin/flowctl ready --spec fn-1-add-oauth   # tasks ready to work on
-.flow/bin/flowctl spec create --title "..." --branch fn-1-add-oauth --json
-.flow/bin/flowctl spec set-plan fn-1-add-oauth --file plan.md
-.flow/bin/flowctl task create --spec fn-1-add-oauth --title "..." --deps fn-1-add-oauth.1 --description-file d.md --acceptance-file a.md --satisfies R1,R3
+.flow/bin/flowctl spec create --title "..." --plan-file plan.md --json
+.flow/bin/flowctl task create --spec fn-1-add-oauth --from-json tasks.json
+# tasks.json: [{"title":"...","satisfies":["R1"]},{"title":"...","deps":[1]}]
+# edit: set-description/set-acceptance/set-spec, set-plan
 .flow/bin/flowctl start fn-1-add-oauth.2        # claim task
 .flow/bin/flowctl done fn-1-add-oauth.2 --summary-file s.md --evidence-json e.json
 .flow/bin/flowctl task reset fn-1-add-oauth.2   # back to todo
@@ -83,7 +84,7 @@ Harness-relative: every direction works — from Claude Code the bridges are `co
 
 **Cursor host** — agent-frontmatter tiering is ignored on Cursor; orchestration lives in AGENTS.md + caller-side pins (setup scaffolds both). Distinct from the headless `cursor` CLI backend below.
 
-- **Pin grammar:** Cursor slugs (e.g. `claude-opus-5-thinking-high`, `gpt-5.6-sol-high`); bracket params where the host accepts them. Slugs are volatile — enumerate via host catalog or `cursor-agent --list-models`; re-run `$flow-next-setup` to refresh.
+- **Pin grammar:** Cursor slugs (e.g. `claude-opus-5-thinking-high`, `gpt-5.6-sol-high`); bracket params where the host accepts them. Slugs are volatile — enumerate via host catalog or `cursor-agent --list-models`; re-run `/flow-next:setup` to refresh.
 - **Tier degrade:** `agents/*.md` family aliases (`haiku`/`sonnet`/`opus`) resolve to **inherit** (session model) on Cursor; no alias-to-slug rewrite exists or is planned. Caller-side pins are the escape hatch.
 - **`review.backend host`:** bare only (`host:<model>` rejected). Pins live in the AGENTS.md model-routing section — **not** on the backend string. Host-native fresh-context subagent; preferred from inside Cursor.
 - **≠ `cursor` CLI backend:** `review.backend cursor:…` / `cursor-agent` is a separate headless subprocess path (multi-family reach from outside Cursor; circular from inside).
@@ -92,7 +93,7 @@ Harness-relative: every direction works — from Claude Code the bridges are `co
 ```bash
 # In-session impl + host review (cross-family pin from AGENTS.md model-routing)
 .flow/bin/flowctl config set review.backend host     # or per-run: --review=host
-# $flow-next-work fn-12  → session implements; host review pins e.g. gpt-5.6-sol-high when writer is Claude-family
+# /flow-next:work fn-12  → session implements; host review pins e.g. gpt-5.6-sol-high when writer is Claude-family
 
 # Bridges FROM a Cursor host (same recipes as above, reverse direction)
 claude -p "<self-contained prompt>" --output-format text --allowedTools "Read,Bash" </dev/null
@@ -106,7 +107,7 @@ codex exec -s read-only --skip-git-repo-check "<prompt>" </dev/null
 # bridge with deterministic rails for unattended loops; its task and spec paths are the brief.
 # Delegate implementation to codex (host keeps gating/git/review; codex only writes code)
 .flow/bin/flowctl config set work.delegate codex     # value MUST be `codex` to activate (OFF by default, consent-gated)
-# …or per-run, no config:  $flow-next-work fn-1-add-oauth delegate:codex
+# …or per-run, no config:  /flow-next:work fn-1-add-oauth delegate:codex
 # Steer the delegate: work.delegateModel (default gpt-5.6-terra, passed as -m) +
 # work.delegateEffort (default medium, passed as -c model_reasoning_effort=)
 
@@ -121,7 +122,7 @@ codex exec -s read-only --skip-git-repo-check "<prompt>" </dev/null
 Work the ready specs — decide per spec by complexity: auth/migration tasks you
 implement yourself; plain CRUD is delegated (delegate:codex). Reviews from codex either way.
 
-Run $flow-next-work fn-12 with delegate:codex. If a task's review comes back
+Run /flow-next:work fn-12 with delegate:codex. If a task's review comes back
 NEEDS_WORK twice, stop delegating it and implement it yourself on the session model.
 ```
 

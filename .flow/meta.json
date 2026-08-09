@@ -3,10 +3,12 @@
   "schema_version": 3,
   "setup": {
     "block_hashes": {
-      "AGENTS.md": "74478984dade77a42ef78a359bd8f4253370636644f82ba2a36b818b8301c568"
+      "AGENTS.md": {
+        "FLOW-NEXT": "1291cae0261f60a298b1c2ac8ebd32b98aa494c5fb7e88806b22ebf517f6eb48"
+      }
     }
   },
-  "setup_date": "2026-08-05T09:10:10Z",
+  "setup_date": "2026-08-09T14:11:43Z",
   "setup_mode": "copy",
-  "setup_version": "3.15.1"
+  "setup_version": "3.22.0"
 }
