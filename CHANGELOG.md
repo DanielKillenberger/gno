@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.34.4] - 2026-08-09
+
+### Fixed
+
 - Fixed the notarized macOS desktop app being killed during Electrobun Worker
   startup on macOS 27 with `CODESIGNING / Invalid Page`. The bundled Bun now
   receives narrowly scoped executable-memory permission in addition to its JIT
@@ -2157,7 +2161,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.34.3...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.34.4...HEAD
+[1.34.4]: https://github.com/gmickel/gno/compare/v1.34.3...v1.34.4
 [1.34.3]: https://github.com/gmickel/gno/compare/v1.34.2...v1.34.3
 [1.34.2]: https://github.com/gmickel/gno/compare/v1.34.1...v1.34.2
 [1.34.1]: https://github.com/gmickel/gno/compare/v1.34.0...v1.34.1
