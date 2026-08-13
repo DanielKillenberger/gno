@@ -24,6 +24,13 @@ import type {
 // Error Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Fixed service default maximum for watcher active source-path queries.
+ * Callers (watcher fallback later) pass this explicitly; methods never invent
+ * an unbounded success path.
+ */
+export const WATCHER_ACTIVE_SOURCE_PATH_MAX = 100_000;
+
 /** Store error codes */
 export type StoreErrorCode =
   | "NOT_FOUND"
@@ -38,6 +45,8 @@ export type StoreErrorCode =
   | "IO_ERROR"
   | "INTERNAL"
   | "EGRESS_DENIED"
+  /** Result set exceeded the caller-supplied positive maximum (never truncated). */
+  | "OVERFLOW"
   // Vector-specific error codes (EPIC 7)
   | "VECTOR_WRITE_FAILED"
   | "VECTOR_DELETE_FAILED"
@@ -1687,6 +1696,63 @@ export interface StorePort {
     collection: string,
     sourcePath: string
   ): Promise<StoreResult<DocumentRow[]>>;
+
+  /**
+   * List distinct effective source paths of ACTIVE documents that are direct
+   * children of `dirRelPath` within `collection`.
+   *
+   * Effective source path is `COALESCE(NULLIF(record_source_path, ''), rel_path)`
+   * so record-container logical documents resolve to their physical container
+   * path. Deeper descendants, inactive rows, and other collections are excluded.
+   *
+   * `dirRelPath` is collection-relative and POSIX-style; the collection root is
+   * `""`. Paths that escape the collection root are rejected with
+   * `INVALID_INPUT`. An empty successful result is distinct from query failure.
+   *
+   * `max` must be a positive integer (see `WATCHER_ACTIVE_SOURCE_PATH_MAX` for
+   * the fixed service default the watcher will pass). Matching rows beyond
+   * `max` yield `OVERFLOW` — never a truncated successful list.
+   */
+  listActiveDirectChildSourcePaths(
+    collection: string,
+    dirRelPath: string,
+    max: number
+  ): Promise<StoreResult<string[]>>;
+
+  /**
+   * List distinct effective source paths of ACTIVE documents anywhere beneath
+   * `dirRelPath` (direct children and deeper descendants).
+   *
+   * Used when a directory is gone from disk so the whole removed subtree can be
+   * reconciled. Prefix containment is exact (`dir1` never matches `dir10/x.md`).
+   *
+   * `dirRelPath` must name a directory below the collection root: `""` is
+   * rejected with `INVALID_INPUT` because a root-wide scan is intentionally out
+   * of scope for this bounded seam. Escaping paths are also `INVALID_INPUT`.
+   *
+   * `max` must be a positive integer (see `WATCHER_ACTIVE_SOURCE_PATH_MAX` for
+   * the fixed service default the watcher will pass). Matching rows beyond
+   * `max` yield `OVERFLOW` — never a truncated successful list.
+   */
+  listActiveDescendantSourcePaths(
+    collection: string,
+    dirRelPath: string,
+    max: number
+  ): Promise<StoreResult<string[]>>;
+
+  /**
+   * Root-wide bounded DISTINCT active physical source paths for one collection.
+   *
+   * Effective source path is `COALESCE(NULLIF(record_source_path, ''), rel_path)`.
+   * Overflow is decided after DISTINCT collapse (`LIMIT max+1`), never on raw
+   * logical document row counts. Inactive rows and other collections are excluded.
+   * Results are ordered ascending. Matching unique sources beyond `max` yield
+   * `OVERFLOW` — never a truncated successful list.
+   */
+  listActiveSourcePaths(
+    collection: string,
+    max: number
+  ): Promise<StoreResult<string[]>>;
 
   /**
    * Fetch documents by mirror hashes in batch.
