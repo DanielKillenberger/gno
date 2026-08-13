@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.34.6] - 2026-08-14
+
+### Fixed
+
 - Fixed resident indexing after atomic saves, recursive directory deletions,
   same-size edits with restored mtimes, and other ambiguous filesystem events.
   Exact eligible paths still receive content-hash synchronization; bounded,
@@ -2182,7 +2186,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.34.5...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.34.6...HEAD
+[1.34.6]: https://github.com/gmickel/gno/compare/v1.34.5...v1.34.6
 [1.34.5]: https://github.com/gmickel/gno/compare/v1.34.4...v1.34.5
 [1.34.4]: https://github.com/gmickel/gno/compare/v1.34.3...v1.34.4
 [1.34.3]: https://github.com/gmickel/gno/compare/v1.34.2...v1.34.3
