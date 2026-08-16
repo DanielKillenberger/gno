@@ -1,0 +1,1221 @@
+{
+  "artifactId": "aid-fn-118-5f3fcc52dbff-v2",
+  "baseSha": "575a1425b671861ff7139b3abd91bfa44aad595c",
+  "changeWalkthrough": {
+    "groups": [
+      {
+        "files": [],
+        "kind": "problem",
+        "ordinal": 1,
+        "rIds": [],
+        "sourceRefs": [
+          "s-spec"
+        ],
+        "summary": "Broad cloud-backed collections could make scheduled indexing act like an implicit sync job because source availability was not separate from egress policy.",
+        "taskIds": [],
+        "title": "Cloud placeholders caused implicit source downloads"
+      },
+      {
+        "files": [
+          {
+            "additions": 136,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/2026-08-16-macos-smoke.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 48,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/evidence/2026-08-16-environment.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 166,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/evidence/2026-08-16-onedrive-libraries.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 266,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/evidence/2026-08-16-performance.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 231,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/evidence/2026-08-16-post-implementation-performance.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 94,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/evidence/2026-08-16-production-regression.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 205,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "research/file-provider/evidence/2026-08-16-provider-matrix.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 129,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "scripts/macos-file-provider-benchmark-stats.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 642,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "scripts/macos-file-provider-smoke-benchmark.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 505,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "scripts/macos-file-provider-smoke-lib.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 388,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "scripts/macos-file-provider-smoke-ops.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 405,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "scripts/macos-file-provider-smoke.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 623,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/scripts/macos-file-provider-smoke.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          }
+        ],
+        "kind": "step",
+        "ordinal": 2,
+        "rIds": [
+          "R1",
+          "R6"
+        ],
+        "sourceRefs": [
+          "s-r1",
+          "s-r6",
+          "s-task1",
+          "s-task5"
+        ],
+        "summary": "A bounded smoke and benchmark harness records provider state without reading existing user content; physical fixtures cover Google Drive, iCloud Drive, and two OneDrive SharePoint libraries.",
+        "taskIds": [
+          "fn-118-cloud-placeholder-safe-indexing.1",
+          "fn-118-cloud-placeholder-safe-indexing.5"
+        ],
+        "title": "Prove macOS File Provider behavior"
+      },
+      {
+        "files": [
+          {
+            "additions": 4,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/config/index.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 14,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/config/types.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 21,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/ingestion/index.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 23,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "src/ingestion/record-container.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 295,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/darwin-io.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 58,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/darwin-path.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 341,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/directory.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 72,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/index.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 360,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/readers.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 28,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/resolve.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 158,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/ingestion/source-availability/types.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 63,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/config.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 39,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/darwin-path.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 152,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/directory.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 397,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/readers.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 209,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/sync-boundary.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 206,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/spec/schemas/source-availability-receipt.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          }
+        ],
+        "kind": "step",
+        "ordinal": 3,
+        "rIds": [
+          "R2",
+          "R3"
+        ],
+        "sourceRefs": [
+          "s-r2",
+          "s-r3",
+          "s-task2"
+        ],
+        "summary": "Opt-in local mode classifies evidenced Darwin File Provider paths and refuses unsafe reads; default any behavior remains available.",
+        "taskIds": [
+          "fn-118-cloud-placeholder-safe-indexing.2"
+        ],
+        "title": "Add the source-availability policy and guarded read boundary"
+      },
+      {
+        "files": [
+          {
+            "additions": 197,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 24,
+            "path": "src/ingestion/sync.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 45,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 3,
+            "path": "src/ingestion/types.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 244,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 4,
+            "path": "src/ingestion/walker.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 42,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 4,
+            "path": "src/serve/watch-reconciliation-fallback-disk.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 30,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 3,
+            "path": "src/serve/watch-reconciliation-fallback.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 6,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 2,
+            "path": "src/serve/watch-reconciliation-shared.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 1,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/serve/watch-reconciliation.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 10,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/serve/watch-service-flush.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 27,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 3,
+            "path": "src/serve/watch-service-snapshot.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 1,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/serve/watch-service.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 101,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 5,
+            "path": "src/serve/watch-snapshot-ops.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 8,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/serve/watch-snapshot-types.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 171,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/sync-paths.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 301,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/ingestion/source-availability/traversal-reconcile.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 24,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "test/serve/watch-reconciliation.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 254,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/serve/watch-snapshot-availability.test.ts",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          }
+        ],
+        "kind": "step",
+        "ordinal": 4,
+        "rIds": [
+          "R3",
+          "R4",
+          "R5"
+        ],
+        "sourceRefs": [
+          "s-r3",
+          "s-r4",
+          "s-r5",
+          "s-task3"
+        ],
+        "summary": "Directory descent, content reads, reconciliation, targeted paths, and watcher paths share availability semantics and preserve prior indexed descendants under unavailable prefixes.",
+        "taskIds": [
+          "fn-118-cloud-placeholder-safe-indexing.3"
+        ],
+        "title": "Enforce one policy across scans, targeted sync, and watchers"
+      },
+      {
+        "files": [
+          {
+            "additions": 24,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "CHANGELOG.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 10,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "GLOSSARY.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 12,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "README.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 23,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "docs/ARCHITECTURE.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 21,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "docs/CLI.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 59,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "docs/CONFIGURATION.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 10,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "docs/DAEMON.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 7,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "docs/MCP.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 21,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "docs/TROUBLESHOOTING.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 37,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "spec/cli.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 6,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 2,
+            "path": "spec/output-schemas/mcp-job-status.schema.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 1,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "website/_config.yml",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Changed as part of the source-availability implementation, evidence, tests, or documentation.",
+            "taskIds": []
+          },
+          {
+            "additions": 8,
+            "attentionClass": "mechanical",
+            "changeType": "copied",
+            "deletions": 8,
+            "path": ".flow/review-receipts/qa-fn-118-cloud-placeholder-safe-indexing.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 10,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 9,
+            "path": ".flow/specs/fn-118-cloud-placeholder-safe-indexing.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 73,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 80,
+            "path": ".flow/specs/fn-118-cloud-placeholder-safe-indexing.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 14,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.1.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 61,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.1.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 17,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.2.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 56,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.2.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 16,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.3.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 54,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.3.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 16,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.4.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 60,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.4.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 16,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.5.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          },
+          {
+            "additions": 51,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/tasks/fn-118-cloud-placeholder-safe-indexing.5.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff"
+            ],
+            "summary": "Flow task, spec, or receipt state for this feature.",
+            "taskIds": []
+          }
+        ],
+        "kind": "step",
+        "ordinal": 5,
+        "rIds": [
+          "R2",
+          "R6",
+          "R7"
+        ],
+        "sourceRefs": [
+          "s-r2",
+          "s-r6",
+          "s-r7",
+          "s-task4"
+        ],
+        "summary": "CLI/config/receipt contracts, performance evidence, user documentation, and Flow completion state describe the macOS guarantee without extending claims beyond physical evidence.",
+        "taskIds": [
+          "fn-118-cloud-placeholder-safe-indexing.4"
+        ],
+        "title": "Publish contracts, evidence, and documentation"
+      },
+      {
+        "files": [],
+        "kind": "kept",
+        "ordinal": 6,
+        "rIds": [
+          "R2"
+        ],
+        "sourceRefs": [
+          "s-r2",
+          "s-task2",
+          "s-task3"
+        ],
+        "summary": "Collections that do not opt into local mode retain existing ingestion behavior, and unsupported local-mode storage fails closed rather than claiming safety.",
+        "taskIds": [
+          "fn-118-cloud-placeholder-safe-indexing.2",
+          "fn-118-cloud-placeholder-safe-indexing.3"
+        ],
+        "title": "Default behavior remains any"
+      },
+      {
+        "files": [],
+        "kind": "verify",
+        "ordinal": 7,
+        "rIds": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7"
+        ],
+        "sourceRefs": [
+          "s-r1",
+          "s-r2",
+          "s-r3",
+          "s-r4",
+          "s-r5",
+          "s-r6",
+          "s-r7",
+          "s-task1",
+          "s-task2",
+          "s-task3",
+          "s-task4",
+          "s-task5"
+        ],
+        "summary": "Task evidence records physical provider matrices, focused and full Bun tests, documentation verification, production regression measurements, and live CLI acceptance checks.",
+        "taskIds": [
+          "fn-118-cloud-placeholder-safe-indexing.1",
+          "fn-118-cloud-placeholder-safe-indexing.2",
+          "fn-118-cloud-placeholder-safe-indexing.3",
+          "fn-118-cloud-placeholder-safe-indexing.4",
+          "fn-118-cloud-placeholder-safe-indexing.5"
+        ],
+        "title": "Physical, regression, contract, and live QA evidence"
+      }
+    ],
+    "proof": [
+      {
+        "label": "Physical provider evidence",
+        "sourceRefs": [
+          "s-task1",
+          "s-task5",
+          "s-r1"
+        ],
+        "value": "Google, iCloud, and both OneDrive libraries refused cloud-only reads with EDEADLK and zero bytes while remaining dataless."
+      },
+      {
+        "label": "Regression gates",
+        "sourceRefs": [
+          "s-task4",
+          "s-r6"
+        ],
+        "value": "Current any measured -1.1280% versus pre-implementation; local measured +1.1841% versus current any on 5,000 files."
+      },
+      {
+        "label": "Verification",
+        "sourceRefs": [
+          "s-task4",
+          "s-r1",
+          "s-r2",
+          "s-r3",
+          "s-r4",
+          "s-r5",
+          "s-r6",
+          "s-r7"
+        ],
+        "value": "Lint clean; 4,341 tests passed with 2 skipped; docs checks passed; provider and performance evidence met all seven criteria."
+      }
+    ],
+    "thesis": "GNO now offers an opt-in macOS local-source policy that skips cloud placeholders without materializing them, preserves indexed content after eviction, and leaves the default any mode unchanged."
+  },
+  "generatedAt": "2026-08-16T20:47:58Z",
+  "headSha": "5f3fcc52dbffa5faa3ece3934501ab2e5363409e",
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "s-spec",
+      "kind": "spec",
+      "ref": "fn-118-cloud-placeholder-safe-indexing"
+    },
+    {
+      "id": "s-task1",
+      "kind": "task",
+      "ref": "fn-118-cloud-placeholder-safe-indexing.1"
+    },
+    {
+      "id": "s-task2",
+      "kind": "task",
+      "ref": "fn-118-cloud-placeholder-safe-indexing.2"
+    },
+    {
+      "id": "s-task3",
+      "kind": "task",
+      "ref": "fn-118-cloud-placeholder-safe-indexing.3"
+    },
+    {
+      "id": "s-task4",
+      "kind": "task",
+      "ref": "fn-118-cloud-placeholder-safe-indexing.4"
+    },
+    {
+      "id": "s-task5",
+      "kind": "task",
+      "ref": "fn-118-cloud-placeholder-safe-indexing.5"
+    },
+    {
+      "id": "s-r1",
+      "kind": "rid",
+      "ref": "R1"
+    },
+    {
+      "id": "s-r2",
+      "kind": "rid",
+      "ref": "R2"
+    },
+    {
+      "id": "s-r3",
+      "kind": "rid",
+      "ref": "R3"
+    },
+    {
+      "id": "s-r4",
+      "kind": "rid",
+      "ref": "R4"
+    },
+    {
+      "id": "s-r5",
+      "kind": "rid",
+      "ref": "R5"
+    },
+    {
+      "id": "s-r6",
+      "kind": "rid",
+      "ref": "R6"
+    },
+    {
+      "id": "s-r7",
+      "kind": "rid",
+      "ref": "R7"
+    },
+    {
+      "id": "s-diff",
+      "kind": "diff_metadata",
+      "ref": "575a1425b671861ff7139b3abd91bfa44aad595c..5f3fcc52dbffa5faa3ece3934501ab2e5363409e"
+    },
+    {
+      "id": "s-c1-1",
+      "kind": "commit",
+      "ref": "b22722a034793c8154b5ec3bb46c75a3e78d3cff"
+    },
+    {
+      "id": "s-c2-1",
+      "kind": "commit",
+      "ref": "e84a2e849dc7ccbc66f970648c8bf226ff1c79d7"
+    },
+    {
+      "id": "s-c3-1",
+      "kind": "commit",
+      "ref": "3c868824549ad8e115d548a35e814febd4b877b3"
+    },
+    {
+      "id": "s-c4-1",
+      "kind": "commit",
+      "ref": "fc2b97d8429e12063593e33571702e3308415835"
+    },
+    {
+      "id": "s-c5-1",
+      "kind": "commit",
+      "ref": "a98feec143a644afb5ec481f27f2f17a87e3abb7"
+    }
+  ],
+  "specId": "fn-118-cloud-placeholder-safe-indexing",
+  "supersedesArtifactId": "aid-fn-118-5f3fcc52dbff"
+}
