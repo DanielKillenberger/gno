@@ -20,6 +20,7 @@ auxiliary_sections:
   - Conversation Evidence    # written by /flow-next:capture (source-tagged AC trail)
   - Resolved via Codebase    # written by /flow-next:interview --scope=technical
   - Resolved via Project Docs  # written by /flow-next:interview --scope=business
+  - Parked unknowns          # optional fog slot; one bullet per genuinely-unknown item, emptied as they resolve
 template_kind: static-scaffold  # no {{var}} substitution; read for structure, write via flowctl spec set-plan
 ---
 
@@ -47,8 +48,40 @@ To customize for your project, copy this file to `<repo-root>/SPEC.md` and edit 
 Discovery cascade (first match wins):
   1. <repo_root>/SPEC.md           (your customized scaffold — uppercase preferred)
   2. <repo_root>/spec.md           (lowercase honored when uppercase absent)
-  3. .flow/templates/spec.md       (project-local copy from /flow-next:setup)
-  4. bundled ${PLUGIN_ROOT}/templates/spec.md  (this file — canonical source of truth)
+  3. bundled ${PLUGIN_ROOT}/templates/spec.md  (this file — canonical source of truth)
+
+Customizing: adding sections and rewriting the guidance prose under any heading is
+free. Renaming or removing `## Acceptance Criteria`, `## Boundaries`,
+`## Goal & Context` or `## Decision Context` does NOT error - it silently degrades
+the features that parse them (R-ID coverage, PR "Not in this PR", interview scope
+routing, Decision Context shape detection).
+
+Full guide, incl. the known limitation for custom sections under an interview pass:
+flow-next docs, "Customizing the scaffold for your project"
+(plugins/flow-next/docs/spec-template.md - https://flow-next.dev/docs/spec-template/).
+-->
+
+<!--
+SCOPE DISCIPLINE (YAGNI — applies to the whole spec):
+Specify the smallest system that satisfies the request. Every R-ID traces to
+the request; every task traces to an R-ID. Capabilities the request never
+asked for are not scope — name them in ## Boundaries as out-of-scope, one line
+each. Prefer designs that ELIMINATE a risk structurally (closed schema, inert
+format, unexposed capability) over machinery that manages it (trust layers,
+scanners, caps, extra state stores). Rejected bigger designs get one line in
+## Decision Context, never sections. This trims scope, never rigor: the
+error/negative-cases discipline below, Boundaries, and R-ID coverage are
+EXEMPT and stay complete. So are filesystem-identity, permission, and
+concurrency guards (realpath/symlink containment, lock-guarded writes, forced
+excludes of runtime state) — an eliminated guard is not an eliminated feature.
+-->
+
+<!--
+EXAMPLES ARE EXHAUSTIVE (applies to every shape this spec shows):
+When the spec shows an output, event, or API shape, the fields shown ARE the
+contract — implementations must not add fields to a shown shape. If a field is
+intended, show it in the example. A deviation the example doesn't license is a
+review finding, not implementer discretion.
 -->
 
 # <spec-id> <Title>
@@ -97,8 +130,19 @@ Sub-scoped sibling criteria use single-letter suffixes (`R4a`, `R4b`) when one
 logical parent splits during revision — siblings sort lexically (`R4a` before
 `R4b` before `R5`). Multi-letter suffixes (`R4ab`) are not supported.
 
-- **R1:** <Testable criterion>
-- **R2:** <Testable criterion>
+- **R1:** <Testable criterion>. Errors: <enumerated error/invalid-input/boundary cases, or "no error surface beyond X">
+- **R2:** <Testable criterion>. Errors: <cases, or "no error surface beyond X">
+
+**Error cases (negative-cases discipline):** each behavioral criterion states its
+error / invalid-input / boundary handling *inside* the R-ID bullet (sub-clauses
+or sub-bullets — not sub-R-IDs), **or** explicitly records
+"no error surface beyond X". A one-line "none" declaration is complete; silence
+is incomplete. Standing G-IDs in `.flow/criteria.md` are referenced, never restated.
+
+Example:
+- **R1:** Parse config file into typed settings. Errors: malformed JSON → clear
+  message + non-zero exit; missing file → same; over size limit → reject.
+- **R2:** Settings object is frozen after load (no error surface beyond R1).
 
 ## Boundaries
 <!-- scope: business -->
@@ -144,6 +188,27 @@ This section has TWO shapes. Pick exactly one:
 -->
 
 ---
+
+<!--
+OPTIONAL AUXILIARY SECTION — `## Parked unknowns`:
+Written only when the spec actually carries fog. One bullet per genuinely-unknown
+item, each passing the fog-or-ticket test: decidable now → decide it here and now,
+so it never reaches this section; resolvable by scheduled work → make it a task or
+a ticket; genuinely unknown (needs a decision, an experiment, or an outside answer
+nobody has yet) → park it here, one line, naming what would resolve it.
+
+Graduate-on-resolution: the moment interview or plan resolves a parked item, its
+answer moves into the canonical section that owns it and the bullet is DELETED
+from here. A parked bullet that survives its own answer is stale fog and reads as
+an open question the spec has in fact closed. Empty section → omit it entirely.
+
+DURABILITY (applies to the whole spec, not just this section):
+Specs state contracts — types, signatures, behaviors, invariants — never file
+paths or line numbers. Paths and line numbers rot on the first refactor and feed
+plan-sync churn. ONE exception: a decision-rich snippet whose exact location IS
+the decision (the reason the reader needs the spec is "here, not there"). TASKS
+are exempt and unchanged — `**Files:**` / `**Touches:**` are a task's job.
+-->
 
 <!--
 Quick commands convention: per-task Quick commands list FOCUSED suites for the
