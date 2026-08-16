@@ -6,17 +6,24 @@
  * @module src/serve/watch-reconciliation-fallback-disk
  */
 
-import type { Collection } from "../config/types";
+// node:path — Bun has no path join helper.
+import { join } from "node:path";
 
-import { matchesCollectionExclusion } from "../core/path-rules";
+import type { Collection } from "../config/types";
+import type { DirectoryAvailabilityPort } from "../ingestion/source-availability";
+
+import {
+  matchesCollectionExclusion,
+  matchesCollectionSubtreeExclusion,
+} from "../core/path-rules";
 import { collectionToWalkConfig, matchesWalkPath } from "../ingestion";
+import { findUnprovenAvailabilityPrefix } from "../ingestion/source-availability";
 import { defaultFs, openDirByRel } from "./watch-snapshot-scan";
 import {
   isMissingFsError,
   joinWatcherRelPath,
   parentWatcherDir,
   type WatcherSnapshotFs,
-  type WatcherSnapshotStat,
 } from "./watch-snapshot-types";
 
 export interface FallbackBudget {
@@ -47,7 +54,12 @@ export function fallbackFs(): WatcherSnapshotFs {
 }
 
 export type DiskListResult =
-  | { status: "ok"; paths: string[]; rootDirNames: string[] }
+  | {
+      status: "ok";
+      paths: string[];
+      rootDirNames: string[];
+      unprovenPrefixes: string[];
+    }
   | { status: "overflow" }
   | { status: "error"; cause: unknown };
 
@@ -60,128 +72,207 @@ export async function listEligibleDiskSources(
   dirRel: string,
   collection: Collection,
   fs: WatcherSnapshotFs,
-  budget: FallbackBudget
+  budget: FallbackBudget,
+  directoryAvailability?: DirectoryAvailabilityPort
 ): Promise<DiskListResult> {
   const walkConfig = collectionToWalkConfig(collection, 0);
   const paths: string[] = [];
   const rootDirNames: string[] = [];
+  const unprovenPrefixes: string[] = [];
   const queue: string[] = [dirRel];
   let head = 0;
 
   while (head < queue.length) {
     const current = queue[head] as string;
     head += 1;
+    if (
+      current !== "" &&
+      matchesCollectionSubtreeExclusion(current, walkConfig.exclude)
+    ) {
+      continue;
+    }
     budget.visitedDirs += 1;
     if (budgetExceeded(budget)) {
       return { status: "overflow" };
     }
 
     const remaining = Math.max(0, budget.limit - budget.visitedDirs + 1);
-    const opened = await openDirByRel(rootAbs, current, fs);
-    if (opened.status === "missing") {
-      continue;
-    }
-    if (opened.status !== "ok") {
-      return {
-        status: "error",
-        cause:
-          opened.status === "scan_failed"
-            ? opened.cause
-            : new Error(`Disk scan failed under ${current || "."}`),
-      };
-    }
-
-    let listed;
-    try {
-      listed = await fs.readDir(opened.handle, remaining);
-    } catch (cause) {
-      await fs.closeDir(opened.handle);
-      if (isMissingFsError(cause)) {
+    if (directoryAvailability?.mode === "local") {
+      if (!fs.readDirectChildrenSync) {
+        unprovenPrefixes.push(current);
         continue;
       }
-      return { status: "error", cause };
-    }
-
-    if (listed.status === "overflow") {
-      await fs.closeDir(opened.handle);
-      return { status: "overflow" };
-    }
-
-    const names = [...listed.names].sort((a, b) =>
-      a < b ? -1 : a > b ? 1 : 0
-    );
-    for (const name of names) {
-      if (name === "" || name === "." || name === "..") {
+      const absPath = current === "" ? rootAbs : join(rootAbs, current);
+      const guarded = directoryAvailability.readDirectory(absPath, () =>
+        fs.readDirectChildrenSync!(rootAbs, current, remaining)
+      );
+      if (guarded.kind !== "available") {
+        unprovenPrefixes.push(current);
         continue;
       }
-      if (name.includes("/") || name.includes("\\") || name.includes("\0")) {
-        await fs.closeDir(opened.handle);
+      const listed = guarded.value;
+      if (listed.status === "missing") {
+        continue;
+      }
+      if (listed.status === "overflow") {
+        return { status: "overflow" };
+      }
+      if (listed.status !== "present") {
         return {
           status: "error",
-          cause: new Error(`Invalid directory entry name: ${name}`),
+          cause:
+            listed.status === "scan_failed"
+              ? listed.cause
+              : new Error(`Disk scan failed under ${current || "."}`),
+        };
+      }
+      for (const [name, fingerprint] of listed.entries) {
+        const childRel = joinWatcherRelPath(current, name);
+        if (fingerprint.kind === "directory") {
+          if (matchesCollectionSubtreeExclusion(childRel, walkConfig.exclude)) {
+            continue;
+          }
+          if (current === "") {
+            rootDirNames.push(name);
+          }
+          queue.push(childRel);
+        } else if (matchesCollectionExclusion(childRel, walkConfig.exclude)) {
+          continue;
+        } else if (fingerprint.kind === "symlink") {
+          if (matchesWalkPath(childRel, walkConfig)) {
+            paths.push(childRel);
+          }
+        } else if (
+          fingerprint.kind === "file" &&
+          matchesWalkPath(childRel, walkConfig)
+        ) {
+          paths.push(childRel);
+        }
+        if (paths.length > budget.limit) {
+          return { status: "overflow" };
+        }
+      }
+      continue;
+    }
+
+    const scanCurrent = async (): Promise<
+      | { status: "ok" }
+      | { status: "overflow" }
+      | { status: "error"; cause: unknown }
+    > => {
+      const opened = await openDirByRel(rootAbs, current, fs);
+      if (opened.status === "missing") {
+        return { status: "ok" };
+      }
+      if (opened.status !== "ok") {
+        return {
+          status: "error",
+          cause:
+            opened.status === "scan_failed"
+              ? opened.cause
+              : new Error(`Disk scan failed under ${current || "."}`),
         };
       }
 
-      let stat: WatcherSnapshotStat;
       try {
-        stat = await fs.lstatChild(opened.handle, name);
-      } catch (cause) {
-        await fs.closeDir(opened.handle);
-        if (isMissingFsError(cause)) {
-          return { status: "error", cause };
+        const listed = await fs.readDir(opened.handle, remaining);
+        if (listed.status === "overflow") {
+          return { status: "overflow" };
         }
-        return { status: "error", cause };
-      }
+        const names = [...listed.names].sort((a, b) =>
+          a < b ? -1 : a > b ? 1 : 0
+        );
+        for (const name of names) {
+          if (name === "" || name === "." || name === "..") {
+            continue;
+          }
+          if (
+            name.includes("/") ||
+            name.includes("\\") ||
+            name.includes("\0")
+          ) {
+            return {
+              status: "error",
+              cause: new Error(`Invalid directory entry name: ${name}`),
+            };
+          }
 
-      const childRel = joinWatcherRelPath(current, name);
-      if (matchesCollectionExclusion(childRel, walkConfig.exclude)) {
-        continue;
-      }
-
-      // Never follow symlinks; eligible link paths stay leaf candidates.
-      if (stat.isSymbolicLink()) {
-        if (matchesWalkPath(childRel, walkConfig)) {
+          const stat = await fs.lstatChild(opened.handle, name);
+          const childRel = joinWatcherRelPath(current, name);
+          if (stat.isDirectory()) {
+            if (
+              matchesCollectionSubtreeExclusion(childRel, walkConfig.exclude)
+            ) {
+              continue;
+            }
+            if (current === "") {
+              rootDirNames.push(name);
+            }
+            queue.push(childRel);
+            continue;
+          }
+          if (matchesCollectionExclusion(childRel, walkConfig.exclude)) {
+            continue;
+          }
+          if (stat.isSymbolicLink()) {
+            if (matchesWalkPath(childRel, walkConfig)) {
+              paths.push(childRel);
+              if (paths.length > budget.limit) {
+                return { status: "overflow" };
+              }
+            }
+            continue;
+          }
+          if (!stat.isFile() || !matchesWalkPath(childRel, walkConfig)) {
+            continue;
+          }
           paths.push(childRel);
           if (paths.length > budget.limit) {
-            await fs.closeDir(opened.handle);
             return { status: "overflow" };
           }
         }
-        continue;
-      }
-
-      if (stat.isDirectory()) {
-        if (current === "") {
-          rootDirNames.push(name);
-        }
-        queue.push(childRel);
-        continue;
-      }
-
-      if (!stat.isFile() || !matchesWalkPath(childRel, walkConfig)) {
-        continue;
-      }
-      paths.push(childRel);
-      if (paths.length > budget.limit) {
+        return { status: "ok" };
+      } catch (cause) {
+        return { status: "error", cause };
+      } finally {
         await fs.closeDir(opened.handle);
-        return { status: "overflow" };
       }
+    };
+
+    const scanned = await scanCurrent();
+    if (scanned.status !== "ok") {
+      return scanned;
     }
-    await fs.closeDir(opened.handle);
   }
 
-  return { status: "ok", paths, rootDirNames };
+  return { status: "ok", paths, rootDirNames, unprovenPrefixes };
 }
 
 export async function inspectNoFollowPresence(
   rootAbs: string,
   relPath: string,
-  fs: WatcherSnapshotFs
+  fs: WatcherSnapshotFs,
+  directoryAvailability?: DirectoryAvailabilityPort
 ): Promise<
   | { status: "present"; indexable: boolean }
   | { status: "missing" }
   | { status: "error"; cause: unknown }
 > {
+  if (directoryAvailability?.mode === "local") {
+    const unproven = await findUnprovenAvailabilityPrefix(
+      rootAbs,
+      relPath,
+      directoryAvailability
+    );
+    if (unproven) {
+      return {
+        status: "error",
+        cause: new Error(
+          `Source absence is unproven under ${unproven.relPath || "."}: ${unproven.code}`
+        ),
+      };
+    }
+  }
   const parent = parentWatcherDir(relPath);
   if (parent === null) {
     return { status: "missing" };
@@ -190,31 +281,79 @@ export async function inspectNoFollowPresence(
   if (base === "" || base.includes("/")) {
     return { status: "error", cause: new Error(`Invalid path: ${relPath}`) };
   }
-  const opened = await openDirByRel(rootAbs, parent, fs);
-  if (opened.status === "missing") {
-    return { status: "missing" };
-  }
-  if (opened.status !== "ok") {
-    return {
-      status: "error",
-      cause:
-        opened.status === "scan_failed"
-          ? opened.cause
-          : new Error("Failed to open parent for presence check"),
-    };
-  }
-  try {
-    const stat = await fs.lstatChild(opened.handle, base);
-    // Only regular files / symlinks are indexable sources. Directory, FIFO,
-    // device, and other specials prove the prior file source is gone.
-    const indexable = stat.isFile() || stat.isSymbolicLink();
-    return { status: "present", indexable };
-  } catch (cause) {
-    if (isMissingFsError(cause)) {
+  const inspectParent = async (): Promise<
+    | { status: "present"; indexable: boolean }
+    | { status: "missing" }
+    | { status: "error"; cause: unknown }
+  > => {
+    const opened = await openDirByRel(rootAbs, parent, fs);
+    if (opened.status === "missing") {
       return { status: "missing" };
     }
-    return { status: "error", cause };
-  } finally {
-    await fs.closeDir(opened.handle);
+    if (opened.status !== "ok") {
+      return {
+        status: "error",
+        cause:
+          opened.status === "scan_failed"
+            ? opened.cause
+            : new Error("Failed to open parent for presence check"),
+      };
+    }
+    try {
+      const stat = await fs.lstatChild(opened.handle, base);
+      // Only regular files / symlinks are indexable sources. Directory, FIFO,
+      // device, and other specials prove the prior file source is gone.
+      const indexable = stat.isFile() || stat.isSymbolicLink();
+      return { status: "present", indexable };
+    } catch (cause) {
+      if (isMissingFsError(cause)) {
+        return { status: "missing" };
+      }
+      return { status: "error", cause };
+    } finally {
+      await fs.closeDir(opened.handle);
+    }
+  };
+
+  if (directoryAvailability?.mode === "local") {
+    if (!fs.lstatChildByRelSync) {
+      return {
+        status: "error",
+        cause: new Error(
+          "Synchronous anchored child metadata is unavailable in local mode"
+        ),
+      };
+    }
+    const parentAbs = parent === "" ? rootAbs : join(rootAbs, parent);
+    const guarded = directoryAvailability.readDirectory(parentAbs, () => {
+      try {
+        return {
+          status: "present" as const,
+          stat: fs.lstatChildByRelSync!(rootAbs, parent, base),
+        };
+      } catch (cause) {
+        if (isMissingFsError(cause)) {
+          return { status: "missing" as const };
+        }
+        throw cause;
+      }
+    });
+    if (guarded.kind !== "available") {
+      return {
+        status: "error",
+        cause: new Error(
+          `Source absence is unproven under ${parent || "."}: ${guarded.code}`
+        ),
+      };
+    }
+    if (guarded.value.status === "missing") {
+      return { status: "missing" };
+    }
+    return {
+      status: "present",
+      indexable:
+        guarded.value.stat.isFile() || guarded.value.stat.isSymbolicLink(),
+    };
   }
+  return inspectParent();
 }

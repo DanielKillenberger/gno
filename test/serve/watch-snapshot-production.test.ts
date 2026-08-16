@@ -163,6 +163,47 @@ describe("createDefaultWatcherFs production adapter", () => {
     }
   });
 
+  test("native synchronous scan supports guarded local-mode enumeration", async () => {
+    const productionFs = createDefaultWatcherFs();
+    if (!productionFs.supportsAnchoredHandles) {
+      expect(productionFs.readDirectChildrenSync).toBeUndefined();
+      return;
+    }
+
+    await writeWatchFixture(root, "nested/local.md", "local");
+    await symlink("nested/local.md", join(root, "local-link.md"));
+    expect(productionFs.readDirectChildrenSync).toBeDefined();
+    expect(productionFs.lstatChildByRelSync).toBeDefined();
+    const rootScan = productionFs.readDirectChildrenSync?.(root, "", 10);
+    expect(rootScan?.status).toBe("present");
+    if (rootScan?.status !== "present") return;
+    expect(rootScan.entries.get("nested")?.kind).toBe("directory");
+    expect(rootScan.entries.get("local-link.md")?.kind).toBe("symlink");
+
+    const nestedScan = productionFs.readDirectChildrenSync?.(
+      root,
+      "nested",
+      10
+    );
+    expect(nestedScan?.status).toBe("present");
+    if (nestedScan?.status !== "present") return;
+    expect(nestedScan.entries.get("local.md")?.kind).toBe("file");
+    expect(
+      productionFs.lstatChildByRelSync?.(root, "nested", "local.md").isFile()
+    ).toBe(true);
+    expect(
+      productionFs
+        .lstatChildByRelSync?.(root, "", "local-link.md")
+        .isSymbolicLink()
+    ).toBe(true);
+    try {
+      productionFs.lstatChildByRelSync?.(root, "", "vanished.md");
+      throw new Error("expected missing child metadata to fail");
+    } catch (cause) {
+      expect((cause as NodeJS.ErrnoException).code).toBe("ENOENT");
+    }
+  });
+
   test("FIFO without writer returns promptly (ok fingerprint or fallback, never hang)", async () => {
     // Lifecycle hang regression: Darwin O_RDONLY|O_SYMLINK without O_NONBLOCK
     // blocks forever on a FIFO with no writer. Linux O_PATH should not block.

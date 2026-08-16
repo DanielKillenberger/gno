@@ -18,11 +18,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Collection } from "../../src/config/types";
+import type { DirectoryAvailabilityPort } from "../../src/ingestion/source-availability";
+import type {
+  WatcherSnapshotFs,
+  WatcherSnapshotStat,
+} from "../../src/serve/watch-snapshot-types";
 import type { SqliteAdapter } from "../../src/store/sqlite/adapter";
 import type { DocumentInput } from "../../src/store/types";
 
 import { classifyDirtyHints } from "../../src/serve/watch-reconciliation";
 import { collapseOverlappingDirtyDirs } from "../../src/serve/watch-reconciliation-fallback";
+import { inspectNoFollowPresence } from "../../src/serve/watch-reconciliation-fallback-disk";
 import { buildWatcherSnapshot } from "../../src/serve/watch-snapshot";
 import { SqliteAdapter as RealSqliteAdapter } from "../../src/store";
 import { safeRm } from "../helpers/cleanup";
@@ -52,6 +58,33 @@ function createStubStore(
   } as unknown as SqliteAdapter;
 }
 
+function createLocalAvailability(): DirectoryAvailabilityPort {
+  return {
+    mode: "local",
+    classify: async () => ({ kind: "available" }),
+    readDirectory: (_absPath, read) => {
+      try {
+        return { kind: "available", value: read() };
+      } catch {
+        return {
+          kind: "error",
+          code: "SOURCE_AVAILABILITY_UNKNOWN",
+          message: "guarded directory read failed",
+        };
+      }
+    },
+  };
+}
+
+function createPresenceFs(
+  lstatChildByRelSync: () => WatcherSnapshotStat
+): WatcherSnapshotFs {
+  return {
+    supportsAnchoredHandles: true,
+    lstatChildByRelSync,
+  } as unknown as WatcherSnapshotFs;
+}
+
 describe("collapse overlapping dirty dirs", () => {
   test("ancestor absorbs descendants; root absorbs all", () => {
     expect(collapseOverlappingDirtyDirs(["sub", "sub/subchild"])).toEqual([
@@ -62,7 +95,96 @@ describe("collapse overlapping dirty dirs", () => {
   });
 });
 
+describe("local guarded fallback presence", () => {
+  test("preserves ENOENT as proven missing", async () => {
+    const fs = createPresenceFs(() => {
+      throw Object.assign(new Error("gone"), { code: "ENOENT" });
+    });
+
+    const presence = await inspectNoFollowPresence(
+      "/collection",
+      "nested/gone.md",
+      fs,
+      createLocalAvailability()
+    );
+
+    expect(presence).toEqual({ status: "missing" });
+  });
+
+  test("keeps non-missing metadata failures unproven", async () => {
+    const fs = createPresenceFs(() => {
+      throw Object.assign(new Error("disk failure"), { code: "EIO" });
+    });
+
+    const presence = await inspectNoFollowPresence(
+      "/collection",
+      "nested/retry.md",
+      fs,
+      createLocalAvailability()
+    );
+
+    expect(presence.status).toBe("error");
+    if (presence.status === "error") {
+      expect(String(presence.cause)).toContain("SOURCE_AVAILABILITY_UNKNOWN");
+    }
+  });
+});
+
 describe("fallback root and forceFallback", () => {
+  test("recursive-glob subtree hints skip availability classification", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gno-watch-excluded-glob-"));
+    try {
+      await mkdir(join(root, "cloud"), { recursive: true });
+      const availabilityPaths: string[] = [];
+      const directoryAvailability: DirectoryAvailabilityPort = {
+        mode: "local",
+        classify: async (absPath) => {
+          availabilityPaths.push(absPath);
+          if (absPath === root) {
+            return { kind: "available" };
+          }
+          return {
+            kind: "dataless",
+            code: "DATALESS_DIRECTORY",
+            message: "excluded directory must not be classified",
+          };
+        },
+        readDirectory: (absPath, read) => {
+          availabilityPaths.push(absPath);
+          if (absPath === root) {
+            return { kind: "available", value: read() };
+          }
+          return {
+            kind: "dataless",
+            code: "DATALESS_DIRECTORY",
+            message: "excluded directory must not be read",
+          };
+        },
+      };
+
+      const classified = await classifyDirtyHints({
+        collection: {
+          ...createCollection("notes", root),
+          exclude: ["cloud/**"],
+        },
+        store: createStubStore(),
+        rootAbs: root,
+        previous: null,
+        dirtyHints: ["cloud"],
+        snapshotOptions: { directoryAvailability },
+      });
+
+      expect(classified.status).toBe("ok");
+      if (classified.status === "ok") {
+        expect(classified.candidates).toEqual([]);
+        expect(classified.removals).toEqual([]);
+      }
+      expect(availabilityPaths).toEqual([root]);
+    } finally {
+      await safeRm(root);
+    }
+  });
+
   test("missing collection root errors instead of proving deletion", async () => {
     const classified = await classifyDirtyHints({
       collection: createCollection("notes", "/no/such/root-missing-xyz"),

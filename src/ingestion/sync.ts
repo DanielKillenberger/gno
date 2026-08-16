@@ -69,6 +69,19 @@ import {
 } from "./frontmatter";
 import { buildLineOffsets } from "./position";
 import { processRecordContainer } from "./record-container";
+import {
+  createDirectoryAvailability,
+  createSourceContentReader,
+  findUnprovenAvailabilityPrefix,
+  isSourceAvailabilitySkip,
+  isUnprovenAbsenceCode,
+  memoizeDirectoryAvailability,
+  relPathUnderAnyPrefix,
+  resolveSourceAvailability,
+  type DirectoryAvailabilityPort,
+  type SourceContentReaderPort,
+  type SourceReadFailure,
+} from "./source-availability";
 import { getExcludedRanges } from "./strip";
 import { collectionToWalkConfig, DEFAULT_CHUNK_PARAMS } from "./types";
 import { defaultWalker } from "./walker";
@@ -649,17 +662,32 @@ export class SyncService {
   private readonly chunker: ChunkerPort;
   private readonly mimeDetector: MimeDetector;
   private readonly pipeline: ConversionPipeline;
+  private readonly sourceReaderFactory: (
+    mode: "any" | "local"
+  ) => SourceContentReaderPort;
+  private readonly directoryAvailabilityFactory: (
+    mode: "any" | "local"
+  ) => DirectoryAvailabilityPort;
 
   constructor(
     walker?: WalkerPort,
     chunker?: ChunkerPort,
     mimeDetector?: MimeDetector,
-    pipeline?: ConversionPipeline
+    pipeline?: ConversionPipeline,
+    sourceReaderFactory?: (mode: "any" | "local") => SourceContentReaderPort,
+    directoryAvailabilityFactory?: (
+      mode: "any" | "local"
+    ) => DirectoryAvailabilityPort
   ) {
     this.walker = walker ?? defaultWalker;
     this.chunker = chunker ?? defaultChunker;
     this.mimeDetector = mimeDetector ?? getDefaultMimeDetector();
     this.pipeline = pipeline ?? getDefaultPipeline();
+    this.sourceReaderFactory =
+      sourceReaderFactory ?? ((mode) => createSourceContentReader(mode));
+    this.directoryAvailabilityFactory =
+      directoryAvailabilityFactory ??
+      ((mode) => createDirectoryAvailability(mode));
   }
 
   private async selectRecordAdapter(
@@ -766,6 +794,28 @@ export class SyncService {
       const contentTypeRulesFingerprint =
         options.contentTypeRulesFingerprint ??
         fingerprintContentTypeMetadataRules(contentTypeRules);
+
+      // 2. Local mode performs one guarded content-boundary read. `any` keeps
+      // the legacy record-stream and sniff/read paths byte-for-byte unchanged.
+      // No availability syscall is added during discovery.
+      const availabilityMode = resolveSourceAvailability(collection, options);
+      let guardedBytes: Uint8Array | undefined;
+      if (availabilityMode === "local") {
+        const sourceRead = await this.sourceReaderFactory("local").readAll(
+          entry.absPath,
+          sourceSize
+        );
+        if (!sourceRead.ok) {
+          return await this.finishSourceAvailabilityFailure(
+            collection,
+            entry,
+            store,
+            sourceRead
+          );
+        }
+        guardedBytes = sourceRead.bytes;
+      }
+
       if (recordAdapter) {
         return await processRecordContainer({
           adapter: recordAdapter,
@@ -782,13 +832,16 @@ export class SyncService {
           sourceCtime,
           sourceMtime,
           sourceSize,
+          sourceBytes: guardedBytes,
           store,
         });
       }
 
-      const sniffBytes = new Uint8Array(
-        await Bun.file(entry.absPath).slice(0, 512).arrayBuffer()
-      );
+      const sniffBytes = guardedBytes
+        ? guardedBytes.subarray(0, Math.min(512, guardedBytes.byteLength))
+        : new Uint8Array(
+            await Bun.file(entry.absPath).slice(0, 512).arrayBuffer()
+          );
       const mime = this.mimeDetector.detect(entry.relPath, sniffBytes);
 
       const priorRecordDocuments = mustOk(
@@ -797,10 +850,9 @@ export class SyncService {
         { collection: collection.name, relPath: entry.relPath }
       );
 
-      // 2. Read byte-oriented files only after record-adapter selection.
-      const bytes = await Bun.file(entry.absPath).bytes();
+      const bytes = guardedBytes ?? (await Bun.file(entry.absPath).bytes());
 
-      // 3. Compute sourceHash
+      // 3. Compute sourceHash from source bytes. Local mode cannot reopen.
       const hasher = new Bun.CryptoHasher("sha256");
       hasher.update(bytes);
       const sourceHash = hasher.digest("hex");
@@ -1152,6 +1204,38 @@ export class SyncService {
     }
   }
 
+  /**
+   * Translate guarded-read failures into skip (cloud placeholder/partial) or
+   * fail-closed error outcomes. Never surfaces materialization refusal as a
+   * conversion error.
+   */
+  private async finishSourceAvailabilityFailure(
+    collection: Collection,
+    entry: WalkEntry,
+    store: StorePort,
+    failure: SourceReadFailure
+  ): Promise<FileSyncResult> {
+    const status = isSourceAvailabilitySkip(failure.code) ? "skipped" : "error";
+    await store
+      .recordError({
+        collection: collection.name,
+        relPath: entry.relPath,
+        code: failure.code,
+        message: failure.message,
+        details:
+          failure.errno === undefined || failure.errno === null
+            ? undefined
+            : { errno: failure.errno },
+      })
+      .catch(() => undefined);
+    return {
+      relPath: entry.relPath,
+      status,
+      errorCode: failure.code,
+      errorMessage: failure.message,
+    };
+  }
+
   private async readPreviousStructure(
     store: StorePort,
     existing: DocumentRow | null
@@ -1251,6 +1335,10 @@ export class SyncService {
     const results: FileSyncResult[] = [];
     const projectionSourceIds = new Set<number>();
     let markedInactive = 0;
+    const availabilityMode = resolveSourceAvailability(collection, syncOptions);
+    const directoryAvailability = memoizeDirectoryAvailability(
+      this.directoryAvailabilityFactory(availabilityMode)
+    );
 
     for (const relPath of relPaths) {
       const recordDocumentsResult = await store.listRecordDocuments(
@@ -1313,6 +1401,33 @@ export class SyncService {
       }
       if (recordCollectFailed) {
         results.push(recordCollectFailed);
+        continue;
+      }
+
+      // Direct syncPaths must not bypass directory-availability guards.
+      const unprovenPrefix = await findUnprovenAvailabilityPrefix(
+        collection.path,
+        relPath,
+        directoryAvailability
+      );
+      if (unprovenPrefix) {
+        const status = isSourceAvailabilitySkip(unprovenPrefix.code)
+          ? "skipped"
+          : "error";
+        await store
+          .recordError({
+            collection: collection.name,
+            relPath: unprovenPrefix.relPath || relPath,
+            code: unprovenPrefix.code,
+            message: unprovenPrefix.message,
+          })
+          .catch(() => undefined);
+        results.push({
+          relPath,
+          status,
+          errorCode: unprovenPrefix.code,
+          errorMessage: unprovenPrefix.message,
+        });
         continue;
       }
 
@@ -1881,23 +1996,44 @@ export class SyncService {
       await gitPull(collection.path);
     }
 
-    // 2. Walk collection
+    // 2. Walk collection (local mode refuses dataless/unproven directory descent)
     const maxBytes = options.limits?.maxBytes ?? DEFAULT_LIMITS.maxBytes;
-    const walkConfig = collectionToWalkConfig(collection, maxBytes);
+    const availabilityMode = resolveSourceAvailability(collection, syncOptions);
+    const directoryAvailability = memoizeDirectoryAvailability(
+      this.directoryAvailabilityFactory(availabilityMode)
+    );
+    const walkConfig = {
+      ...collectionToWalkConfig(collection, maxBytes, syncOptions),
+      sourceAvailability: availabilityMode,
+      directoryAvailability,
+    };
     const { entries, skipped } = await this.walker.walk(walkConfig);
 
     // Track seen paths for marking inactive
     // Only include TOO_LARGE files (they exist but are unprocessable)
     // EXCLUDED files should NOT be in seenPaths - if config changes to exclude
     // a previously-included file, that doc SHOULD be marked inactive
+    // Unproven prefixes (dataless / availability-unknown dirs) preserve
+    // previously indexed descendants — never treat them as proven deletions.
     const seenPaths = new Set<string>();
+    const unprovenPrefixes: string[] = [];
     for (const skip of skipped) {
       if (skip.reason === "TOO_LARGE") {
         seenPaths.add(skip.relPath);
       }
+      if (skip.unprovenPrefix || isUnprovenAbsenceCode(skip.reason)) {
+        unprovenPrefixes.push(skip.relPath);
+      }
     }
 
-    // 3. Record TOO_LARGE errors and track in seenPaths
+    let added = 0;
+    let updated = 0;
+    let unchanged = 0;
+    let errored = 0;
+    let dynamicSkipped = 0;
+    const fileResults: FileSyncResult[] = [];
+
+    // 3. Record TOO_LARGE / availability-prefix outcomes for receipts
     for (const skip of skipped) {
       if (skip.reason === "TOO_LARGE") {
         const recordResult = await store.recordError({
@@ -1919,6 +2055,35 @@ export class SyncService {
           code: "TOO_LARGE",
           message: `File size ${skip.size} exceeds limit ${maxBytes}`,
         });
+        continue;
+      }
+      if (skip.unprovenPrefix || isUnprovenAbsenceCode(skip.reason)) {
+        const message =
+          skip.message ??
+          `Directory availability refused descent (${skip.reason})`;
+        await store
+          .recordError({
+            collection: collection.name,
+            relPath: skip.relPath,
+            code: skip.reason,
+            message,
+          })
+          .catch(() => undefined);
+        errors.push({
+          relPath: skip.relPath,
+          code: skip.reason,
+          message,
+        });
+        const isSkip = isSourceAvailabilitySkip(skip.reason);
+        fileResults.push({
+          relPath: skip.relPath === "" ? "." : skip.relPath,
+          status: isSkip ? "skipped" : "error",
+          errorCode: skip.reason,
+          errorMessage: message,
+        });
+        if (!isSkip) {
+          errored += 1;
+        }
       }
     }
 
@@ -1927,14 +2092,6 @@ export class SyncService {
       1,
       Math.min(MAX_CONCURRENCY, options.concurrency ?? DEFAULT_CONCURRENCY)
     );
-
-    let added = 0;
-    let updated = 0;
-    let unchanged = 0;
-    let errored = 0;
-    let dynamicSkipped = 0;
-    const fileResults: FileSyncResult[] = [];
-
     if (concurrency === 1) {
       // Sequential processing with batched transactions (Windows perf)
       for (let i = 0; i < entries.length; i += TX_BATCH_SIZE) {
@@ -2072,11 +2229,20 @@ export class SyncService {
       });
     } else {
       const missingPaths = existingDocsResult.value
-        .filter(
-          (document) =>
-            document.active &&
-            !seenPaths.has(document.recordSourcePath ?? document.relPath)
-        )
+        .filter((document) => {
+          if (!document.active) {
+            return false;
+          }
+          const sourcePath = document.recordSourcePath ?? document.relPath;
+          if (seenPaths.has(sourcePath)) {
+            return false;
+          }
+          // Absence under an unenumerated/unproven prefix is not proven deletion.
+          if (relPathUnderAnyPrefix(sourcePath, unprovenPrefixes)) {
+            return false;
+          }
+          return true;
+        })
         .map((d) => d.relPath);
 
       if (missingPaths.length > 0) {
@@ -2109,6 +2275,13 @@ export class SyncService {
       errors.push(...(await this.projectTypedEdges(store, syncOptions)));
     }
 
+    const walkerSkippedCount = skipped.filter(
+      (skip) =>
+        skip.reason === "TOO_LARGE" ||
+        skip.reason === "EXCLUDED" ||
+        isSourceAvailabilitySkip(skip.reason)
+    ).length;
+
     return {
       collection: collection.name,
       filesProcessed: entries.length + inventoryErrored,
@@ -2116,7 +2289,7 @@ export class SyncService {
       filesUpdated: updated,
       filesUnchanged: unchanged,
       filesErrored: errored + inventoryErrored,
-      filesSkipped: skipped.length + dynamicSkipped,
+      filesSkipped: walkerSkippedCount + dynamicSkipped,
       filesMarkedInactive: markedInactive,
       durationMs: Date.now() - startTime,
       files: fileResults,
