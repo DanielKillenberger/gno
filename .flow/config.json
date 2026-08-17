@@ -115,16 +115,20 @@
           "improvement": "ac8434d9-e47f-44cf-b43e-04743afba6b1"
         },
         "stateIds": {
-          "in_progress": "23de7dc7-65cf-4679-9749-8246ba7630a1"
+          "backlog": "3b9978a0-c2a5-4b80-93bd-4d2c9efb6967",
+          "cancelled": "828c8c40-301d-4893-9a5c-414d0c38fd29",
+          "done": "6a77140f-d3ad-400c-a01d-3be19424aa25",
+          "in_progress": "23de7dc7-65cf-4679-9749-8246ba7630a1",
+          "todo": "e519fb14-92f7-44dd-a878-0f3214ffd4eb"
         },
         "teamId": "ccfc7aae-89d7-417a-a58f-8b32cae471d9",
         "teamKey": "GNO"
       },
-      "resolvedAt": null,
+      "resolvedAt": "2026-08-17T06:35:39.797697Z",
       "scopeResolvedAt": {
         "capabilities": "2026-08-05T09:35:50.194220Z",
         "destination": "2026-08-05T09:35:39.644707Z",
-        "destination.stateIds": "2026-08-05T09:35:44.276912Z"
+        "destination.stateIds": "2026-08-17T06:35:39.797697Z"
       }
     },
     "specIds": "tracker",
