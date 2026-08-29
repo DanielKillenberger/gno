@@ -1,0 +1,24 @@
+{
+  "branch_name": "fn-121-search-snippet-quality-skip-frontmatter",
+  "created_at": "2026-08-29T21:24:19.014765Z",
+  "depends_on_epics": [],
+  "id": "fn-121-search-snippet-quality-skip-frontmatter",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-121-search-snippet-quality-skip-frontmatter.md",
+  "status": "open",
+  "title": "Search snippet quality: skip frontmatter, prefer prose",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-08-29T21:24:19.016594Z"
+}
