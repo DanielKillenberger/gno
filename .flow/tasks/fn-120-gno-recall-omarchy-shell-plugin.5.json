@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-29T11:30:18.230492Z",
+  "depends_on": [
+    "fn-120-gno-recall-omarchy-shell-plugin.4"
+  ],
+  "id": "fn-120-gno-recall-omarchy-shell-plugin.5",
+  "priority": null,
+  "spec": "fn-120-gno-recall-omarchy-shell-plugin",
+  "spec_path": ".flow/tasks/fn-120-gno-recall-omarchy-shell-plugin.5.md",
+  "status": "todo",
+  "title": "Add open actions, IPC summon, and conflict-checked SUPER+R",
+  "updated_at": "2026-08-29T11:30:18.230492Z"
+}

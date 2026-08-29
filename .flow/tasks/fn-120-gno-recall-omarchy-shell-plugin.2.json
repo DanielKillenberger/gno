@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-29T11:30:18.230397Z",
+  "depends_on": [
+    "fn-120-gno-recall-omarchy-shell-plugin.1"
+  ],
+  "id": "fn-120-gno-recall-omarchy-shell-plugin.2",
+  "priority": null,
+  "spec": "fn-120-gno-recall-omarchy-shell-plugin",
+  "spec_path": ".flow/tasks/fn-120-gno-recall-omarchy-shell-plugin.2.md",
+  "status": "todo",
+  "title": "Ship quiet bar widget health states",
+  "updated_at": "2026-08-29T11:30:18.230397Z"
+}

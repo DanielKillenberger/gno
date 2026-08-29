@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-08-29T11:23:07.285315Z",
+  "depends_on": [
+    "fn-119-gno-peek-command-desktop-integration.1",
+    "fn-119-gno-peek-command-desktop-integration.2",
+    "fn-119-gno-peek-command-desktop-integration.3"
+  ],
+  "id": "fn-119-gno-peek-command-desktop-integration.4",
+  "priority": null,
+  "spec": "fn-119-gno-peek-command-desktop-integration",
+  "spec_path": ".flow/tasks/fn-119-gno-peek-command-desktop-integration.4.md",
+  "status": "todo",
+  "title": "Point skill and CLI docs at peek",
+  "updated_at": "2026-08-29T11:23:07.285315Z"
+}
