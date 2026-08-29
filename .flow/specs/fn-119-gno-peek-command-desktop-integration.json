@@ -51,7 +51,7 @@
     "completion": 0
   },
   "spec_path": ".flow/specs/fn-119-gno-peek-command-desktop-integration.md",
-  "status": "open",
+  "status": "done",
   "title": "GNO peek command + desktop integration surface",
   "tracker": {
     "baseHashFlow": null,
@@ -64,5 +64,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-29T12:23:48.734007Z"
+  "updated_at": "2026-08-29T12:49:04.015705Z"
 }

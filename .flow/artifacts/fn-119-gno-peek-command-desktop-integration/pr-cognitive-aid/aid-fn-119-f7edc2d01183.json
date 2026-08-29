@@ -1,0 +1,782 @@
+{
+  "artifactId": "aid-fn-119-f7edc2d01183",
+  "baseSha": "669f8c25e7fe013087493b2322c22d5f2dbf139b",
+  "changeWalkthrough": {
+    "groups": [
+      {
+        "files": [],
+        "kind": "problem",
+        "ordinal": 1,
+        "rIds": [],
+        "sourceRefs": [
+          "s-spec"
+        ],
+        "summary": "External consumers (the planned GNO Recall Omarchy plugin, fn-120) had to compose gno status + gno ls + gno changes to answer 'what is in my index and is serve up' — multiple invocations, and gno status touches activation machinery. There was also no frozen deep-link contract, so a desktop surface could not durably open a document in the web UI.",
+        "taskIds": [],
+        "title": "No cheap snapshot surface for desktop integrations"
+      },
+      {
+        "files": [
+          {
+            "additions": 74,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "spec/cli.md",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "Pins the peek command contract: snapshot shape, field semantics (pid-file serve liveness, never an HTTP probe), exit codes.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 212,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "spec/output-schemas/peek.schema.json",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "JSON schema for peek@1.0 with conditional initialized/uninitialized shapes.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 66,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/cli/commands/peek.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "CLI command: builds the snapshot via the shared builder and formats terminal/JSON output.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 2,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/cli/options.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "Registers peek with terminal+json output formats.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 20,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/cli/program.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "Wires the peek command into the CLI program.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 202,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/core/peek.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "Shared snapshot builder used by both CLI and MCP; pid-file serve detection; atomic failure.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 207,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/cli/peek.test.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "CLI contract tests: uninitialized exit 0, RUNTIME exit 2, serve pid-file states, no model imports.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 104,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/spec/schemas/peek.test.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "Schema contract tests for peek@1.0 output.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 1,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "test/spec/schemas/validator.ts",
+            "rIds": [
+              "R1"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r1",
+              "s-task1"
+            ],
+            "summary": "Loads the peek schema into the contract-test validator.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          }
+        ],
+        "kind": "step",
+        "ordinal": 2,
+        "rIds": [
+          "R1"
+        ],
+        "sourceRefs": [
+          "s-r1",
+          "s-task1",
+          "s-c1"
+        ],
+        "summary": "New shared builder src/core/peek.ts composes counts, backlog, bounded recent[] (docid/absPath), and pid-file-based serve state in one read-only pass; src/cli/commands/peek.ts exposes it as gno peek --json. Uninitialized is a success payload (initialized:false, pinned nulls, exit 0); any subquery failure is an atomic RUNTIME envelope with exit 2. The builder imports no model, embedding, or activation machinery — enforced by a test.",
+        "taskIds": [
+          "fn-119-gno-peek-command-desktop-integration.1"
+        ],
+        "title": "Add the model-free peek@1.0 snapshot (CLI)"
+      },
+      {
+        "files": [
+          {
+            "additions": 11,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "docs/API.md",
+            "rIds": [
+              "R2"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r2",
+              "s-task2"
+            ],
+            "summary": "Documents the web-UI deep-link contract and distinguishes it from the REST API.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.2"
+            ]
+          },
+          {
+            "additions": 21,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "docs/WEB-UI.md",
+            "rIds": [
+              "R2"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r2",
+              "s-task2"
+            ],
+            "summary": "Adds the Document deep links section freezing the /doc?uri= template.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.2"
+            ]
+          },
+          {
+            "additions": 1,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "spec/output-schemas/search-results.schema.json",
+            "rIds": [
+              "R2"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r2",
+              "s-task2"
+            ],
+            "summary": "Pins the absPath field description as a frozen consumer contract.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.2"
+            ]
+          },
+          {
+            "additions": 80,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "test/spec/schemas/search-result.test.ts",
+            "rIds": [
+              "R2"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r2",
+              "s-task2"
+            ],
+            "summary": "Contract tests for absPath presence on file-backed results and absence handling.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.2"
+            ]
+          }
+        ],
+        "kind": "step",
+        "ordinal": 3,
+        "rIds": [
+          "R2"
+        ],
+        "sourceRefs": [
+          "s-r2",
+          "s-task2",
+          "s-c2"
+        ],
+        "summary": "Documents the frozen web-UI template {serveUrl}/doc?uri=<encodeURIComponent(uri)> (stable across releases; unknown URIs resolve to the web UI's own not-found state) and pins results[].source.absPath on gno search --json so consumers can open files without a full-content fetch. No code changes were needed — the pipeline already populated absPath; this step froze and tested the contract.",
+        "taskIds": [
+          "fn-119-gno-peek-command-desktop-integration.2"
+        ],
+        "title": "Freeze the deep-link and search source-path contract"
+      },
+      {
+        "files": [
+          {
+            "additions": 60,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 1,
+            "path": "spec/mcp.md",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task3"
+            ],
+            "summary": "Documents the gno_peek tool: schema, annotations, egress class.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.3"
+            ]
+          },
+          {
+            "additions": 1,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/mcp/http-egress.ts",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task3"
+            ],
+            "summary": "Classifies gno_peek as metadata egress.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.3"
+            ]
+          },
+          {
+            "additions": 14,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "src/mcp/tools/index.ts",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task3"
+            ],
+            "summary": "Registers gno_peek with description and input schema.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.3"
+            ]
+          },
+          {
+            "additions": 78,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "src/mcp/tools/peek.ts",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task3"
+            ],
+            "summary": "MCP handler delegating to the shared peek builder.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.3"
+            ]
+          },
+          {
+            "additions": 279,
+            "attentionClass": "canonical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": "test/mcp/tools/peek.test.ts",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task3"
+            ],
+            "summary": "MCP tests incl. CLI/MCP field parity.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.3"
+            ]
+          }
+        ],
+        "kind": "step",
+        "ordinal": 4,
+        "rIds": [
+          "R3"
+        ],
+        "sourceRefs": [
+          "s-r3",
+          "s-task3",
+          "s-c3"
+        ],
+        "summary": "gno_peek calls the identical shared builder, returns the same peek@1.0 shape as structuredContent, is classified as metadata egress, and is annotated read-only. Field-level parity with the CLI is tested.",
+        "taskIds": [
+          "fn-119-gno-peek-command-desktop-integration.3"
+        ],
+        "title": "Expose the same snapshot as a read-only MCP tool"
+      },
+      {
+        "files": [
+          {
+            "additions": 2,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 6,
+            "path": "GLOSSARY.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-task4"
+            ],
+            "summary": "Fixes a pre-existing truncated duplicate line found during completion review.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          },
+          {
+            "additions": 26,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 3,
+            "path": "assets/skill/SKILL.md",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task4"
+            ],
+            "summary": "Adds the Snapshot, serve, and open section guiding agents to gno peek.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          },
+          {
+            "additions": 9,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 0,
+            "path": "assets/skill/cli-reference.md",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task4"
+            ],
+            "summary": "Adds the gno peek reference section.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          },
+          {
+            "additions": 3,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 2,
+            "path": "assets/skill/mcp-reference.md",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task4"
+            ],
+            "summary": "Prefers gno_peek over gno_status for snapshot questions.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          },
+          {
+            "additions": 54,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 28,
+            "path": "docs/CLI.md",
+            "rIds": [
+              "R2",
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r2",
+              "s-r3",
+              "s-task2",
+              "s-task4"
+            ],
+            "summary": "Documents gno peek, search absPath, and deep-link/file-open paths.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.2",
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          },
+          {
+            "additions": 21,
+            "attentionClass": "canonical",
+            "changeType": "modified",
+            "deletions": 2,
+            "path": "docs/MCP.md",
+            "rIds": [
+              "R3"
+            ],
+            "sourceRefs": [
+              "s-diff",
+              "s-r3",
+              "s-task4"
+            ],
+            "summary": "Documents gno_peek for MCP consumers.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          }
+        ],
+        "kind": "step",
+        "ordinal": 5,
+        "rIds": [
+          "R3"
+        ],
+        "sourceRefs": [
+          "s-r3",
+          "s-task4",
+          "s-c4"
+        ],
+        "summary": "Skill (SKILL.md + references) and user docs now route snapshot/open questions to gno peek / gno_peek instead of composing status+ls+changes, and document the absPath/deep-link open paths.",
+        "taskIds": [
+          "fn-119-gno-peek-command-desktop-integration.4"
+        ],
+        "title": "Point skill and user docs at peek"
+      },
+      {
+        "files": [
+          {
+            "additions": 12,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/memory/bug/integration/peek-serve-detection-is-pid-file-only-2026-08-29.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-qa"
+            ],
+            "summary": "QA P2 observation: pid-file-only serve detection consequence for consumers.",
+            "taskIds": []
+          },
+          {
+            "additions": 52,
+            "attentionClass": "mechanical",
+            "changeType": "added",
+            "deletions": 0,
+            "path": ".flow/review-receipts/qa-fn-119-gno-peek-command-desktop-integration.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-qa"
+            ],
+            "summary": "Live QA SHIP receipt (3/3 R-ID live coverage).",
+            "taskIds": []
+          },
+          {
+            "additions": 39,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 3,
+            "path": ".flow/specs/fn-119-gno-peek-command-desktop-integration.json",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-spec"
+            ],
+            "summary": "Spec status bookkeeping.",
+            "taskIds": []
+          },
+          {
+            "additions": 8,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 4,
+            "path": ".flow/tasks/fn-119-gno-peek-command-desktop-integration.1.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-task1"
+            ],
+            "summary": "Task receipt bookkeeping.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.1"
+            ]
+          },
+          {
+            "additions": 4,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 5,
+            "path": ".flow/tasks/fn-119-gno-peek-command-desktop-integration.2.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-task2"
+            ],
+            "summary": "Task receipt bookkeeping.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.2"
+            ]
+          },
+          {
+            "additions": 6,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 4,
+            "path": ".flow/tasks/fn-119-gno-peek-command-desktop-integration.3.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-task3"
+            ],
+            "summary": "Task receipt bookkeeping.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.3"
+            ]
+          },
+          {
+            "additions": 6,
+            "attentionClass": "mechanical",
+            "changeType": "modified",
+            "deletions": 4,
+            "path": ".flow/tasks/fn-119-gno-peek-command-desktop-integration.4.md",
+            "rIds": [],
+            "sourceRefs": [
+              "s-diff",
+              "s-task4"
+            ],
+            "summary": "Task receipt bookkeeping.",
+            "taskIds": [
+              "fn-119-gno-peek-command-desktop-integration.4"
+            ]
+          }
+        ],
+        "kind": "verify",
+        "ordinal": 6,
+        "rIds": [],
+        "sourceRefs": [
+          "s-qa",
+          "s-spec"
+        ],
+        "summary": "Per-task live QA during development (uninitialized/initialized/serve up-down/MCP parity captures) plus a final /flow-next:qa pass: SHIP with 3/3 R-IDs live-covered (CLI captures, a real stdio MCP session, and browser screenshots of the deep link known/unknown states). One P2 observation filed to bug memory: foreground serve (no --detach) writes no pid file, so peek reports it not running — per the pinned contract, but fn-120 must start serve with --detach.",
+        "taskIds": [],
+        "title": "Continuous live QA + receipts"
+      }
+    ],
+    "proof": [
+      {
+        "label": "Tests",
+        "sourceRefs": [
+          "s-task1",
+          "s-task2",
+          "s-task3",
+          "s-task4"
+        ],
+        "value": "bun test peek/search contract suites (CLI, MCP, schemas) all green; quiesce full-suite failures classified pre-existing/flaky vs spec base"
+      },
+      {
+        "label": "Live QA",
+        "sourceRefs": [
+          "s-qa"
+        ],
+        "value": "SHIP - 3/3 R-IDs live-covered: CLI captures, real stdio MCP parity session, browser screenshots of deep-link known/unknown states"
+      },
+      {
+        "label": "R-ID coverage",
+        "sourceRefs": [
+          "s-r1",
+          "s-r2",
+          "s-r3",
+          "s-task1",
+          "s-task2",
+          "s-task3",
+          "s-task4"
+        ],
+        "value": "3/3 acceptance criteria evidenced by tasks .1-.4"
+      }
+    ],
+    "thesis": "gno peek --json now provides a versioned, model-free peek@1.0 snapshot (counts, backlog, recent files with absolute paths, pid-file serve detection) across CLI and MCP, plus a frozen /doc?uri= web deep-link contract and a pinned search absPath field — the desktop-integration surface the GNO Recall Omarchy plugin (fn-120) builds on."
+  },
+  "generatedAt": "2026-08-29T12:38:28Z",
+  "headSha": "f7edc2d01183c07d6e8789fc94bb8f0790f7a5e8",
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "s-spec",
+      "kind": "spec",
+      "ref": "fn-119-gno-peek-command-desktop-integration"
+    },
+    {
+      "id": "s-task1",
+      "kind": "task",
+      "ref": "fn-119-gno-peek-command-desktop-integration.1"
+    },
+    {
+      "id": "s-task2",
+      "kind": "task",
+      "ref": "fn-119-gno-peek-command-desktop-integration.2"
+    },
+    {
+      "id": "s-task3",
+      "kind": "task",
+      "ref": "fn-119-gno-peek-command-desktop-integration.3"
+    },
+    {
+      "id": "s-task4",
+      "kind": "task",
+      "ref": "fn-119-gno-peek-command-desktop-integration.4"
+    },
+    {
+      "id": "s-r1",
+      "kind": "rid",
+      "ref": "R1"
+    },
+    {
+      "id": "s-r2",
+      "kind": "rid",
+      "ref": "R2"
+    },
+    {
+      "id": "s-r3",
+      "kind": "rid",
+      "ref": "R3"
+    },
+    {
+      "id": "s-diff",
+      "kind": "diff_metadata",
+      "ref": "669f8c25e7fe013087493b2322c22d5f2dbf139b..f7edc2d01183c07d6e8789fc94bb8f0790f7a5e8"
+    },
+    {
+      "id": "s-c1",
+      "kind": "commit",
+      "ref": "5e7492a681757352393d29b9ba0f091018b81d7d"
+    },
+    {
+      "id": "s-c2",
+      "kind": "commit",
+      "ref": "46513d6b2e1dafea57f620f4e65df43eb3c435b3"
+    },
+    {
+      "id": "s-c3",
+      "kind": "commit",
+      "ref": "301320b4cf8441b0204f62978c0c828b3339e918"
+    },
+    {
+      "id": "s-c4",
+      "kind": "commit",
+      "ref": "b6d892b429b2e57ed04200836c99f606bfc543ce"
+    },
+    {
+      "id": "s-qa",
+      "kind": "qa_receipt",
+      "ref": ".flow/review-receipts/qa-fn-119-gno-peek-command-desktop-integration.json"
+    }
+  ],
+  "specId": "fn-119-gno-peek-command-desktop-integration"
+}
