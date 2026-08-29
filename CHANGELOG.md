@@ -13,6 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.36.0] - 2026-08-29
+
+### Added
+
+- `gno peek --json`: versioned, model-free `peek@1.0` snapshot for desktop and
+  external integrations — index/collection/document counts, embedding backlog
+  and recent ingest errors, the 10 most recently modified documents with
+  `docid` and `absPath`, and pid-file-based `gno serve` detection. One
+  invocation, no model/embedding/vector initialization; uninitialized reports
+  `initialized:false` with pinned nulls (exit 0); any subquery failure is an
+  atomic `RUNTIME` envelope (exit 2). Contract: `spec/cli.md` +
+  `spec/output-schemas/peek.schema.json`.
+- `gno_peek` MCP tool: the same `peek@1.0` snapshot as a read-only, model-free
+  MCP tool (metadata egress class), with field-level parity to the CLI.
+- Frozen web-UI deep-link contract
+  `{serveUrl}/doc?uri=<encodeURIComponent(uri)>` (stable across releases;
+  unknown URIs resolve to the web UI's own not-found handling) and pinned
+  `results[].source.absPath` on `gno search --json` for direct file opening.
+  Documented in `docs/WEB-UI.md`, `docs/API.md`, `docs/CLI.md`.
+- Skill and docs guidance routing snapshot/open questions to
+  `gno peek` / `gno_peek` instead of composing `status` + `ls` + `changes`.
+
 ## [1.35.0] - 2026-08-17
 
 ### Added
@@ -2218,7 +2240,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.35.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.36.0...HEAD
+[1.36.0]: https://github.com/gmickel/gno/compare/v1.35.0...v1.36.0
 [1.35.0]: https://github.com/gmickel/gno/compare/v1.34.6...v1.35.0
 [1.34.6]: https://github.com/gmickel/gno/compare/v1.34.5...v1.34.6
 [1.34.5]: https://github.com/gmickel/gno/compare/v1.34.4...v1.34.5
