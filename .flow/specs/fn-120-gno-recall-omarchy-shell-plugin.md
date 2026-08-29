@@ -262,7 +262,11 @@ monitor, grabs keyboard focus, and Esc always dismisses. [paraphrase]
   [user]
 - **R11:** Enter always opens: pressing Enter on any document row — recents,
   search hits, or browsed collection docs — actually opens the document:
-  primary action opens the source file via the default handler when an
+  primary action opens the source file via a visible opener chain (text docs:
+  `$VISUAL` — TUI editors wrapped in `omarchy-launch-tui` — then `omawrite`,
+  then `omarchy-launch-editor`; otherwise `gio open`/`xdg-open`; the
+  `fileOpener` override always wins; raw `xdg-open` alone mis-sniffs markdown
+  to a headless nvim and is insufficient) when an
   absPath is available/derivable, and falls back to the web UI deep link
   when serve is running; when neither path is available the row shows
   explicit guidance instead of silently doing nothing. An explicit web-open
