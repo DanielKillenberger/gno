@@ -32,9 +32,8 @@ Verified against installed released gno 1.36.0: `gno status --json` returns coll
 
 
 ## Done summary
-TBD
-
+Collection browsing shipped (R10). Service: runStatus() (gno status --json; generation, 8s kill timer, incremental 512KiB bound, memory-only collections cache with lastStatusAt) and runLs(collection, offset) (gno ls <name> --json -n 50; --offset omitted on page 1 because gno 1.36.0 rejects 0; cancel-inflight + late-drop + 512KiB bound); browsedAbsPath() joins collection.path + / + relPath and feeds the existing open pipeline. Overlay: three levels (recents -> collections -> docs) entered via Tab or Ctrl+B; in-memory filter at every level (proven zero status/ls spawns while typing); Enter drills/opens/loads-more; Load more/Right/PgDn pagination; layered Esc (clear filter -> back a level -> dismiss) plus empty-filter Backspace; header shows location and page; explicit collection-empty and ls-failure inline states that stay interactive. Panel: Browse collections action summoning the overlay with mode=collections payload. Live QA verified in-host: 22 collections listed, ai drill-in paged 50->100 rows (page 2 header), open-from-browse launched a real window for a spaces-in-name doc via the joined absPath, esc-levels journaled, panel entry captured. Gates: validate 0, qmllint 0. Session restored ready/1673. Known P2 carried to .9: browse-row relPath renders twice (metaText + snippet both carry it); same double-render on the Load more row.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 058ec9817d6ab969b92da1fa90c31769a920725b
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell, live QA /tmp/fn-120.8-qa (collections/drill-page/open-from-browse/browse-filter/empty/ls-failure/esc-levels/panel-entry)
 - PRs:
