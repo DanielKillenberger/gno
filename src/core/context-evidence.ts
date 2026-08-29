@@ -413,13 +413,19 @@ export const materializeContextEvidenceCandidates = async (
     const content = contentByHash.get(document.mirrorHash);
     const chunk = getChunk(document.mirrorHash, metadata.seq);
     const chunkKey = `${document.mirrorHash}:${metadata.seq}`;
+    // Display snippets may omit leading YAML frontmatter, so startLine can sit
+    // after the stored chunk start. endLine must still identify the same chunk.
+    const displayRangeWithinChunk =
+      chunk !== undefined &&
+      snippetRange.endLine === chunk.endLine &&
+      snippetRange.startLine >= chunk.startLine &&
+      snippetRange.startLine <= chunk.endLine;
     if (
       !content ||
       metadata.mirrorHash !== document.mirrorHash ||
       !chunk ||
       chunk.mirrorHash !== document.mirrorHash ||
-      snippetRange.startLine !== chunk.startLine ||
-      snippetRange.endLine !== chunk.endLine
+      !displayRangeWithinChunk
     ) {
       throw new ContextEvidenceError(
         "chunk_coordinate_mismatch",

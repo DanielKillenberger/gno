@@ -28,6 +28,7 @@ import { selectBestChunkForSteering } from "./intent";
 import { hasProjectAffinity } from "./project-affinity";
 import { detectQueryLanguage } from "./query-language";
 import { attachSearchResultContexts } from "./result-context";
+import { cleanDisplaySnippet } from "./snippet";
 import {
   resolveRecencyTimestamp,
   isWithinTemporalRange,
@@ -236,6 +237,8 @@ export async function searchVectorWithEmbedding(
         continue;
       }
 
+      const cleanedSnippet = cleanDisplaySnippet(chunk.text, chunk.text);
+      const snippetStartLine = chunk.startLine + cleanedSnippet.startLineOffset;
       const scoredResult = applyContentTypeBoost(
         {
           docid: doc.docid,
@@ -244,11 +247,11 @@ export async function searchVectorWithEmbedding(
           title: doc.title ?? undefined,
           contentType: doc.contentType ?? undefined,
           categories: doc.categories ?? undefined,
-          line: chunk.startLine,
-          snippet: chunk.text,
+          line: snippetStartLine,
+          snippet: cleanedSnippet.text,
           snippetLanguage: chunk.language ?? undefined,
           snippetRange: {
-            startLine: chunk.startLine,
+            startLine: snippetStartLine,
             endLine: chunk.endLine,
           },
           source: {
@@ -338,6 +341,12 @@ export async function searchVectorWithEmbedding(
 
       const collectionPath = collectionPaths.get(doc.collection);
       const sourceRelPath = doc.recordSourcePath ?? doc.relPath;
+      const cleanedChunk = fullContent
+        ? undefined
+        : cleanDisplaySnippet(chunk.text, chunk.text);
+      const snippetStartLine = cleanedChunk
+        ? chunk.startLine + cleanedChunk.startLineOffset
+        : chunk.startLine;
 
       const result = applyContentTypeBoost(
         {
@@ -347,13 +356,13 @@ export async function searchVectorWithEmbedding(
           title: doc.title ?? undefined,
           contentType: doc.contentType ?? undefined,
           categories: doc.categories ?? undefined,
-          line: chunk.startLine,
-          snippet: fullContent ?? chunk.text,
+          line: snippetStartLine,
+          snippet: fullContent ?? cleanedChunk?.text ?? chunk.text,
           snippetLanguage: chunk.language ?? undefined,
           // --full: no snippetRange (full doc content)
           snippetRange: fullContent
             ? undefined
-            : { startLine: chunk.startLine, endLine: chunk.endLine },
+            : { startLine: snippetStartLine, endLine: chunk.endLine },
           source: {
             relPath: sourceRelPath,
             absPath: collectionPath

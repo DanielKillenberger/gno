@@ -30,6 +30,7 @@ import { selectBestChunkForSteering } from "./intent";
 import { hasProjectAffinity } from "./project-affinity";
 import { detectQueryLanguage } from "./query-language";
 import { attachSearchResultContexts } from "./result-context";
+import { cleanDisplaySnippet } from "./snippet";
 import {
   resolveRecencyTimestamp,
   resolveTemporalRange,
@@ -107,6 +108,7 @@ function buildSearchResult(ctx: BuildResultContext): SearchResult {
   // Determine snippet content and range
   let snippet: string;
   let snippetRange: { startLine: number; endLine: number } | undefined;
+  let line = chunk?.startLine;
 
   if (options?.full && fullContent) {
     // --full: use full content, no range (full doc)
@@ -117,11 +119,18 @@ function buildSearchResult(ctx: BuildResultContext): SearchResult {
     snippet = chunk.text;
     snippetRange = { startLine: chunk.startLine, endLine: chunk.endLine };
   } else {
-    // Default: use FTS snippet or chunk text
-    snippet = fts.snippet ?? chunk?.text ?? "";
-    snippetRange = chunk
-      ? { startLine: chunk.startLine, endLine: chunk.endLine }
-      : undefined;
+    // Default: FTS snippet or chunk text, with leading frontmatter stripped
+    const cleaned = cleanDisplaySnippet(
+      fts.snippet ?? chunk?.text ?? "",
+      chunk?.text
+    );
+    snippet = cleaned.text;
+    if (chunk) {
+      line = chunk.startLine + cleaned.startLineOffset;
+      snippetRange = { startLine: line, endLine: chunk.endLine };
+    } else {
+      snippetRange = undefined;
+    }
   }
 
   const result: SearchResult = {
@@ -131,7 +140,7 @@ function buildSearchResult(ctx: BuildResultContext): SearchResult {
     title: fts.title,
     contentType: fts.contentType,
     categories: fts.categories,
-    line: chunk?.startLine,
+    line,
     snippet,
     snippetLanguage: chunk?.language ?? undefined,
     snippetRange,

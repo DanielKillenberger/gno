@@ -58,6 +58,7 @@ import {
 } from "./query-modes";
 import { rerankCandidates } from "./rerank";
 import { attachSearchResultContexts } from "./result-context";
+import { cleanDisplaySnippet } from "./snippet";
 import {
   isWithinTemporalRange,
   resolveRecencyTimestamp,
@@ -1003,6 +1004,7 @@ export async function searchHybrid(
           ) ?? chunk);
 
     let snippet = snippetChunk.text;
+    let snippetStartLine = snippetChunk.startLine;
     let snippetRange: { startLine: number; endLine: number } | undefined = {
       startLine: snippetChunk.startLine,
       endLine: snippetChunk.endLine,
@@ -1021,6 +1023,18 @@ export async function searchHybrid(
         snippetRange = undefined; // Full content has no range
       }
       // Fallback to chunk text if content unavailable
+    } else {
+      const cleanedSnippet = cleanDisplaySnippet(
+        snippetChunk.text,
+        snippetChunk.text
+      );
+      snippet = cleanedSnippet.text;
+      snippetStartLine =
+        snippetChunk.startLine + cleanedSnippet.startLineOffset;
+      snippetRange = {
+        startLine: snippetStartLine,
+        endLine: snippetChunk.endLine,
+      };
     }
 
     for (const doc of candidateDocs) {
@@ -1050,7 +1064,7 @@ export async function searchHybrid(
         title: doc.title ?? undefined,
         contentType: doc.contentType ?? undefined,
         categories: doc.categories ?? undefined,
-        line: snippetChunk.startLine,
+        line: snippetStartLine,
         snippet,
         snippetLanguage: chunk.language ?? undefined,
         snippetRange,

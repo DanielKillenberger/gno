@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Search and query snippets skip leading YAML frontmatter and fall back to
+  document prose when FTS centers on tag/metadata fences. `--full` and
+  `--line-numbers` still emit the raw source.
+
 ## [1.36.0] - 2026-08-29
 
 ### Added
