@@ -63,6 +63,7 @@ equivalent files fail closed as ambiguous.
 | Command            | --json | --files | --csv | --md | --xml | Default  |
 | ------------------ | ------ | ------- | ----- | ---- | ----- | -------- |
 | status             | yes    | no      | no    | yes  | no    | terminal |
+| peek               | yes    | no      | no    | no   | no    | terminal |
 | init               | no     | no      | no    | no   | no    | terminal |
 | setup              | yes    | no      | no    | no   | no    | terminal |
 | profile check      | yes    | no      | no    | no   | no    | terminal |
@@ -333,6 +334,71 @@ proof as healthy while the projection is truncated.
 
 - 0: Success
 - 2: DB not initialized or inaccessible
+
+---
+
+### gno peek
+
+Cheap read-only metadata snapshot for external integrations (status bars,
+launchers, desktop plugins). One invocation; no model, embedding, or vector
+initialization. Uninitialized is a successful, reportable state.
+
+**Synopsis:**
+
+```bash
+gno peek [--json]
+```
+
+**Output (JSON):**
+
+Bare payload (no `ok` envelope). Schema
+[`peek@1.0`](./output-schemas/peek.schema.json).
+
+```json
+{
+  "schemaVersion": "peek@1.0",
+  "gnoVersion": "0.42.0",
+  "generatedAt": "2026-08-29T09:00:05Z",
+  "initialized": true,
+  "indexName": "default",
+  "counts": { "documents": 1234, "collections": 5 },
+  "backlog": { "pending": 0, "failed": 0 },
+  "lastIndexedAt": "2026-08-29T09:00:00Z",
+  "recent": [
+    {
+      "docid": "#abc123",
+      "uri": "gno://notes/inbox.md",
+      "title": "Inbox",
+      "collection": "notes",
+      "absPath": "/home/user/notes/inbox.md",
+      "modifiedAt": "2026-08-29T08:55:00Z"
+    }
+  ],
+  "serve": { "running": true, "url": "http://localhost:3000" }
+}
+```
+
+**Field semantics:**
+
+- `initialized:false` → `counts`, `backlog`, and `lastIndexedAt` are `null`,
+  `recent` is `[]`, exit 0.
+- `title` is nullable (consumers fall back to the URI tail).
+- `lastIndexedAt` is nullable on an initialized-but-never-indexed store.
+- `recent` is bounded (max 10), sorted by `modifiedAt` descending.
+- `docid` is the store document id as-is (leading `#` plus hex).
+- `backlog.pending` is the chunk embedding backlog (`status.embeddingBacklog`).
+- `backlog.failed` is recent ingest/index errors (`recentErrors`).
+- `serve` when not running: `{ "running": false, "url": null }`. Liveness is
+  pid-file based (`process.kill(pid, 0)`); a stale pid reports not running.
+  Never an HTTP probe.
+- Any subquery failure is atomic: `RUNTIME` envelope, never a half-filled
+  payload.
+
+**Exit Codes:**
+
+- `0`: Success, including uninitialized
+- `1`: Validation error (unsupported format)
+- `2`: Locked or failed database read, or any partial subquery failure
 
 ---
 
@@ -1161,7 +1227,14 @@ Important notes:
 - malformed lexical syntax returns exit code `1`
 
 **Output (JSON):**
-See [Output Schemas](./output-schemas/search-result.schema.json)
+See [Output Schemas](./output-schemas/search-results.schema.json)
+
+`results[].source.absPath` is the documented source-path field. It is included
+by default when the collection root and `source.relPath` can be joined; search
+has no `--source` flag. When `absPath` is absent (unresolvable collection path,
+missing relPath, or a hit without a filesystem file), consumers display the URI
+tail and must disable file-open for that row — do not call `gno get` just to
+recover a path.
 
 Every structured search result may include `context`, the matching
 user-configured guidance joined in deterministic global, collection, then

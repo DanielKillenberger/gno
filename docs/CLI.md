@@ -34,34 +34,35 @@ never raw roots.
 
 ## Quick Reference
 
-| Command          | Description                         |
-| ---------------- | ----------------------------------- |
-| `gno init`       | Initialize config and database      |
-| `gno setup`      | Add a folder and prove retrieval    |
-| `gno index`      | Full index (sync + embed)           |
-| `gno update`     | Sync files from disk (no embed)     |
-| `gno embed`      | Generate embeddings only            |
-| `gno search`     | BM25 full-text search               |
-| `gno vsearch`    | Vector similarity search            |
-| `gno query`      | Hybrid search (BM25 + vector)       |
-| `gno bench`      | Benchmark retrieval fixtures        |
-| `gno ask`        | Search with AI answer               |
-| `gno get`        | Retrieve document content           |
-| `gno ls`         | List indexed documents              |
-| `gno daemon`     | Headless continuous indexing        |
-| `gno links`      | List outgoing links from document   |
-| `gno backlinks`  | List documents linking to target    |
-| `gno similar`    | Find semantically similar docs      |
-| `gno graph`      | Export knowledge graph              |
-| `gno audit`      | Read-only workspace integrity audit |
-| `gno serve`      | Start web UI server                 |
-| `gno mcp`        | Start MCP server for AI clients     |
-| `gno models`     | Manage models (list, pull, use)     |
-| `gno skill`      | Install GNO skill for AI agents     |
-| `gno tags`       | Manage document tags                |
-| `gno completion` | Shell tab completion                |
-| `gno vec`        | Vector index maintenance            |
-| `gno doctor`     | Check system health                 |
+| Command          | Description                          |
+| ---------------- | ------------------------------------ |
+| `gno init`       | Initialize config and database       |
+| `gno setup`      | Add a folder and prove retrieval     |
+| `gno index`      | Full index (sync + embed)            |
+| `gno update`     | Sync files from disk (no embed)      |
+| `gno embed`      | Generate embeddings only             |
+| `gno search`     | BM25 full-text search                |
+| `gno vsearch`    | Vector similarity search             |
+| `gno query`      | Hybrid search (BM25 + vector)        |
+| `gno bench`      | Benchmark retrieval fixtures         |
+| `gno ask`        | Search with AI answer                |
+| `gno get`        | Retrieve document content            |
+| `gno ls`         | List indexed documents               |
+| `gno daemon`     | Headless continuous indexing         |
+| `gno links`      | List outgoing links from document    |
+| `gno backlinks`  | List documents linking to target     |
+| `gno similar`    | Find semantically similar docs       |
+| `gno graph`      | Export knowledge graph               |
+| `gno audit`      | Read-only workspace integrity audit  |
+| `gno serve`      | Start web UI server                  |
+| `gno mcp`        | Start MCP server for AI clients      |
+| `gno models`     | Manage models (list, pull, use)      |
+| `gno skill`      | Install GNO skill for AI agents      |
+| `gno tags`       | Manage document tags                 |
+| `gno completion` | Shell tab completion                 |
+| `gno vec`        | Vector index maintenance             |
+| `gno peek`       | Cheap counts, backlog, recent, serve |
+| `gno doctor`     | Check system health                  |
 
 ## Global Flags
 
@@ -266,6 +267,10 @@ gno search 'DEC-0054'
 ```
 
 JSON results include a top-level `line` anchor when the matching chunk is known.
+`--json` also includes `results[].source.absPath` when the hit is a resolvable
+file-backed document (collection root + relative path). There is no `--source`
+flag. If `absPath` is absent, show the URI tail and do not offer file-open for
+that row.
 For non-default indexes, emitted `gno://` URIs include output-only index
 metadata, e.g. `gno://docs/api.md?index=research`; readers such as `gno get`
 can round-trip that URI back to the named index.
@@ -1511,6 +1516,27 @@ gno impact gno://notes/plan.md --max-depth 3 --max-edges 250 --json
   `document-diff.schema.json`, and `impact.schema.json`.
 
 ## Admin Commands
+
+### gno peek
+
+Cheap read-only snapshot of index counts, backlog, recent files, and whether
+serve is up. One invocation; no model or embedding initialization. Use this
+instead of composing `gno status` + `gno ls` + `gno changes`. Keep
+`gno status` for activation, onboarding, and the full health payload.
+
+```bash
+gno peek
+gno peek --json
+```
+
+Uninitialized is success: `--json` returns `initialized: false` with pinned
+nulls and `recent: []`, exit 0.
+
+JSON is `peek@1.0`. `recent[].absPath` is the path to open a recent file
+without `gno get`. When `serve.running` is true, open a document in the Web
+UI with the frozen template `{serveUrl}/doc?uri=<encodeURIComponent(uri)>`
+(`serve.url` + document URI; optional `#anchor`). See
+[Document deep links](./WEB-UI.md#document-deep-links).
 
 ### gno status
 
