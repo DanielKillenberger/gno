@@ -32,9 +32,8 @@ SUPER+R is already verified free against Quattro defaults in the spec — do not
 - [ ] Installed from the local checkout onto the live Omarchy session; evidence captured for open-file, serve-down web-UI, open-file failure, IPC toggle, successful SUPER+R install, and a forced keybind-conflict run.
 
 ## Done summary
-TBD
-
+Open actions + configurable summon shipped. File-open: xdg-open (overridable) launched via Quickshell.execDetached with a fixed literal bash -lc 'exec "$@"' trampoline so dynamic absPaths travel only as positional args (session PATH needed for GUI handlers); peek absPath for recents, source.absPath for hits; missing absPath disables the action with a notice; never gno get. Web-open: omarchy-launch-browser at {serve.url}/doc?uri=<encodeURIComponent(uri)> (frozen fn-119.2 route); serve-down shows guidance and spawns nothing; plugin never starts serve. Opener spawn failures raise a github-style 3s actionStatus notice, UI stays interactive. Keys: overlay Enter=file Ctrl+Enter=web; panel recents Enter/click=file w=web. No second IpcHandler - shell {summon,hide,toggle} contract kept accurate. scripts/install-keybind.sh: conflict-checked via omarchy menu keybindings --print + hyprctl binds plain-text parse, appends the o.bind line to ~/.config/hypr/bindings.lua when SUPER+R free, idempotent re-run, prints conflict + writes nothing + exit 1 when taken, never hl.unbind. Live QA proved all paths on the real session incl. a real SUPER+R install (left in place per user intent, hyprctl configerrors empty), idempotency re-run, forced-conflict run with unchanged checksum, real file-open (nvim window spawned+killed), real web-open (Chromium loaded /doc deep link with serve up, then serve stopped). Gates: validate 0, qmllint 0, bash -n 0. Session restored ready/1673 docs, overlay+panel closed, serve down.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ee45064687f88380ba9008a023c57eaca1530298
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell, bash -n scripts/install-keybind.sh, live QA /tmp/fn-120.5-qa (open-file/no-abspath/serve-down/web-open/open-fail/ipc-toggle/keybind install+idempotent+conflict)
 - PRs:
