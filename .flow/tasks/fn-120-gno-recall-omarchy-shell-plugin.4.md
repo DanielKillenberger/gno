@@ -33,9 +33,8 @@ fn-119.2 freezes results[].source.absPath as the documented default (no --source
 - [ ] Installed from the local checkout onto the live Omarchy session; evidence captured (screenshots + real search/peek JSON + observation that no per-keystroke gno appeared) for recents, local filter, committed search, empty results, and search timeout/failure.
 
 ## Done summary
-TBD
-
+Recall overlay shipped: focused-output PanelWindow (WlrLayershell overlay, exclusive keyboard focus, Color.menu tokens) showing 10 cached recents ~46ms after summon. Typing filters titles/URI-tails purely in memory - proven zero gno spawns per keystroke via pgrep sampling (procs=none every sample), idle searchState, and zero journal search-start lines while typing. Enter runs exactly one search through Service.qml as argv [resolvedGnoPath, search, query, --json, --no-project-affinity, -n, 20] with searchLimit=20 named constant, 15s SIGTERM + 1s SIGKILL timeout. searchGenerationId increments on every request/cancel; in-flight processes are SIGTERMed on a new Enter and late onExited results whose gen != current are dropped - journal-proven with a slow-once wrapper (gen 9 cancelled, late-drop logged, gen 10 applied hits=20, no later overwrite). Rows show title-or-URI-tail, collection (peek field for recents, URI-derived for hits), snippet, modified age. Explicit inline states: uninitialized, empty-index, filter-empty, search-empty, search-error/timeout (overlay stays interactive - follow-up search succeeded after forced failure), plugin-error. Esc clears filter then dismisses via shell.hide so openPanelIds stays consistent; full keyboard round-trip logged. Gates: validate exit 0, qmllint exit 0. Session restored: ready, 1673 docs, overlay closed.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 0e52b64ee005a63bf6abbd89af79a209f64dbfbe
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell, live overlay QA /tmp/fn-120.4-qa (recents/filter/no-spawn/search/empty/error/late-drop/keyboard-flow)
 - PRs:
