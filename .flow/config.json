@@ -16,6 +16,7 @@
     "mergeVerdictCommand": "",
     "patienceMinutes": 30,
     "release": true,
+    "requestReviewers": "",
     "reviewSignal": "silence",
     "reviewTrigger": ""
   },
@@ -54,8 +55,8 @@
   },
   "planSync": {
     "crossEpic": true,
-    "crossSpec": true,
-    "enabled": true
+    "crossSpec": false,
+    "enabled": false
   },
   "review": {
     "backend": "none",
@@ -131,9 +132,9 @@
         "destination.stateIds": "2026-08-17T06:35:39.797697Z"
       }
     },
-    "specIds": "tracker",
+    "specIds": "flow",
     "staleAfterHours": 24,
-    "type": "linear",
+    "type": null,
     "version": 1
   },
   "work": {

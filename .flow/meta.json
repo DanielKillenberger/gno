@@ -4,11 +4,11 @@
   "setup": {
     "block_hashes": {
       "AGENTS.md": {
-        "FLOW-NEXT": "cb58e8378f3a23093a6e8a361ad177c45c2519463bbc1ca1e996a1ede63594b5"
+        "FLOW-NEXT": "0f0836ff07509e8422bbd3c6649f104abf5a800320bbb40a6f589b25188fa211"
       }
     }
   },
-  "setup_date": "2026-08-16T07:34:11Z",
+  "setup_date": "2026-08-29T09:15:40Z",
   "setup_mode": "copy",
-  "setup_version": "4.0.0"
+  "setup_version": "4.9.0"
 }
