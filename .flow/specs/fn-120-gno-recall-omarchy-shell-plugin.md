@@ -273,6 +273,20 @@ monitor, grabs keyboard focus, and Esc always dismisses. [paraphrase]
   key remains available on every row. Verified live per row type (a real
   window/tab must appear). Errors: opener failure → non-blocking notice.
   [user]
+- **R12:** Deep search on demand: in the overlay, Shift+Enter runs a hybrid
+  deep search for the current query text via
+  `gno query <text> --json --no-project-affinity -n <limit>` at balanced
+  depth (embeddings + expansion + rerank; ~7s warm, longer cold), while
+  plain Enter search remains BM25 `gno search` (fast default commit path).
+  Deep results render in the same result rows — parse the `results[]`
+  envelope (vs `hits[]` for search); `source.absPath` is present so R11
+  open behavior is unchanged. Deep runs follow the R7/R9 rules (argv
+  arrays, generation IDs, stdout bounds) with a longer timeout (≥60s for
+  cold model load) and a distinct visible "deep search" in-progress state;
+  a newer search or Esc supersedes/drops late output. Status/help copy
+  advertises the key. Errors: failure/timeout → inline error, overlay
+  stays interactive. "would shift-enter or something make sense to do a
+  more deep search (medium depth i guess) with embeddings etc?" [user]
 
 ## Boundaries
 <!-- Boundaries: 40% [user], 60% [inferred] -->
@@ -285,8 +299,9 @@ monitor, grabs keyboard focus, and Esc always dismisses. [paraphrase]
 - No custom helper daemon/binary in v1 — CLI JSON is the boundary; a
   persistent helper is a future optimization if profiling demands it.
   [inferred]
-- No semantic/vector search in the overlay's v1 commit path — BM25 keyword
-  search only (fast, no model warmup). [inferred]
+- No semantic/vector search on the overlay's default commit path — plain
+  Enter stays BM25 only (fast, no model warmup). Deep hybrid search exists
+  solely behind the explicit Shift+Enter action (R12). [user]
 - No note editing/creation from the plugin — read/recall only. [inferred]
 - No silent keybind override — the SUPER+R default lands only through the
   conflict-checked install step; an existing bind always wins. [user]
@@ -356,6 +371,7 @@ monitor, grabs keyboard focus, and Esc always dismisses. [paraphrase]
 | R9 | fn-120-gno-recall-omarchy-shell-plugin.1 |
 | R10 | fn-120-gno-recall-omarchy-shell-plugin.8 |
 | R11 | fn-120-gno-recall-omarchy-shell-plugin.9 |
+| R12 | fn-120-gno-recall-omarchy-shell-plugin.10 |
 
 ## Parked unknowns
 
