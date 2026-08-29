@@ -28,9 +28,8 @@ R5 shipped Enter=file on overlay rows and panel recents; search hits carry sourc
 
 
 ## Done summary
-TBD
-
+Enter-opens-everywhere shipped (R11). Single openDocument(row) entry now backs Enter on every doc row (overlay recents/search/browse, panel recents): absPath present-or-joinable -> file open via existing trampoline; no absPath + serve.running -> web deep link with brief Opened-in-web-UI status; no absPath + serve down -> explicit guidance notice (No file path - start gno serve --detach to open in the web UI), never a silent no-op, plugin never starts serve. Ctrl+Enter/w remain explicit web-open. Audit found the prior behavior disabled file-open on absPath-less rows without opening anything - all such paths now route through openDocument. Carried-over P2 fixed: browse and Load-more rows render their path/hint exactly once (snippet cleared, metaText authoritative). Live evidence: real Typora windows for recents/search/browse/panel opens (browse via joined absPath), Chromium loading the /doc?uri= deep link for the fallback with serve up, guidance notice with zero spawn with serve down, explicit web paths verified. Gates: validate 0, qmllint 0. Serve stopped; session restored ready/1673/22, opener xdg-open.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3d1c778
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell, live QA /tmp/fn-120.9-qa (open-recents/open-search/open-browse/open-panel/fallback-web/guidance/explicit-web/browse-rows-fixed)
 - PRs:
