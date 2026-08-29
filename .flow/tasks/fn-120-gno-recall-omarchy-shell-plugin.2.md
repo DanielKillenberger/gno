@@ -31,9 +31,8 @@ Bar click must not call omarchy-shell shell toggle <id> or it will open the over
 - [ ] Installed from the local checkout onto the live Omarchy session; evidence captured for healthy glyph, backlog or stale badge, and at least one plugin-local error state (screenshots + the real peek/error JSON that produced each).
 
 ## Done summary
-TBD
-
+Quiet-by-default bar widget shipped: healthy = history glyph only; backlog pending/failed = circle/diamond count marks; stale = tilde composed with backlog marks; setup-guidance = question-circle; init-guidance = plus; degraded = warning triangle - every state pairs shape with Color.urgent/muted/foreground (no color-only signal) plus a state-naming tooltip. Service gained a distinct runtime-error state for RUNTIME envelopes (review note from .1), a stale property, and panelOpened tracking. Left-click toggles the nested Panel.qml loader (journal-evidenced, not the overlay IPC); middle-click refreshes; opened/open/close/toggle/closeForPopoutSwitch forward to the loader for the popout coordinator. Gates re-verified in-host (validate exit 0, qmllint exit 0). Live QA on the running shell captured healthy, setup-guidance (bogus gnoPath), and init-guidance (env-wrapper uninitialized gno) with screenshots + producing JSON in /tmp/fn-120.2-qa; session restored to ready/1673 docs.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: db88b77042b97f727601fa6dd2b2c7aed686bf3b
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell (4 QML files), live bar-state captures /tmp/fn-120.2-qa
 - PRs:
