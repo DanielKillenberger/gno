@@ -248,6 +248,27 @@ monitor, grabs keyboard focus, and Esc always dismisses. [paraphrase]
   not-executable, version-skew/unknown-command, spawn failure, timeout, and
   malformed output. Errors: this R is the error surface for the subprocess
   boundary; none of these states may crash or blank the shell. [paraphrase]
+- **R10:** Collection browsing: from the overlay (and an entry point in the
+  panel), the user can list all collections (name + document count, from
+  `gno status --json` collections[]) and drill into one to page through its
+  documents (`gno ls <collection> --json -n <limit> --offset <n>`), fully
+  keyboard-driven (Enter drills in / opens, Esc or Backspace navigates back
+  before dismissing). Browsed rows derive `absPath` by joining the
+  collection's absolute `path` with the URI-decoded `source.relPath`; both
+  subprocesses follow the R7/R9 rules (argv arrays, generation IDs,
+  timeouts, stdout bounds, memory-only caching). Errors: status/ls failure
+  → inline error, browse stays interactive; empty collection → explicit
+  copy. "recall and quick browse of our notes" is the founding intent.
+  [user]
+- **R11:** Enter always opens: pressing Enter on any document row — recents,
+  search hits, or browsed collection docs — actually opens the document:
+  primary action opens the source file via the default handler when an
+  absPath is available/derivable, and falls back to the web UI deep link
+  when serve is running; when neither path is available the row shows
+  explicit guidance instead of silently doing nothing. An explicit web-open
+  key remains available on every row. Verified live per row type (a real
+  window/tab must appear). Errors: opener failure → non-blocking notice.
+  [user]
 
 ## Boundaries
 <!-- Boundaries: 40% [user], 60% [inferred] -->
@@ -329,6 +350,8 @@ monitor, grabs keyboard focus, and Esc always dismisses. [paraphrase]
 | R7 | fn-120-gno-recall-omarchy-shell-plugin.6 |
 | R8 | fn-120-gno-recall-omarchy-shell-plugin.7 |
 | R9 | fn-120-gno-recall-omarchy-shell-plugin.1 |
+| R10 | fn-120-gno-recall-omarchy-shell-plugin.8 |
+| R11 | fn-120-gno-recall-omarchy-shell-plugin.9 |
 
 ## Parked unknowns
 
