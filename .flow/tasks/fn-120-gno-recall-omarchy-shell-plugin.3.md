@@ -33,9 +33,8 @@ Do not add kind: panel or entryPoints.panel. manageIpc: false is required so a l
 - [ ] Installed from the local checkout onto the live Omarchy session; evidence captured (screenshots + peek JSON) for healthy panel, stale-cache panel, uninitialized or empty-but-initialized, and serve-down web-UI affordance.
 
 ## Done summary
-TBD
-
+Bar-anchored index health panel shipped as Panel.qml: a qs.Ui KeyboardPanel with manageIpc:false (plugin-id shell toggle stays reserved for the overlay), loaded by BarWidget via Loader with injected bar/settings/service/anchorItem/hostWidget. Content: health line, documents/collections counts, backlog, lastIndexedAt, 10 keyboard-selectable recents (title with URI-tail fallback, collection, relative age). Keyboard: Esc closes, Tab hands off via bar.switchPanelFrom, arrows/jk move highlight, Enter/Space activates. Open-web-UI action is serve-gated: enabled with serve.url via Qt.openUrlExternally when serve.running, else disabled with 'start: gno serve --detach' guidance - the plugin never starts serve. Recall-search control closes the panel and summons the overlay via bar.shell.toggle with bar.run fallback. Three distinct copy blocks (uninitialized / empty-but-initialized / plugin-local error), stale renders last-good rows with an explicit 'Showing last good snapshot · age' marker. Gates: validate exit 0, qmllint clean. Live captures in /tmp/fn-120.3-qa verified in-host: healthy (serve-down guidance visible), stale, uninitialized, serve-up enabled button with http://localhost:3000, Esc-close journal proof, overlay layer appearing in Hyprland layer list. Session restored to ready/1673 docs, serve down.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 7ac13f79eb73f3e9a2b8f4417e83fbed20fbe6dc
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell, live panel QA /tmp/fn-120.3-qa (healthy/stale/uninit/serve-up/esc/overlay-summon)
 - PRs:
