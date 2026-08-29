@@ -37,9 +37,10 @@ omarchy plugin add clones into ~/.config/omarchy/plugins/<manifest.id>/ (not ~/.
 - [ ] Installed from the local checkout onto the live Omarchy session (~/.config/omarchy/plugins/<id>/); evidence captured: validate output, omarchy plugin list --json showing the id, and at least one real peek JSON or a plugin-local discovery-error state from the running shell.
 
 ## Done summary
-TBD
+Scaffolded the GNO Recall Omarchy plugin in the new public repo gmickel/omarchy-gno-recall (user-confirmed names: id gmickel.gno-recall, display "GNO Recall", MIT). manifest.json declares service + bar-widget + overlay with keepLoaded:true (no panel kind); entryPoints Service.qml / BarWidget.qml / RecallOverlay.qml; barWidget settings gnoPath (empty = PATH) + refreshIntervalSec (default 900, clamped 60-3600). Service.qml is the sole Process owner: argv-array Quickshell.Io.Process + StdioCollector, bounded stdout (256K), kill-timers with SIGKILL escalation, and distinct states not-found / not-executable / spawn-failure / timeout / malformed-json / unknown-command / version-skew plus ready/loading; lastGoodSnapshot + generationId already present for R7. BarWidget binds via bar.shell.serviceFor and pushes settings; RecallOverlay is a dismissible stub exposing a peekState IPC probe. README covers add/update/remove, privilege boundary, gno >= 1.36.0 floor, and the local-dev loop.
 
+Gates re-verified in-host: omarchy plugin validate . exit 0; qmllint -I /usr/share/omarchy/shell clean on all four QML files. Live QA on the running Omarchy session: plugin installed + enabled, shell stayed up, and `omarchy-shell shell call gmickel.gno-recall peekState '{}'` returned state=ready with a real peek@1.0 snapshot from released gno 1.36.0 (initialized:true, 1673 documents). Evidence: /tmp/fn-120.1-qa/{validate,plugin-list,service-peek-evidence,qmllint}.log. Review note carried to .2: RUNTIME exit-2 envelopes currently surface under spawn-failure; give them a distinct health state.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: d7a90ca112f2b1dc3ef0ddc9d8b8d9f33e51ca85
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell Service.qml BarWidget.qml RecallOverlay.qml Panel.qml, omarchy-shell shell call gmickel.gno-recall peekState {}
 - PRs:
