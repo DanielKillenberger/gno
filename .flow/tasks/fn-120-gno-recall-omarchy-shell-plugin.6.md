@@ -30,9 +30,8 @@ R7 is the refresh-path error surface. A green qmllint is not enough — cache-dr
 - [ ] Installed from the local checkout onto the live Omarchy session; evidence captured for stale+age, timeout, malformed peek, late-result suppression, shell-restart cache-drop, and theme switch.
 
 ## Done summary
-TBD
-
+R7 hardening audit complete. Already held from .1-.5: memory-only cache (no FileView/settings/XDG snapshot writes), search generation late-drop, kill timers, token-only theming with non-color cues. Gaps closed: peek-side generation ids (peekGenerationId/_runningPeekGen; late onExited no-ops, overlapping refresh() coalesces via queued flag - journal-proven gen 8 dropped, gens 9/10 coalesced, gen 11 restarted), stdout bounds as named constants rejected before JSON.parse (maxPeekStdoutChars=512KiB, maxSearchStdoutChars=2MiB; oversized 614401-char output rejected without crash), lastSuccessfulRefreshAt wall-clock stamp driving visible cache-age in panel and overlay, bar now prefers stale visuals (with backlog marks) over setup-guidance when last-good exists while keeping setup-guidance when no cache, README cache/privacy note. Live evidence: stale+age, 30s-sleep timeout counted as failed refresh (stale not crash), malformed JSON, oversized, overlapping-peek coalesce, shell-restart cache drop (post-restart peekState showed loading/null lastGood/zero recents - nothing restored from disk), Blackgold->Nord->Blackgold theme switch restyling all surfaces. Gates: validate 0, qmllint 0. Session restored: theme Blackgold, ready, 1673 docs, SUPER+R intact, hyprctl configerrors empty.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 48e8cc1303edb7e81fff24ab881713f3531855ac
+- Tests: omarchy plugin validate ., qmllint -I /usr/share/omarchy/shell, live QA /tmp/fn-120.6-qa (stale-age/timeout/malformed/oversized/late-peek-coalesce/shell-restart-cache-drop/theme-switch)
 - PRs:
