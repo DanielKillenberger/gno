@@ -1796,6 +1796,7 @@ the serve pid-file. A foreground `gno serve` stays invisible to peek.
 Options:
 
 - `-p, --port <num>` - Port to listen on (default: 3000)
+- `--dev` - Serve the development bundle with HMR. Default `gno serve` is production.
 - `--host`, `--mcp-token-file`, repeatable `--mcp-allowed-host` /
   `--mcp-allowed-origin`, and `--mcp-enable-write` - see
   [Resident HTTP MCP security](MCP.md#resident-http-transport)

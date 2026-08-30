@@ -3335,16 +3335,24 @@ API share the listener; use `gno daemon` for authenticated non-loopback MCP.
 **Synopsis:**
 
 ```bash
-gno serve [--port <num>] [gateway-options] [--detach] [--pid-file <path>] [--log-file <path>]
+gno serve [--port <num>] [--dev] [gateway-options] [--detach] [--pid-file <path>] [--log-file <path>]
 gno serve --status [--json]
 gno serve --stop
 ```
+
+Default `gno serve` (no `--dev`) is the production WebUI bundle, even when
+`NODE_ENV` is unset. `--dev` is the operator switch for the development bundle
+and HMR (`serve:dev` / `bun --hot` remain the hot-reload path). `--dev` does
+not apply to `--status` or `--stop` (those paths do not boot the UI). A
+detached child inherits the same production default unless the parent was
+started with `--dev`.
 
 **Options:**
 
 | Option                 | Type    | Default                  | Description                                                      |
 | ---------------------- | ------- | ------------------------ | ---------------------------------------------------------------- |
 | `-p, --port`           | number  | 3000                     | Port to listen on                                                |
+| `--dev`                | boolean | false                    | Serve the development bundle with HMR (default is production)    |
 | `--detach`             | boolean | false                    | Self-spawn a detached child; parent prints `{pid,url}` and exits |
 | `--pid-file <path>`    | string  | `{data}/serve.pid`       | Override pid-file location (JSON metadata, absolute path)        |
 | `--log-file <path>`    | string  | `{data}/serve.log`       | Override log-file location (append mode)                         |
@@ -3423,6 +3431,7 @@ is blocked.
 ```bash
 gno serve
 gno serve --port 8080
+gno serve --dev
 
 # Backgrounding
 gno serve --detach

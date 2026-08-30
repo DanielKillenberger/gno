@@ -12,6 +12,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { resolveServeNodeEnv } from "../../src/cli/program";
 import { runCli } from "../../src/cli/run";
 import { safeRm } from "../helpers/cleanup";
 
@@ -368,6 +369,48 @@ describe("gno serve backgrounding flags", () => {
         logFile
       );
       expect(code).toBe(3);
+    });
+  });
+
+  describe("--dev production default", () => {
+    test("plain serve resolves to production; --dev resolves to development", () => {
+      expect(resolveServeNodeEnv(false)).toBe("production");
+      expect(resolveServeNodeEnv(true)).toBe("development");
+    });
+
+    test("`gno serve --help` documents --dev", async () => {
+      const { code, stdout } = await cli("serve", "--help");
+      expect(code).toBe(0);
+      expect(stdout).toContain("--dev");
+      expect(stdout).toContain("production");
+    });
+
+    test("`--status --dev` still only inspects status (does not apply)", async () => {
+      const { code } = await cli(
+        "serve",
+        "--status",
+        "--dev",
+        "--pid-file",
+        pidFile,
+        "--log-file",
+        logFile
+      );
+      expect(code).toBe(3);
+    });
+
+    test("`--stop --dev` still only stops (does not apply)", async () => {
+      const { code, stdout, stderr } = await cli(
+        "serve",
+        "--stop",
+        "--dev",
+        "--pid-file",
+        pidFile,
+        "--log-file",
+        logFile
+      );
+      expect(code).toBe(3);
+      expect(stdout).toBe("");
+      expect(stderr).toBe("");
     });
   });
 
