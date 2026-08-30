@@ -36,25 +36,38 @@ const buildEntrypoints = async (
   format: "esm" | "iife" = "esm"
 ): Promise<void> => {
   for (let attempt = 1; attempt <= BUILD_ATTEMPTS; attempt += 1) {
-    const result = await Bun.build({
-      entrypoints,
-      outdir,
-      target: "browser",
-      format,
-      define: {
-        "process.env.NODE_ENV": JSON.stringify("production"),
-      },
-      minify: true,
-      sourcemap: "none",
-      splitting: false,
-      naming: "[name].[ext]",
-    });
-    if (result.success) {
-      return;
-    }
-    for (const log of result.logs) console.error(log);
-    if (!isTransientReadFailure(result.logs) || attempt === BUILD_ATTEMPTS) {
-      throw new Error("Browser clipper build failed");
+    try {
+      const result = await Bun.build({
+        entrypoints,
+        outdir,
+        target: "browser",
+        format,
+        define: {
+          "process.env.NODE_ENV": JSON.stringify("production"),
+        },
+        minify: true,
+        sourcemap: "none",
+        splitting: false,
+        naming: "[name].[ext]",
+      });
+      if (result.success) {
+        return;
+      }
+      for (const log of result.logs) console.error(log);
+      if (!isTransientReadFailure(result.logs) || attempt === BUILD_ATTEMPTS) {
+        throw new Error("Browser clipper build failed");
+      }
+    } catch (error) {
+      const thrownBuildFailure =
+        error instanceof Error &&
+        error.message === "Browser clipper build failed";
+      if (
+        thrownBuildFailure ||
+        !TRANSIENT_READ.test(String(error)) ||
+        attempt === BUILD_ATTEMPTS
+      ) {
+        throw error;
+      }
     }
     await Bun.sleep(25 * attempt);
   }

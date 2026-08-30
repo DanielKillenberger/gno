@@ -5,9 +5,10 @@ import { mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { ClipperPackageResult } from "../package";
+
 import { safeRm } from "../../test/helpers/cleanup";
 import { readArchiveEntries, sha256Hex } from "../archive";
-import { packageClipper } from "../package";
 
 let tempRoot: string | null = null;
 
@@ -56,11 +57,43 @@ describe("browser clipper package", () => {
       join(packRoot, "node_modules")
     );
     await copyPackagingInputs(join(repoRoot, "browser-extension"), extRoot);
-    const result = await packageClipper({
-      rootDir: extRoot,
-      artifactsDir: join(tempRoot, "artifacts"),
-      distDir: join(tempRoot, "dist"),
-    });
+    const resultPath = join(tempRoot, "package-result.json");
+    const runnerPath = join(tempRoot, "run-package.ts");
+    await Bun.write(
+      runnerPath,
+      `import { packageClipper } from ${JSON.stringify(join(repoRoot, "browser-extension/package.ts"))};
+const result = await packageClipper({
+  rootDir: ${JSON.stringify(extRoot)},
+  artifactsDir: ${JSON.stringify(join(tempRoot, "artifacts"))},
+  distDir: ${JSON.stringify(join(tempRoot, "dist"))},
+});
+await Bun.write(${JSON.stringify(resultPath)}, JSON.stringify(result));
+`
+    );
+    let lastChildError = "";
+    let result: ClipperPackageResult | null = null;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const child = Bun.spawn([process.execPath, runnerPath], {
+        cwd: packRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const exitCode = await child.exited;
+      if (exitCode === 0) {
+        result = (await Bun.file(resultPath).json()) as ClipperPackageResult;
+        break;
+      }
+      lastChildError = await new Response(child.stderr).text();
+      if (!/Unexpected reading file/u.test(lastChildError) || attempt === 4) {
+        throw new Error(
+          `packageClipper child failed (${String(exitCode)}): ${lastChildError}`
+        );
+      }
+      await Bun.sleep(25 * attempt);
+    }
+    if (!result) {
+      throw new Error(`packageClipper child failed: ${lastChildError}`);
+    }
     const packageManifest = (await Bun.file(
       join(import.meta.dir, "..", "..", "package.json")
     ).json()) as { version: string };
