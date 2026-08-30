@@ -822,6 +822,28 @@ management contract.
 `gno serve` is not the only live-refresh path anymore. For headless continuous
 indexing without the Web UI, use `gno daemon`.
 
+### First page load bars
+
+Two bars, same localhost production harness, cold JS cache:
+
+| Bar         | Meaning                                                                           |     P95 |
+| ----------- | --------------------------------------------------------------------------------- | ------: |
+| First paint | Navigation start → Dashboard chrome visible (`h1` GNO plus the Search nav button) | ≤ 200ms |
+| TTI         | Same navigation start → Search click starts in-app navigation to `/search`        |    ≤ 1s |
+
+Filled Dashboard health data is not either bar. This is not a 200ms TTI claim.
+
+```bash
+bun run test:e2e:install   # once — Chromium
+bun run bench:webui-first-page
+# optional: bun run bench:webui-first-page -- --n 20
+```
+
+The script prints N, every sample, nearest-rank P95 (19th of 20 sorted), the
+cache rule (`Network.setCacheDisabled` plus a new browser context per sample),
+and the selectors. A warm JS cache, unreachable server, or missing shell
+selector exits non-zero and does not publish a P95.
+
 ---
 
 ## Security

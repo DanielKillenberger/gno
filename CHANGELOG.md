@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Split the production WebUI first JavaScript file into chunks, lazy-load
+  non-home routes, and default `gno serve` to the production bundle unless
+  `--dev`. Documented a localhost harness for P95 first paint of home chrome
+  (≤ 200ms) and P95 TTI (clicks respond, ≤ 1s). Filled Dashboard health data
+  is not either bar; this is not a 200ms TTI claim.
+
 ### Changed
 
 ### Fixed

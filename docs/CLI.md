@@ -1797,6 +1797,7 @@ Options:
 
 - `-p, --port <num>` - Port to listen on (default: 3000)
 - `--dev` - Serve the development bundle with HMR. Default `gno serve` is production.
+- First-page-load bars (localhost production, cold JS cache): P95 first paint of home chrome ≤ 200ms; P95 TTI (Search click → `/search`) ≤ 1s. Measure with `bun run bench:webui-first-page`. Filled health data is not either bar; this is not a 200ms TTI claim.
 - `--host`, `--mcp-token-file`, repeatable `--mcp-allowed-host` /
   `--mcp-allowed-origin`, and `--mcp-enable-write` - see
   [Resident HTTP MCP security](MCP.md#resident-http-transport)

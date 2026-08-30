@@ -65,6 +65,7 @@
     "test": "bun test",
     "test:web": "bun test test/serve/public --timeout 30000",
     "test:e2e": "bun scripts/web-ui-smoke.ts",
+    "bench:webui-first-page": "bun scripts/webui-first-page-load.ts",
     "test:e2e:clipper": "bun test test/clipper/e2e.test.ts --timeout 240000",
     "test:e2e:pdf": "bun scripts/pdf-viewer-smoke.ts",
     "smoke:pdf-viewer": "bun scripts/pdf-viewer-smoke.ts",
