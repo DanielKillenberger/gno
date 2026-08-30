@@ -698,14 +698,21 @@ GET /api/collections
 ```json
 [
   {
-    "name": "notes",
-    "path": "/Users/you/notes",
-    "pattern": "**/*.md",
+    "name": "corpus",
+    "path": "/home/you/docs/corpus",
+    "pattern": "**/*",
     "include": [],
-    "exclude": [".git", "node_modules"],
-    "models": {
-      "embed": "hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf"
-    },
+    "exclude": [
+      ".git",
+      "node_modules",
+      ".venv",
+      ".idea",
+      "dist",
+      "build",
+      "__pycache__",
+      ".DS_Store",
+      "Thumbs.db"
+    ],
     "effectiveModels": {
       "embed": "hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf",
       "rerank": "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf",
@@ -713,12 +720,21 @@ GET /api/collections
       "gen": "hf:unsloth/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q4_K_M.gguf"
     },
     "modelSources": {
-      "embed": "override",
+      "embed": "preset",
       "rerank": "preset",
       "expand": "preset",
       "gen": "preset"
     },
-    "activePresetId": "slim-tuned"
+    "activePresetId": "slim-tuned",
+    "egressPolicy": {
+      "schemaVersion": "1.0",
+      "collection": "corpus",
+      "configuredPolicy": null,
+      "effectivePolicy": "local_only",
+      "source": "config_default",
+      "revision": 0,
+      "version": "egress-policy-v1:ae29ee652c0380dc54c5db0449f3974780bf86f3d3dd4ba61ea5bc76eb6fd0f0"
+    }
   }
 ]
 ```
@@ -1235,21 +1251,33 @@ GET /api/docs?collection=notes&limit=20&offset=0&tagsAll=work&tagsAny=urgent,mee
 {
   "documents": [
     {
-      "docid": "abc123def456",
-      "uri": "gno://notes/projects/readme.md",
-      "title": "Project README",
-      "collection": "notes",
-      "relPath": "projects/readme.md",
+      "docid": "#0e3978ba",
+      "uri": "gno://corpus/de/deployment-anleitung.md",
+      "title": "Deployment-Anleitung",
+      "collection": "corpus",
+      "relPath": "de/deployment-anleitung.md",
       "sourceExt": ".md",
       "sourceMime": "text/markdown",
-      "updatedAt": "2025-01-15T09:00:00Z"
+      "updatedAt": "2026-08-30 12:04:41"
+    },
+    {
+      "docid": "#804c26f5",
+      "uri": "gno://corpus/de/fehlerbehandlung.md",
+      "title": "Fehlerbehandlung und Logging",
+      "collection": "corpus",
+      "relPath": "de/fehlerbehandlung.md",
+      "sourceExt": ".md",
+      "sourceMime": "text/markdown",
+      "updatedAt": "2026-08-30 12:04:41"
     }
   ],
-  "total": 142,
-  "limit": 20,
+  "total": 9,
+  "limit": 2,
   "offset": 0,
-  "availableDateFields": ["deadline", "published_at"],
-  "sortField": "published_at",
+  "pathPrefix": "",
+  "directChildrenOnly": false,
+  "availableDateFields": [],
+  "sortField": "modified",
   "sortOrder": "desc"
 }
 ```
@@ -1287,24 +1315,24 @@ not-found path on `/doc`; they do not produce a CLI error. See
 
 **Response**:
 
-```json
+````json
 {
-  "docid": "abc123def456",
-  "uri": "gno://notes/projects/readme.md",
-  "title": "Project README",
-  "content": "# Project\n\nThis is the full document content...",
+  "docid": "#9a856271",
+  "uri": "gno://corpus/en/api-reference.md",
+  "title": "REST API Reference",
+  "content": "# REST API Reference\n\nComplete API documentation for the data processing service.\n\n## Authentication\n\nAll API requests require Bearer token authentication:\n\n```bash\ncurl -H \"Authorization: Bearer $TOKEN\" https://api.example.com/v1/data\n```\n\n...",
   "contentAvailable": true,
-  "collection": "notes",
-  "relPath": "projects/readme.md",
-  "tags": ["work", "project/alpha"],
+  "collection": "corpus",
+  "relPath": "en/api-reference.md",
+  "tags": [],
   "source": {
-    "absPath": "/Users/you/notes/projects/readme.md",
-    "relPath": "projects/readme.md",
+    "absPath": "/home/you/docs/corpus/en/api-reference.md",
+    "relPath": "en/api-reference.md",
     "mime": "text/markdown",
     "ext": ".md",
-    "modifiedAt": "2025-01-15T09:00:00Z",
-    "sizeBytes": 4523,
-    "sourceHash": "7b3c..."
+    "modifiedAt": "2026-08-15T13:19:21.428Z",
+    "sizeBytes": 2299,
+    "sourceHash": "9a8562714b7bba0f1172dc0c44721cb4800cc8759dc8b6166c74ec2fb9dee11e"
   },
   "capabilities": {
     "editable": true,
@@ -1314,7 +1342,7 @@ not-found path on `/doc`; they do not produce a CLI error. See
     "mode": "editable"
   }
 }
-```
+````
 
 For converted source formats such as PDF or DOCX, `capabilities.editable` is `false` and `capabilities.canCreateEditableCopy` is `true`. Those documents remain viewable/searchable, but GNO will not write converted markdown back into the original binary source file.
 
@@ -2454,33 +2482,94 @@ is the correct value for subsequent get calls.
 
 **Response**:
 
-```json
+````json
 {
-  "query": "authentication",
-  "mode": "bm25",
   "results": [
     {
-      "docid": "abc123",
-      "uri": "gno://notes/auth.md",
-      "line": 42,
-      "context": "Company knowledge base\n\nReviewed security documentation",
-      "title": "Authentication Guide",
-      "collection": "notes",
-      "contentType": "meeting",
-      "categories": ["meeting", "notes"],
-      "tags": ["backend", "auth"],
-      "score": 0.87,
-      "chunk": {
-        "text": "...relevant text snippet...",
-        "index": 2
+      "docid": "#aecb080b",
+      "score": 1,
+      "uri": "gno://corpus/fr/securite-applications.md",
+      "title": "Sécurité des Applications Web",
+      "contentType": "prose",
+      "categories": ["prose"],
+      "line": 1,
+      "snippet": "# Sécurité des Applications Web\n\nGuide complet sur la sécurisation des applications web modernes.\n\n## <mark>Authentification</mark>\n\n### Tokens JWT\n\nLes JSON Web Tokens offrent une <mark>authentification</mark> sans état:\n\n```typescript\nimport jwt from \"jsonwebtoken\";\n\nfunction genererToken...",
+      "snippetLanguage": "fr",
+      "snippetRange": {
+        "startLine": 1,
+        "endLine": 170
+      },
+      "source": {
+        "relPath": "fr/securite-applications.md",
+        "absPath": "/home/you/docs/corpus/fr/securite-applications.md",
+        "mime": "text/markdown",
+        "ext": ".md",
+        "modifiedAt": "2026-08-15T13:19:21.428Z",
+        "sizeBytes": 3922,
+        "sourceHash": "aecb080b1fb1bd05b23f82a9d07e02b39a9209da48e47c08a24f5dba8e19510b"
+      },
+      "conversion": {
+        "mirrorHash": "aecb080b1fb1bd05b23f82a9d07e02b39a9209da48e47c08a24f5dba8e19510b"
+      },
+      "egressLineage": {
+        "effectivePolicy": "local_only",
+        "digest": "f09d4d8168e4a0d551ad7b695f8a0e001b48b436e1cc4fb34596393281bced58",
+        "sources": [
+          {
+            "collection": "corpus",
+            "policy": "local_only",
+            "source": "config_default"
+          }
+        ]
+      }
+    },
+    {
+      "docid": "#9a856271",
+      "score": 0,
+      "uri": "gno://corpus/en/api-reference.md",
+      "title": "REST API Reference",
+      "contentType": "prose",
+      "categories": ["prose"],
+      "line": 1,
+      "snippet": "# REST API Reference\n\nComplete API documentation for the data processing service.\n\n## <mark>Authentication</mark>\n\nAll API requests require Bearer token <mark>authentication</mark>:\n\n```bash\ncurl -H \"Authorization: Bearer $TOKEN\" https://api.example.com/v1/data\n```\n\n### Token...",
+      "snippetLanguage": "en",
+      "snippetRange": {
+        "startLine": 1,
+        "endLine": 108
+      },
+      "source": {
+        "relPath": "en/api-reference.md",
+        "absPath": "/home/you/docs/corpus/en/api-reference.md",
+        "mime": "text/markdown",
+        "ext": ".md",
+        "modifiedAt": "2026-08-15T13:19:21.428Z",
+        "sizeBytes": 2299,
+        "sourceHash": "9a8562714b7bba0f1172dc0c44721cb4800cc8759dc8b6166c74ec2fb9dee11e"
+      },
+      "conversion": {
+        "mirrorHash": "9a8562714b7bba0f1172dc0c44721cb4800cc8759dc8b6166c74ec2fb9dee11e"
+      },
+      "egressLineage": {
+        "effectivePolicy": "local_only",
+        "digest": "f09d4d8168e4a0d551ad7b695f8a0e001b48b436e1cc4fb34596393281bced58",
+        "sources": [
+          {
+            "collection": "corpus",
+            "policy": "local_only",
+            "source": "config_default"
+          }
+        ]
       }
     }
   ],
   "meta": {
-    "totalResults": 5
+    "query": "authentication",
+    "mode": "bm25",
+    "totalResults": 2,
+    "queryLanguage": "und"
   }
 }
-```
+````
 
 Default snippets skip leading YAML frontmatter and prefer document prose. When
 the FTS window is frontmatter-dominated, GNO falls back to stripped chunk
@@ -2654,36 +2743,115 @@ Combined BM25 + vector search with optional reranking. **Recommended for best re
 
 **Response**:
 
-```json
+````json
 {
-  "query": "how to handle authentication errors",
-  "mode": "hybrid",
-  "queryLanguage": "en",
   "results": [
     {
-      "docid": "abc123",
-      "uri": "gno://notes/auth.md",
-      "context": "Company knowledge base\n\nReviewed security documentation",
-      "title": "Authentication Guide",
-      "collection": "notes",
-      "contentType": "meeting",
-      "categories": ["meeting", "notes"],
-      "tags": ["backend", "auth"],
-      "score": 0.92,
-      "chunk": {
-        "text": "...relevant text snippet...",
-        "index": 2
+      "docid": "#aecb080b",
+      "score": 1,
+      "uri": "gno://corpus/fr/securite-applications.md",
+      "title": "Sécurité des Applications Web",
+      "contentType": "prose",
+      "categories": ["prose"],
+      "line": 1,
+      "snippet": "# Sécurité des Applications Web\n\nGuide complet sur la sécurisation des applications web modernes.\n\n## Authentification\n\n### Tokens JWT\n\nLes JSON Web Tokens offrent une authentification sans état:\n\n```typescript\nimport jwt from \"jsonwebtoken\";\n\nfunction genererToken...",
+      "snippetLanguage": "fr",
+      "snippetRange": {
+        "startLine": 1,
+        "endLine": 170
+      },
+      "source": {
+        "relPath": "fr/securite-applications.md",
+        "absPath": "/home/you/docs/corpus/fr/securite-applications.md",
+        "mime": "text/markdown",
+        "ext": ".md",
+        "modifiedAt": "2026-08-15T13:19:21.428Z",
+        "sizeBytes": 3922,
+        "sourceHash": "aecb080b1fb1bd05b23f82a9d07e02b39a9209da48e47c08a24f5dba8e19510b"
+      },
+      "conversion": {
+        "mirrorHash": "aecb080b1fb1bd05b23f82a9d07e02b39a9209da48e47c08a24f5dba8e19510b",
+        "converterId": "native/markdown",
+        "converterVersion": "1.0.0"
+      },
+      "egressLineage": {
+        "effectivePolicy": "local_only",
+        "digest": "f09d4d8168e4a0d551ad7b695f8a0e001b48b436e1cc4fb34596393281bced58",
+        "sources": [
+          {
+            "collection": "corpus",
+            "policy": "local_only",
+            "source": "config_default"
+          }
+        ]
+      }
+    },
+    {
+      "docid": "#9a856271",
+      "score": 0.347,
+      "uri": "gno://corpus/en/api-reference.md",
+      "title": "REST API Reference",
+      "contentType": "prose",
+      "categories": ["prose"],
+      "line": 1,
+      "snippet": "# REST API Reference\n\nComplete API documentation for the data processing service.\n\n## Authentication\n\nAll API requests require Bearer token authentication:\n\n```bash\ncurl -H \"Authorization: Bearer $TOKEN\" https://api.example.com/v1/data\n```\n\n### Token Endpoints...",
+      "snippetLanguage": "en",
+      "snippetRange": {
+        "startLine": 1,
+        "endLine": 108
+      },
+      "source": {
+        "relPath": "en/api-reference.md",
+        "absPath": "/home/you/docs/corpus/en/api-reference.md",
+        "mime": "text/markdown",
+        "ext": ".md",
+        "modifiedAt": "2026-08-15T13:19:21.428Z",
+        "sizeBytes": 2299,
+        "sourceHash": "9a8562714b7bba0f1172dc0c44721cb4800cc8759dc8b6166c74ec2fb9dee11e"
+      },
+      "conversion": {
+        "mirrorHash": "9a8562714b7bba0f1172dc0c44721cb4800cc8759dc8b6166c74ec2fb9dee11e",
+        "converterId": "native/markdown",
+        "converterVersion": "1.0.0"
+      },
+      "egressLineage": {
+        "effectivePolicy": "local_only",
+        "digest": "f09d4d8168e4a0d551ad7b695f8a0e001b48b436e1cc4fb34596393281bced58",
+        "sources": [
+          {
+            "collection": "corpus",
+            "policy": "local_only",
+            "source": "config_default"
+          }
+        ]
       }
     }
   ],
   "meta": {
-    "expanded": true,
-    "reranked": true,
+    "query": "authentication",
+    "mode": "hybrid",
+    "expanded": false,
+    "reranked": false,
     "vectorsUsed": true,
-    "totalResults": 12
+    "totalResults": 2,
+    "candidateLimit": 20,
+    "graphExpansion": {
+      "enabled": false,
+      "seedCount": 0,
+      "candidateCount": 0,
+      "maxCandidates": 20,
+      "edgeConfidence": {
+        "explicit": 0,
+        "inferred": 0,
+        "ambiguous": 0,
+        "similarity": 0
+      },
+      "fallbackReasons": ["graph_disabled"]
+    },
+    "queryLanguage": "und"
   }
 }
-```
+````
 
 JSON search/query results include `contentType` when a configured content type
 or built-in heuristic is available, plus the full `categories` array used by
@@ -3226,7 +3394,7 @@ async function askGno(question: string): Promise<string> {
 curl -s -X POST http://localhost:3000/api/query \
   -H "Content-Type: application/json" \
   -d "{\"query\": \"$1\", \"limit\": 5}" \
-  | jq -r '.results[] | "• \(.title)\n  \(.chunk.text | .[0:100])...\n"'
+  | jq -r '.results[] | "• \(.title)\n  \(.snippet | .[0:100])...\n"'
 ```
 
 ---
