@@ -49,7 +49,7 @@
     "completion": 0
   },
   "spec_path": ".flow/specs/fn-124-webui-first-page-load.md",
-  "status": "open",
+  "status": "done",
   "title": "WebUI first page load",
   "tracker": {
     "baseHashFlow": null,
@@ -62,5 +62,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-30T17:41:13.754951Z"
+  "updated_at": "2026-08-30T19:44:09.391970Z"
 }

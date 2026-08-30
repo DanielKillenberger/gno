@@ -44,14 +44,8 @@ Document and run one harness for both bars (R1, R2, R8). Same machine story: loc
 
 
 ## Done summary
-Documented and ran `bun run bench:webui-first-page` (Playwright, localhost production `gno serve`, N=20, new context, CDP `Network.setCacheDisabled`).
-
-Selectors: first paint is in-page rAF until `h1` GNO and the nav Search button are present; TTI is that Search click navigating to `/search`. Health cards are excluded. P95 is nearest-rank (19th of 20).
-
-Measured on this machine: P95 first paint 113.7ms (bar 200ms), P95 TTI 255.5ms (bar 1000ms). Docs and CHANGELOG describe the bars without a 200ms TTI claim.
-
-In-harness review: SHIP.
+Landed via PR #200 (squash ce093b95). Implemented on the contributor branch with done summaries in git; task JSON stayed todo in the export. Reviewed in-host by Gordon's harness (approve), full gate green (4406 tests), bars reproduced locally (P95 first paint 148.9ms, TTI 250.9ms). Released as v1.37.0.
 ## Evidence
-- Commits: 75f73bd20e3d74fa15b51122613e70920efb74fb, 1e3316155c83006f26ca1fb7632bfd2edc5c868b
-- Tests: bun scripts/webui-first-page-load.ts, bun test test/serve/public/navigation.test.tsx test/serve/spa-first-chunk.test.ts test/serve/public/code-language.test.ts
-- PRs:
+- Commits: ce093b95
+- Tests: bun run lint:check, bun test, bun scripts/webui-first-page-load.ts --n 8
+- PRs: https://github.com/gmickel/gno/pull/200
