@@ -16,18 +16,12 @@ import {
   Search,
   StarIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import type { AppStatusResponse, HealthActionKind } from "../../status-model";
 
-import { AddCollectionDialog } from "../components/AddCollectionDialog";
-import { AIModelSelector } from "../components/AIModelSelector";
-import { BootstrapStatus } from "../components/BootstrapStatus";
 import { CaptureButton } from "../components/CaptureButton";
-import { FirstRunWizard } from "../components/FirstRunWizard";
 import { GnoLogo } from "../components/GnoLogo";
-import { HealthCenter } from "../components/HealthCenter";
-import { IndexingProgress } from "../components/IndexingProgress";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -92,6 +86,37 @@ interface ModelDownloadStatus {
   failed: Array<{ type: string; error: string }>;
   startedAt: number | null;
 }
+
+const AddCollectionDialog = lazy(() =>
+  import("../components/AddCollectionDialog").then((module) => ({
+    default: module.AddCollectionDialog,
+  }))
+);
+const AIModelSelector = lazy(() =>
+  import("../components/AIModelSelector").then((module) => ({
+    default: module.AIModelSelector,
+  }))
+);
+const BootstrapStatus = lazy(() =>
+  import("../components/BootstrapStatus").then((module) => ({
+    default: module.BootstrapStatus,
+  }))
+);
+const FirstRunWizard = lazy(() =>
+  import("../components/FirstRunWizard").then((module) => ({
+    default: module.FirstRunWizard,
+  }))
+);
+const HealthCenter = lazy(() =>
+  import("../components/HealthCenter").then((module) => ({
+    default: module.HealthCenter,
+  }))
+);
+const IndexingProgress = lazy(() =>
+  import("../components/IndexingProgress").then((module) => ({
+    default: module.IndexingProgress,
+  }))
+);
 
 interface PageProps {
   navigate: (to: string | number) => void;
@@ -397,7 +422,9 @@ export default function Dashboard({ navigate }: PageProps) {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 md:justify-end">
-              <AIModelSelector appStatus={status} showLabel={false} />
+              <Suspense fallback={null}>
+                <AIModelSelector appStatus={status} showLabel={false} />
+              </Suspense>
               <Button
                 disabled={syncing}
                 onClick={() => void handleSync()}
@@ -416,14 +443,16 @@ export default function Dashboard({ navigate }: PageProps) {
 
           {syncJobId && (!status || status.onboarding.ready) && (
             <div className="mt-4 rounded-lg border border-border/50 bg-background/50 p-4">
-              <IndexingProgress
-                jobId={syncJobId}
-                onComplete={handleSyncComplete}
-                onError={() => {
-                  setSyncing(false);
-                  setSyncJobId(null);
-                }}
-              />
+              <Suspense fallback={null}>
+                <IndexingProgress
+                  jobId={syncJobId}
+                  onComplete={handleSyncComplete}
+                  onError={() => {
+                    setSyncing(false);
+                    setSyncJobId(null);
+                  }}
+                />
+              </Suspense>
             </div>
           )}
         </div>
@@ -432,17 +461,19 @@ export default function Dashboard({ navigate }: PageProps) {
       <main className="mx-auto max-w-6xl p-8">
         {status && !status.onboarding.ready && (
           <section className="mb-10">
-            <FirstRunWizard
-              onboarding={status.onboarding}
-              onAddCollection={handleOpenAddCollection}
-              onDownloadModels={() => void handleDownloadModels()}
-              onEmbed={() => void handleEmbedNow()}
-              onSync={() => void handleSync()}
-              onSyncComplete={handleSyncComplete}
-              embedding={busyAction === "embed"}
-              syncJobId={syncJobId}
-              syncing={syncing}
-            />
+            <Suspense fallback={null}>
+              <FirstRunWizard
+                embedding={busyAction === "embed"}
+                onAddCollection={handleOpenAddCollection}
+                onDownloadModels={() => void handleDownloadModels()}
+                onEmbed={() => void handleEmbedNow()}
+                onboarding={status.onboarding}
+                onSync={() => void handleSync()}
+                onSyncComplete={handleSyncComplete}
+                syncJobId={syncJobId}
+                syncing={syncing}
+              />
+            </Suspense>
           </section>
         )}
 
@@ -519,22 +550,26 @@ export default function Dashboard({ navigate }: PageProps) {
 
         {status && (
           <div className="mb-10">
-            <HealthCenter
-              busyAction={busyAction}
-              health={status.health}
-              onAction={handleHealthAction}
-              resident={status.resident}
-            />
+            <Suspense fallback={null}>
+              <HealthCenter
+                busyAction={busyAction}
+                health={status.health}
+                onAction={handleHealthAction}
+                resident={status.resident}
+              />
+            </Suspense>
           </div>
         )}
 
         {status && (
           <div className="mb-10">
-            <BootstrapStatus
-              activation={status.activation}
-              bootstrap={status.bootstrap}
-              onDownloadModels={() => void handleDownloadModels()}
-            />
+            <Suspense fallback={null}>
+              <BootstrapStatus
+                activation={status.activation}
+                bootstrap={status.bootstrap}
+                onDownloadModels={() => void handleDownloadModels()}
+              />
+            </Suspense>
           </div>
         )}
 
@@ -791,12 +826,14 @@ export default function Dashboard({ navigate }: PageProps) {
       </main>
 
       <CaptureButton onClick={() => openCapture()} />
-      <AddCollectionDialog
-        initialPath={initialCollectionPath}
-        onOpenChange={setAddDialogOpen}
-        onSuccess={() => void loadStatus()}
-        open={addDialogOpen}
-      />
+      <Suspense fallback={null}>
+        <AddCollectionDialog
+          initialPath={initialCollectionPath}
+          onOpenChange={setAddDialogOpen}
+          onSuccess={() => void loadStatus()}
+          open={addDialogOpen}
+        />
+      </Suspense>
     </div>
   );
 }
