@@ -374,13 +374,14 @@ When adding new commands or modifying outputs:
   - CLI.md, QUICKSTART.md, ARCHITECTURE.md
   - WEB-UI.md, API.md (for `gno serve` and REST API)
   - MCP.md (for `gno mcp`)
-- [ ] website/\_data/features.yml - Feature bento cards current?
-- [ ] website/ - Auto-synced from docs/ via `bun run website:sync-docs`
 - [ ] ~/work/gno.sh - Website docs/reference pages updated for new user-facing GNO behavior
 - [ ] Flow-Next - Are epic/task specs up to date?
 
-**Website sync**: The `website/docs/` directory is auto-populated from `docs/` during build.
-Run `bun run website:sync-docs` to manually sync. CHANGELOG.md is also copied.
+**Legacy `website/` directory**: The in-repo Jekyll site is retired and is NOT
+a documentation surface - do not update its pages or `_data/features.yml` for
+new features. CI still consumes `website/assets/images/og/` (OG templates via
+`og-images.yml`) and `scripts/sync-assets.ts` writes to `website/assets/`;
+excising the rest is tracked in Flow-Next.
 
 **Hosted website docs**: New features, CLI/MCP/API output changes, model behavior,
 and troubleshooting updates must also be reflected in `~/work/gno.sh` when they
