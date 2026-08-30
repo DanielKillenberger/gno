@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Production `gno serve` loads the committed SPA snapshot before listen so
+  Windows Bun 1.3.11 becomes ready within the watcher smoke without switching
+  the default back to `--dev`. Refresh the snapshot with
+  `bun scripts/build-spa-production.ts`.
+
 - Production WebUI split now paints Dashboard chrome from source and from a
   `bun build --compile` binary. The HTML document references the mount entry
   (not a shared chunk), compiled executables serve a prebuilt SPA snapshot

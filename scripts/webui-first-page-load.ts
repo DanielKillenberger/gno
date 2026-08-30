@@ -293,36 +293,37 @@ async function main(): Promise<void> {
       await seedRuntime.runtime.dispose();
     }
 
-    const server = Bun.spawn(
-      [
-        "bun",
-        "run",
-        "src/index.ts",
-        "--config",
-        configPath,
-        "--index",
-        indexName,
-        "serve",
-        "--port",
-        String(port),
-      ],
-      {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          GNO_CACHE_DIR: cacheDir,
-          GNO_CONFIG_DIR: configDir,
-          GNO_DATA_DIR: dataDir,
-          GNO_OFFLINE: "1",
-        },
-        stderr: "inherit",
-        stdout: "inherit",
-      }
-    );
-
-    const browser = await chromium.launch();
+    let server: ReturnType<typeof Bun.spawn> | undefined;
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     const samples: Sample[] = [];
     try {
+      browser = await chromium.launch();
+      server = Bun.spawn(
+        [
+          "bun",
+          "run",
+          "src/index.ts",
+          "--config",
+          configPath,
+          "--index",
+          indexName,
+          "serve",
+          "--port",
+          String(port),
+        ],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            GNO_CACHE_DIR: cacheDir,
+            GNO_CONFIG_DIR: configDir,
+            GNO_DATA_DIR: dataDir,
+            GNO_OFFLINE: "1",
+          },
+          stderr: "inherit",
+          stdout: "inherit",
+        }
+      );
       await waitForHealthy(baseUrl);
 
       for (let index = 0; index < n; index += 1) {
@@ -335,9 +336,11 @@ async function main(): Promise<void> {
         }
       }
     } finally {
-      await browser.close();
-      server.kill();
-      await server.exited;
+      await browser?.close();
+      if (server) {
+        server.kill();
+        await server.exited;
+      }
     }
 
     const firstPaintP95 = nearestRankP95(

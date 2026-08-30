@@ -1,9 +1,9 @@
 /**
  * Prebuild the production WebUI SPA into assets/spa-production.json.gz.
  *
- * Source-run `gno serve` rebuilds from `src/serve/public/index.html`.
- * `bun build --compile` binaries cannot call Bun.build on /$bunfs, so they
- * serve this embedded snapshot instead.
+ * Production `gno serve` (source and `bun build --compile`) loads this
+ * snapshot instead of calling Bun.build at listen time. Compiled binaries
+ * also cannot call Bun.build on /$bunfs. Use `--dev` for a live HTMLBundle.
  */
 
 import { join } from "node:path";

@@ -3,6 +3,10 @@ import { expect, test } from "bun:test";
 import homepage from "../../src/serve/public/index.html";
 import { createSpaBundleSource } from "../../src/serve/spa-bundle-source";
 import {
+  getProductionSpaAssets,
+  loadEmbeddedProductionSpa,
+} from "../../src/serve/spa-production";
+import {
   buildProductionSpaAssets,
   ROOT_MOUNT_MARKER,
 } from "../../src/serve/spa-production-build";
@@ -96,6 +100,37 @@ test("private SPA bundle source serves entry and generated assets", async () => 
     }
   } finally {
     await source.close();
+  }
+});
+
+test("production serve assets load the committed snapshot without Bun.build", async () => {
+  const originalBuild = Bun.build;
+  let buildCalls = 0;
+  const stubBuild = (async (
+    ...args: Parameters<typeof Bun.build>
+  ): Promise<Awaited<ReturnType<typeof Bun.build>>> => {
+    buildCalls += 1;
+    return originalBuild(...args);
+  }) as typeof Bun.build;
+  Bun.build = stubBuild;
+  try {
+    const [served, embedded] = await Promise.all([
+      getProductionSpaAssets(),
+      loadEmbeddedProductionSpa(),
+    ]);
+    expect(buildCalls).toBe(0);
+    expect(served.html).toBe(embedded.html);
+    expect(Object.keys(served.files)).toEqual(Object.keys(embedded.files));
+    expect(served.html.includes('id="root"')).toBe(true);
+    expect(served.html.includes(ROOT_MOUNT_MARKER)).toBe(false);
+    const firstJsPath = served.html.match(/src="(\/[^"]+\.js)"/u)?.[1];
+    expect(firstJsPath).toBeTruthy();
+    expect(
+      firstJsPath !== undefined &&
+        served.files[firstJsPath]?.text.includes(ROOT_MOUNT_MARKER)
+    ).toBe(true);
+  } finally {
+    Bun.build = originalBuild;
   }
 });
 

@@ -3341,11 +3341,13 @@ gno serve --stop
 ```
 
 Default `gno serve` (no `--dev`) is the production WebUI bundle, even when
-`NODE_ENV` is unset. `--dev` is the operator switch for the development bundle
-and HMR (`serve:dev` / `bun --hot` remain the hot-reload path). `--dev` does
-not apply to `--status` or `--stop` (those paths do not boot the UI). A
-detached child inherits the same production default unless the parent was
-started with `--dev`.
+`NODE_ENV` is unset. Production serve loads the committed SPA snapshot
+(`assets/spa-production.json.gz`) so first listen does not wait on `Bun.build`.
+Refresh the snapshot with `bun scripts/build-spa-production.ts`. `--dev` is the
+operator switch for the development bundle and HMR (`serve:dev` / `bun --hot`
+remain the hot-reload path). `--dev` does not apply to `--status` or `--stop`
+(those paths do not boot the UI). A detached child inherits the same
+production default unless the parent was started with `--dev`.
 
 **Options:**
 

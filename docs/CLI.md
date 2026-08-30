@@ -1796,7 +1796,7 @@ the serve pid-file. A foreground `gno serve` stays invisible to peek.
 Options:
 
 - `-p, --port <num>` - Port to listen on (default: 3000)
-- `--dev` - Serve the development bundle with HMR. Default `gno serve` is production.
+- `--dev` - Serve the development bundle with HMR. Default `gno serve` is production (committed SPA snapshot; refresh with `bun scripts/build-spa-production.ts`).
 - First-page-load bars (localhost production, cold JS cache): P95 first paint of home chrome ≤ 200ms; P95 TTI (Search click → `/search`) ≤ 1s. Measure with `bun run bench:webui-first-page`. Filled health data is not either bar; this is not a 200ms TTI claim.
 - `--host`, `--mcp-token-file`, repeatable `--mcp-allowed-host` /
   `--mcp-allowed-origin`, and `--mcp-enable-write` - see

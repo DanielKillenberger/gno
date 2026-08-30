@@ -38,11 +38,12 @@ const isEnoent = (error: unknown): boolean =>
  * loopback listener plus an unguessable entry path. The public server proxies
  * the bytes and applies its normal security envelope before browser delivery.
  *
- * Production (`isDev === false`) serves a split SPA. Source runs rebuild from
- * `src/serve/public/index.html`. Compiled executables cannot call `Bun.build`
- * on `/$bunfs` (ENOENT on the virtual root), so they serve the prebuilt
- * snapshot embedded from `assets/spa-production.json.gz`. Development keeps
- * the live HTMLBundle so HMR still works.
+ * Production (`isDev === false`) serves the split SPA snapshot embedded from
+ * `assets/spa-production.json.gz`. Source and compiled executables share that
+ * path so first listen does not wait on `Bun.build`. Compiled binaries also
+ * cannot call `Bun.build` on `/$bunfs` (ENOENT on the virtual root).
+ * Development keeps the live HTMLBundle so HMR still works. Refresh the
+ * snapshot with `bun scripts/build-spa-production.ts`.
  */
 export async function createSpaBundleSource(
   bundle: HTMLBundle,

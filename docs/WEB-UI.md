@@ -801,7 +801,10 @@ gno serve [options]
 | `--pid-file <path>` | Override pid-file location                                                | `{data}/serve.pid` |
 | `--log-file <path>` | Override log-file location (append-only)                                  | `{data}/serve.log` |
 
-Default `gno serve` is the production bundle. Use `--dev` (or `bun run serve:dev`
+Default `gno serve` is the production bundle. Source and compiled binaries
+load the committed SPA snapshot (`assets/spa-production.json.gz`) so first
+listen does not wait on `Bun.build`. Refresh that snapshot with
+`bun scripts/build-spa-production.ts`. Use `--dev` (or `bun run serve:dev`
 / `bun --hot … serve --dev`) for HMR. `--dev` does not apply to `--status` or
 `--stop`. A detached child inherits the production default unless the parent
 was started with `--dev`.

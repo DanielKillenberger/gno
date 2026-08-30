@@ -1,7 +1,5 @@
 import productionSpaGzip from "../../assets/spa-production.json.gz" with { type: "file" };
 import {
-  buildProductionSpaAssets,
-  isStandaloneExecutable,
   ROOT_MOUNT_MARKER,
   type ProductionSpaAssets,
 } from "./spa-production-build";
@@ -35,8 +33,11 @@ export const loadEmbeddedProductionSpa =
 
 export const getProductionSpaAssets =
   async (): Promise<ProductionSpaAssets> => {
-    if (isStandaloneExecutable()) {
-      return loadEmbeddedProductionSpa();
-    }
-    return buildProductionSpaAssets();
+    // Source and compiled serve both load the committed snapshot. Rebuilding
+    // with Bun.build on every `gno serve` blocked first listen on Windows
+    // Bun 1.3.11 long enough for the watcher smoke (10s) to miss readiness.
+    // Refresh the snapshot with `bun scripts/build-spa-production.ts`.
+    // `--dev` keeps the live HTMLBundle. Tests that need a live rebuild call
+    // `buildProductionSpaAssets` directly.
+    return loadEmbeddedProductionSpa();
   };
