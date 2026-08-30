@@ -527,7 +527,17 @@ describe("macos-file-provider-smoke local hierarchical classification", () => {
       );
 
       const base = createDirectoryAvailability("local", {
+        // Production local mode fail-closes on non-Darwin. This case proves
+        // hierarchical directory classification, so inject the same Darwin
+        // mechanism stubs as test/ingestion/source-availability/directory.test.ts.
+        platform: "darwin",
         pathSupport: () => "icloud-drive",
+        policy: {
+          get: () => 0,
+          set: () => 0,
+          readErrno: () => 0,
+        },
+        stat: { lstatFlags: () => ({ ok: true, stFlags: 0 }) },
       });
       const instrumented = instrumentDirectoryAvailability(base);
       const memoized = memoizeDirectoryAvailability(instrumented.port);

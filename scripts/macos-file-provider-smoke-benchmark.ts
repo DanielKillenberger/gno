@@ -6,6 +6,8 @@
  * availability pass measured at +15.2323% pre-implementation.
  */
 
+// node:fs — portable open/read/close when Darwin FFI is unavailable
+import { closeSync, openSync, readSync } from "node:fs";
 // node:fs/promises — owned temp-corpus structure and exact cleanup; no Bun equivalent
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 // node:os — Bun has no temporary-directory helper
@@ -17,8 +19,13 @@ import {
   createDirectoryAvailability,
   createSourceContentReader,
   memoizeDirectoryAvailability,
+  type DarwinFileIoPort,
+  type DarwinIoPolicyPort,
+  type DarwinStatPort,
   type DirectoryAvailabilityPort,
   type DirectoryAvailabilityResult,
+  type LocalDirectoryDeps,
+  type LocalReaderDeps,
   type SourceContentReaderPort,
 } from "../src/ingestion/source-availability";
 import { FileWalker } from "../src/ingestion/walker";
@@ -134,6 +141,73 @@ export function instrumentDirectoryAvailability(
  * reads actually run on the all-local corpus (R6 cost measurement).
  */
 const BENCHMARK_PATH_SUPPORT = (): "icloud-drive" => "icloud-drive";
+
+const MECHANISM_POLICY: DarwinIoPolicyPort = {
+  get: () => 0,
+  set: () => 0,
+  readErrno: () => 0,
+};
+
+const MECHANISM_STAT: DarwinStatPort = {
+  lstatFlags: () => ({ ok: true, stFlags: 0 }),
+};
+
+const MECHANISM_FILE: DarwinFileIoPort = {
+  open: (absPath, _flags) => {
+    try {
+      return openSync(absPath, "r");
+    } catch {
+      return -1;
+    }
+  },
+  read: (fd, buf) => {
+    try {
+      return readSync(fd, buf);
+    } catch {
+      return -1;
+    }
+  },
+  close: (fd) => {
+    try {
+      closeSync(fd);
+      return 0;
+    } catch {
+      return -1;
+    }
+  },
+  readErrno: () => 0,
+};
+
+/**
+ * Owned temp corpora are not under a File Provider layout. On Darwin the
+ * injected pathSupport is enough because loadDarwinIo() supplies policy/stat.
+ * On Linux/Windows those backends are absent and production fail-closes;
+ * inject the same mechanism stubs the unit tests use so protocol-shape
+ * lanes still run.
+ */
+function localAvailabilityDeps(): LocalDirectoryDeps {
+  if (process.platform === "darwin") {
+    return { pathSupport: BENCHMARK_PATH_SUPPORT };
+  }
+  return {
+    platform: "darwin",
+    pathSupport: BENCHMARK_PATH_SUPPORT,
+    policy: MECHANISM_POLICY,
+    stat: MECHANISM_STAT,
+  };
+}
+
+function localReaderDeps(): LocalReaderDeps {
+  if (process.platform === "darwin") {
+    return { pathSupport: BENCHMARK_PATH_SUPPORT };
+  }
+  return {
+    platform: "darwin",
+    pathSupport: BENCHMARK_PATH_SUPPORT,
+    policy: MECHANISM_POLICY,
+    file: MECHANISM_FILE,
+  };
+}
 
 function walkConfig(
   root: string,
@@ -265,9 +339,7 @@ export async function runShippedDesignBenchmark(options: {
     uniquePathsPerSample: [] as number[],
   };
   const localDiscovery = await measureLane(async () => {
-    const base = createDirectoryAvailability("local", {
-      pathSupport: BENCHMARK_PATH_SUPPORT,
-    });
+    const base = createDirectoryAvailability("local", localAvailabilityDeps());
     const instrumented = instrumentDirectoryAvailability(base);
     const memoized = memoizeDirectoryAvailability(instrumented.port);
     const result = await walkShipped(
@@ -296,9 +368,7 @@ export async function runShippedDesignBenchmark(options: {
 
   // ── availability metadata: hierarchical dir classification only ─────────
   const availabilityMeta = await measureLane(async () => {
-    const base = createDirectoryAvailability("local", {
-      pathSupport: BENCHMARK_PATH_SUPPORT,
-    });
+    const base = createDirectoryAvailability("local", localAvailabilityDeps());
     const memoized = memoizeDirectoryAvailability(base);
     // Classify every directory once (root + descendants).
     const queue = [options.corpusRoot];
@@ -332,9 +402,7 @@ export async function runShippedDesignBenchmark(options: {
 
   // ── sniff/read/hash (production readers) ────────────────────────────────
   const anyReader = createSourceContentReader("any");
-  const localReader = createSourceContentReader("local", {
-    pathSupport: BENCHMARK_PATH_SUPPORT,
-  });
+  const localReader = createSourceContentReader("local", localReaderDeps());
 
   const sniffAny = await measureLane(async () => {
     const result = await sniffReadHash(files, anyReader);
