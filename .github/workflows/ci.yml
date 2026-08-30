@@ -89,6 +89,9 @@ jobs:
         run: bun run lint:check
 
       - name: Test
+        # Explicit bash so GitHub adds -o pipefail; the TTY-workaround pipe
+        # to cat otherwise swallows bun test's exit code (false-green CI).
+        shell: bash
         run: bun test | cat
         env:
           CI: "true"
