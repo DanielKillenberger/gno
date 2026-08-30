@@ -105,7 +105,7 @@ gno daemon --detach  # headless indexing + resident MCP gateway
 
 **Start here** · [Quick Start](#quick-start) · [Installation](#installation) · [Agent Integration](#agent-integration) · [Search Modes](#search-modes)
 
-**Surfaces** · [Web UI](#web-ui) · [REST API](#rest-api) · [SDK](#sdk) · [Daemon Mode](#daemon-mode) · [Publish to gno.sh](#publish-to-gnosh)
+**Surfaces** · [Web UI](#web-ui) · [Omarchy Plugin](#omarchy-plugin) · [REST API](#rest-api) · [SDK](#sdk) · [Daemon Mode](#daemon-mode) · [Publish to gno.sh](#publish-to-gnosh)
 
 **Under the hood** · [How It Works](#how-it-works) · [Features](#features) · [Local Models](#local-models) · [Fine-Tuned Models](#fine-tuned-models) · [Architecture](#architecture) · [Development](#development)
 
@@ -806,6 +806,18 @@ an HTTP model backend, or when you explicitly upload an exported artifact to
 gno.sh.
 
 > **Detailed docs**: [Web UI Guide](https://gno.sh/docs/web-ui)
+
+---
+
+## Omarchy Plugin
+
+On [Omarchy](https://omarchy.org/), [**GNO Recall**](https://github.com/gmickel/omarchy-gno-recall) puts the index in your bar: a quiet health widget, an anchored panel with counts and recent documents, and a keyboard-first overlay (Super+R) for search, deep search, collection browsing, and opening documents.
+
+```bash
+omarchy plugin add https://github.com/gmickel/omarchy-gno-recall --enable
+```
+
+Requires gno >= 1.36.0 on `PATH`.
 
 ---
 
