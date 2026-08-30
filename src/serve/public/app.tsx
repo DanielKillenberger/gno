@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 
 import { HelpButton } from "./components/HelpButton";
-import { QuickSwitcher } from "./components/QuickSwitcher";
-import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
 import { CaptureModalProvider, useCaptureModal } from "./hooks/useCaptureModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -21,17 +26,28 @@ import {
   updateActiveTabBrowseState,
   type WorkspaceState,
 } from "./lib/workspace-tabs";
-import Ask from "./pages/Ask";
-import Browse from "./pages/Browse";
 import ClipperPairing from "./pages/ClipperPairing";
-import Collections from "./pages/Collections";
-import Connectors from "./pages/Connectors";
 import Dashboard from "./pages/Dashboard";
-import DocumentEditor from "./pages/DocumentEditor";
-import DocView from "./pages/DocView";
-import GraphView from "./pages/GraphView";
-import Search from "./pages/Search";
-import TraceHistory from "./pages/TraceHistory";
+
+const QuickSwitcher = lazy(() =>
+  import("./components/QuickSwitcher").then((module) => ({
+    default: module.QuickSwitcher,
+  }))
+);
+const ShortcutHelpModal = lazy(() =>
+  import("./components/ShortcutHelpModal").then((module) => ({
+    default: module.ShortcutHelpModal,
+  }))
+);
+const Search = lazy(() => import("./pages/Search"));
+const Browse = lazy(() => import("./pages/Browse"));
+const DocView = lazy(() => import("./pages/DocView"));
+const DocumentEditor = lazy(() => import("./pages/DocumentEditor"));
+const Collections = lazy(() => import("./pages/Collections"));
+const Connectors = lazy(() => import("./pages/Connectors"));
+const Ask = lazy(() => import("./pages/Ask"));
+const GraphView = lazy(() => import("./pages/GraphView"));
+const TraceHistory = lazy(() => import("./pages/TraceHistory"));
 
 type Route =
   | "/"
@@ -155,7 +171,9 @@ function AppContent({
           tabs={workspace.tabs}
         />
         <div className="flex-1">
-          <Page key={pageKey} location={location} navigate={navigate} />
+          <Suspense fallback={null}>
+            <Page key={pageKey} location={location} navigate={navigate} />
+          </Suspense>
         </div>
         <footer className="border-t border-border/30 bg-background/60 py-6 text-center text-sm backdrop-blur-sm">
           <div className="ornament mx-auto mb-4 max-w-[8rem] text-muted-foreground/20">
@@ -217,17 +235,19 @@ function AppContent({
         </footer>
       </div>
       <HelpButton onClick={() => setShortcutHelpOpen(true)} />
-      <QuickSwitcher
-        location={location}
-        navigate={(to) => navigate(to)}
-        onCreateNote={openCapture}
-        onOpenChange={setQuickSwitcherOpen}
-        open={quickSwitcherOpen}
-      />
-      <ShortcutHelpModal
-        onOpenChange={setShortcutHelpOpen}
-        open={shortcutHelpOpen}
-      />
+      <Suspense fallback={null}>
+        <QuickSwitcher
+          location={location}
+          navigate={(to) => navigate(to)}
+          onCreateNote={openCapture}
+          onOpenChange={setQuickSwitcherOpen}
+          open={quickSwitcherOpen}
+        />
+        <ShortcutHelpModal
+          onOpenChange={setShortcutHelpOpen}
+          open={shortcutHelpOpen}
+        />
+      </Suspense>
     </>
   );
 }

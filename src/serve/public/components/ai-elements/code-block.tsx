@@ -33,14 +33,19 @@ const CodeBlockContext = createContext<CodeBlockContextType>({
   code: "",
 });
 
-const highlighterPromise = createHighlighter({
-  engine: createJavaScriptRegexEngine(),
-  langs: ["text"],
-  themes: ["one-light", "one-dark-pro"],
-});
+let highlighterPromise: ReturnType<typeof createHighlighter> | null = null;
+
+function getHighlighterRuntime(): ReturnType<typeof createHighlighter> {
+  highlighterPromise ??= createHighlighter({
+    engine: createJavaScriptRegexEngine(),
+    langs: ["text"],
+    themes: ["one-light", "one-dark-pro"],
+  });
+  return highlighterPromise;
+}
 
 async function getHighlighter(language: BundledLanguage | "text") {
-  const highlighter = await highlighterPromise;
+  const highlighter = await getHighlighterRuntime();
   if (!highlighter.getLoadedLanguages().includes(language)) {
     await highlighter.loadLanguage(language);
   }

@@ -4164,10 +4164,27 @@ function wireServeCommand(program: Command): void {
       "internal detached-child marker"
     ).hideHelp()
   );
+  serveCmd.addOption(
+    new Option(
+      "--dev",
+      "serve the development bundle with HMR (default: production)"
+    )
+  );
 
   serveCmd.action(async (cmdOpts: Record<string, unknown>, cmd: Command) => {
     await handleServeAction(cmdOpts, cmd);
   });
+}
+
+/** CLI serve bundle mode. Default `gno serve` is production unless `--dev`. */
+export function resolveServeNodeEnv(
+  dev: boolean
+): "development" | "production" {
+  return dev ? "development" : "production";
+}
+
+function applyServeBundleEnv(dev: boolean): void {
+  process.env.NODE_ENV = resolveServeNodeEnv(dev);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4238,6 +4255,9 @@ async function handleServeAction(
     return;
   }
 
+  const dev = cmdOpts.dev === true;
+  applyServeBundleEnv(dev);
+
   if (cmdOpts.detach) {
     const port = parsePositiveInt("port", cmdOpts.port);
     await runServeDetach({
@@ -4245,6 +4265,7 @@ async function handleServeAction(
       paths,
       spawnDetached,
       argv: resolveCliArgv(cmd),
+      nodeEnv: resolveServeNodeEnv(dev),
     });
     return;
   }
@@ -4423,6 +4444,7 @@ interface ServeDetachDeps {
    * can't taint each other's child argv.
    */
   argv: string[];
+  nodeEnv: "development" | "production";
 }
 
 async function runServeDetach(deps: ServeDetachDeps): Promise<void> {
@@ -4432,6 +4454,7 @@ async function runServeDetach(deps: ServeDetachDeps): Promise<void> {
   const result = await deps.spawnDetached({
     kind: "serve",
     argv: childArgv,
+    env: { NODE_ENV: deps.nodeEnv },
     pidFile: deps.paths.pidFile,
     logFile: deps.paths.logFile,
     port: deps.port,

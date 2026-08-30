@@ -15,6 +15,11 @@ describe("code language normalization", () => {
     expect(resolveCodeLanguage("definitely-unknown")).toBe("text");
   });
 
+  test("accepts allowlisted language ids without importing grammars", () => {
+    expect(resolveCodeLanguage("rust")).toBe("rust");
+    expect(resolveCodeLanguage("js")).toBe("javascript");
+  });
+
   test("extracts hyphenated language ids from markdown classes", () => {
     expect(extractMarkdownCodeLanguage("language-objective-c")).toBe(
       "objective-c"
@@ -26,5 +31,10 @@ describe("code language normalization", () => {
 
     expect(light).toContain("shiki");
     expect(dark).toContain("shiki");
+  });
+
+  test("unknown fence language highlights as text without throw", async () => {
+    const [light] = await highlightCode("plain", "definitely-unknown");
+    expect(light).toContain("shiki");
   });
 });

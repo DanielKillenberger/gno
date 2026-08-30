@@ -1,13 +1,86 @@
 import { expect, test } from "bun:test";
 
+import homepage from "../../src/serve/public/index.html";
 import { createSpaBundleSource } from "../../src/serve/spa-bundle-source";
+import {
+  getProductionSpaAssets,
+  loadEmbeddedProductionSpa,
+} from "../../src/serve/spa-production";
+import {
+  buildProductionSpaAssets,
+  ROOT_MOUNT_MARKER,
+} from "../../src/serve/spa-production-build";
 import fixture from "./fixtures/spa-bundle-entry.html";
+
+const DOCUMENT_ASSET_RE = /<(?:script|link)\b[^>]*\b(?:src|href)="(\/[^"]+)"/gu;
+const CHUNK_HREF_RE = /\/chunk-[a-z0-9]+\.js/g;
+const INLINE_SCRIPT_RE = /<script(?![^>]*\bsrc=)[^>]*>/u;
+const MONOLITH_JS_BYTES = 8_000_000;
+
+const documentAssetPaths = (html: string): string[] => {
+  const paths: string[] = [];
+  for (const match of html.matchAll(DOCUMENT_ASSET_RE)) {
+    const path = match[1];
+    if (path) {
+      paths.push(path);
+    }
+  }
+  return paths;
+};
+
+test("production SPA source emits a split first JS file plus extra chunks", async () => {
+  const source = await createSpaBundleSource(homepage, false);
+  try {
+    const entry = await source.fetch(
+      new Request(`http://public.invalid${source.entryPath}`)
+    );
+    expect(entry.status).toBe(200);
+    const html = await entry.text();
+    expect(html).toContain('<div id="root"></div>');
+    expect(INLINE_SCRIPT_RE.test(html)).toBe(false);
+
+    const assets = documentAssetPaths(html);
+    const firstJsPath = assets.find((path) => path.endsWith(".js"));
+    expect(firstJsPath).toBeTruthy();
+    expect(assets.filter((path) => path.endsWith(".js")).length).toBe(1);
+
+    for (const assetPath of assets) {
+      const asset = await source.fetch(
+        new Request(`http://public.invalid${assetPath}`)
+      );
+      expect(asset.status).toBe(200);
+      expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    }
+
+    const firstJs = await source.fetch(
+      new Request(`http://public.invalid${firstJsPath}`)
+    );
+    expect(firstJs.status).toBe(200);
+    const firstJsText = await firstJs.text();
+    expect(firstJsText.length).toBeLessThan(MONOLITH_JS_BYTES);
+    expect(firstJsText.includes(ROOT_MOUNT_MARKER)).toBe(true);
+    expect(html.includes("<base")).toBe(false);
+
+    const extraChunks = [
+      ...new Set(firstJsText.match(CHUNK_HREF_RE) ?? []),
+    ].filter((path) => path !== firstJsPath);
+    expect(extraChunks.length).toBeGreaterThan(0);
+
+    const extra = await source.fetch(
+      new Request(`http://public.invalid${extraChunks[0]}`)
+    );
+    expect(extra.status).toBe(200);
+    expect((await extra.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  } finally {
+    await source.close();
+  }
+});
 
 test("private SPA bundle source serves entry and generated assets", async () => {
   // Dedicated fixture, not the production homepage. Full-suite runs mock
   // SPA modules (use-api, etc.); compiling index.html in that process
   // yields HTTP 500. This bundle only proves the private source surface.
-  const source = createSpaBundleSource(fixture, false);
+  const source = await createSpaBundleSource(fixture, false);
   try {
     const entry = await source.fetch(
       new Request(`http://public.invalid${source.entryPath}`)
@@ -16,14 +89,57 @@ test("private SPA bundle source serves entry and generated assets", async () => 
     const html = await entry.text();
     expect(html).toContain('<div id="root"></div>');
 
-    const assetPath = html.match(/(?:src|href)="(\/[^"]+)"/u)?.[1];
-    expect(assetPath).toBeTruthy();
-    const asset = await source.fetch(
-      new Request(`http://public.invalid${assetPath}`)
-    );
-    expect(asset.status).toBe(200);
-    expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    const assets = documentAssetPaths(html);
+    expect(assets.length).toBeGreaterThan(0);
+    for (const assetPath of assets) {
+      const asset = await source.fetch(
+        new Request(`http://public.invalid${assetPath}`)
+      );
+      expect(asset.status).toBe(200);
+      expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    }
   } finally {
     await source.close();
   }
+});
+
+test("production serve assets load the committed snapshot without Bun.build", async () => {
+  const originalBuild = Bun.build;
+  let buildCalls = 0;
+  const stubBuild = (async (
+    ...args: Parameters<typeof Bun.build>
+  ): Promise<Awaited<ReturnType<typeof Bun.build>>> => {
+    buildCalls += 1;
+    return originalBuild(...args);
+  }) as typeof Bun.build;
+  Bun.build = stubBuild;
+  try {
+    const [served, embedded] = await Promise.all([
+      getProductionSpaAssets(),
+      loadEmbeddedProductionSpa(),
+    ]);
+    expect(buildCalls).toBe(0);
+    expect(served.html).toBe(embedded.html);
+    expect(Object.keys(served.files)).toEqual(Object.keys(embedded.files));
+    expect(served.html.includes('id="root"')).toBe(true);
+    expect(served.html.includes(ROOT_MOUNT_MARKER)).toBe(false);
+    const firstJsPath = served.html.match(/src="(\/[^"]+\.js)"/u)?.[1];
+    expect(firstJsPath).toBeTruthy();
+    expect(
+      firstJsPath !== undefined &&
+        served.files[firstJsPath]?.text.includes(ROOT_MOUNT_MARKER)
+    ).toBe(true);
+  } finally {
+    Bun.build = originalBuild;
+  }
+});
+
+test("production SPA build refuses a bunfs HTML entry", async () => {
+  let thrown: unknown;
+  try {
+    await buildProductionSpaAssets("/$bunfs/root/index-eenebfbp.html");
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown instanceof Error && /bunfs/.test(thrown.message)).toBe(true);
 });

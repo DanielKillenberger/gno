@@ -793,6 +793,7 @@ gno serve [options]
 | Flag                | Description                                                               | Default            |
 | :------------------ | :------------------------------------------------------------------------ | :----------------- |
 | `-p, --port <num>`  | Port to listen on                                                         | 3000               |
+| `--dev`             | Serve the development bundle with HMR                                     | false              |
 | `--index <name>`    | Use named index                                                           | default            |
 | `--detach`          | Self-spawn a detached background process (macOS/Linux only)               | false              |
 | `--status`          | Read pid-file, check liveness, print status (`--json` for machine output) | false              |
@@ -800,21 +801,53 @@ gno serve [options]
 | `--pid-file <path>` | Override pid-file location                                                | `{data}/serve.pid` |
 | `--log-file <path>` | Override log-file location (append-only)                                  | `{data}/serve.log` |
 
+Default `gno serve` is the production bundle. Source and compiled binaries
+load the committed SPA snapshot (`assets/spa-production.json.gz`) so first
+listen does not wait on `Bun.build`. Refresh that snapshot with
+`bun scripts/build-spa-production.ts`. Use `--dev` (or `bun run serve:dev`
+/ `bun --hot … serve --dev`) for HMR. `--dev` does not apply to `--status` or
+`--stop`. A detached child inherits the production default unless the parent
+was started with `--dev`.
+
 `--detach`, `--status`, `--stop` are mutually exclusive. `--json` is gated to
 `--status`. See [CLI reference](CLI.md#long-running-processes) for the full
 management contract.
 
 ### Environment Variables
 
-| Variable                 | Description                                              |
-| :----------------------- | :------------------------------------------------------- |
-| `NODE_ENV=production`    | Disable HMR, stricter CSP                                |
-| `GNO_VERBOSE=1`          | Enable debug logging                                     |
-| `HF_HUB_OFFLINE=1`       | Offline mode: use cached models only                     |
-| `GNO_NO_AUTO_DOWNLOAD=1` | Disable auto-download (allow explicit `gno models pull`) |
+| Variable                 | Description                                                                          |
+| :----------------------- | :----------------------------------------------------------------------------------- |
+| `NODE_ENV`               | Default `gno serve` sets `production`. `--dev` sets `development` (HMR + `ws:` CSP). |
+| `GNO_VERBOSE=1`          | Enable debug logging                                                                 |
+| `HF_HUB_OFFLINE=1`       | Offline mode: use cached models only                                                 |
+| `GNO_NO_AUTO_DOWNLOAD=1` | Disable auto-download (allow explicit `gno models pull`)                             |
 
 `gno serve` is not the only live-refresh path anymore. For headless continuous
 indexing without the Web UI, use `gno daemon`.
+
+### First page load bars
+
+Two bars, same localhost production harness, cold JS cache:
+
+| Bar         | Meaning                                                                                                           |     P95 |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- | ------: |
+| First paint | Navigation start → Dashboard chrome painted visible (`h1` GNO plus the Search nav button; not mere DOM insertion) | ≤ 200ms |
+| TTI         | Same navigation start → Search click starts in-app navigation to `/search`                                        |    ≤ 1s |
+
+Filled Dashboard health data is not either bar. This is not a 200ms TTI claim.
+
+```bash
+bun run test:e2e:install   # once — Chromium
+bun run bench:webui-first-page
+# optional: bun run bench:webui-first-page -- --n 20
+```
+
+The script prints N, every sample, nearest-rank P95 (19th of 20 sorted), the
+cache rule (`Network.setCacheDisabled` plus a new browser context per sample),
+and the selectors. First paint waits until the heading and Search button have
+a non-zero painted box (not `display`/`visibility`/`opacity` hidden) and a
+following paint frame has committed. A warm JS cache, unreachable server, or
+missing shell selector exits non-zero and does not publish a P95.
 
 ---
 
