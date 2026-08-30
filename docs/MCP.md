@@ -26,7 +26,7 @@ diagnose can emit the closed, redacted `query-diagnose@1.1` affinity metadata.
 ## Overview
 
 MCP (Model Context Protocol) allows AI assistants to access external tools and
-resources. GNO registers 27 tools in default read-only mode and 42 when writes
+resources. GNO registers 33 tools in default read-only mode and 51 when writes
 are explicitly enabled:
 
 - **Tools (read)**: gno_context, gno_context_verify, gno_ask, gno_search, gno_vsearch, gno_query, gno_query_diagnose, gno_get, gno_section, gno_multi_get, gno_peek, gno_status, gno_changes, gno_diff, gno_impact, gno_trace_list, gno_trace_show, gno_list_tags, gno_links, gno_backlinks, gno_similar, gno_graph, gno_graph_query, gno_graph_neighbors, gno_graph_path

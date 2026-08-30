@@ -661,9 +661,9 @@ Connect GNO to Claude Desktop, Cursor, Raycast, and more:
 
 ![GNO MCP](./assets/screenshots/mcp.jpg)
 
-GNO exposes 25 tools by default via [Model Context Protocol](https://modelcontextprotocol.io),
+GNO exposes 33 tools by default via [Model Context Protocol](https://modelcontextprotocol.io),
 including the core retrieval tools below. Starting MCP with `--enable-write`
-adds 15 opt-in mutation tools, for 40 total.
+adds 18 opt-in mutation tools, for 51 total.
 
 | Tool                 | Description                                     |
 | :------------------- | :---------------------------------------------- |
