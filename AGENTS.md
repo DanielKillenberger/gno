@@ -377,11 +377,13 @@ When adding new commands or modifying outputs:
 - [ ] ~/work/gno.sh - Website docs/reference pages updated for new user-facing GNO behavior
 - [ ] Flow-Next - Are epic/task specs up to date?
 
-**Legacy `website/` directory**: The in-repo Jekyll site is retired and is NOT
-a documentation surface - do not update its pages or `_data/features.yml` for
-new features. CI still consumes `website/assets/images/og/` (OG templates via
-`og-images.yml`) and `scripts/sync-assets.ts` writes to `website/assets/`;
-excising the rest is tracked in Flow-Next.
+**Legacy `website/` directory**: The in-repo Jekyll site is retired and kept
+in place for historical reference only. NEVER update it - not its pages, not
+`_data/features.yml` - for any feature or docs change (user decision
+2026-08-30). The only parts still consumed are `website/assets/images/og/`
+(OG templates via `og-images.yml`) and `website/assets/` as the
+`scripts/sync-assets.ts` target; those may be touched when the OG/asset
+pipeline itself changes.
 
 **Hosted website docs**: New features, CLI/MCP/API output changes, model behavior,
 and troubleshooting updates must also be reflected in `~/work/gno.sh` when they
