@@ -24,27 +24,39 @@ export interface BuildClipperOptions {
   rootDir?: string;
 }
 
+const TRANSIENT_READ = /Unexpected reading file/u;
+const BUILD_ATTEMPTS = 4;
+
+const isTransientReadFailure = (logs: readonly unknown[]): boolean =>
+  logs.some((log) => TRANSIENT_READ.test(String(log)));
+
 const buildEntrypoints = async (
   entrypoints: string[],
   outdir: string,
   format: "esm" | "iife" = "esm"
 ): Promise<void> => {
-  const result = await Bun.build({
-    entrypoints,
-    outdir,
-    target: "browser",
-    format,
-    define: {
-      "process.env.NODE_ENV": JSON.stringify("production"),
-    },
-    minify: true,
-    sourcemap: "none",
-    splitting: false,
-    naming: "[name].[ext]",
-  });
-  if (!result.success) {
+  for (let attempt = 1; attempt <= BUILD_ATTEMPTS; attempt += 1) {
+    const result = await Bun.build({
+      entrypoints,
+      outdir,
+      target: "browser",
+      format,
+      define: {
+        "process.env.NODE_ENV": JSON.stringify("production"),
+      },
+      minify: true,
+      sourcemap: "none",
+      splitting: false,
+      naming: "[name].[ext]",
+    });
+    if (result.success) {
+      return;
+    }
     for (const log of result.logs) console.error(log);
-    throw new Error("Browser clipper build failed");
+    if (!isTransientReadFailure(result.logs) || attempt === BUILD_ATTEMPTS) {
+      throw new Error("Browser clipper build failed");
+    }
+    await Bun.sleep(25 * attempt);
   }
 };
 
