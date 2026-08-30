@@ -1,11 +1,16 @@
 import type { HTMLBundle, Server } from "bun";
 
-// node:fs/promises — no Bun equivalent for mkdir/rm/unlink of sockets and build dirs.
-import { mkdir, rm, unlink } from "node:fs/promises";
+// node:fs/promises — no Bun equivalent for unlink of private sockets.
+import { unlink } from "node:fs/promises";
 // node:os — no Bun equivalent for the platform temporary directory.
 import { tmpdir } from "node:os";
 // node:path — no Bun path utils.
-import { basename, join } from "node:path";
+import { join } from "node:path";
+
+import {
+  getProductionSpaAssets,
+  type ProductionSpaAssets,
+} from "./spa-production";
 
 type BunServer = Server<unknown>;
 
@@ -33,10 +38,11 @@ const isEnoent = (error: unknown): boolean =>
  * loopback listener plus an unguessable entry path. The public server proxies
  * the bytes and applies its normal security envelope before browser delivery.
  *
- * Production (`isDev === false`) builds the HTML entry with `Bun.build`
- * splitting so the document references an external first JS module plus extra
- * chunks instead of one inlined ~11.8 MB script. Development keeps the live
- * HTMLBundle so HMR still works.
+ * Production (`isDev === false`) serves a split SPA. Source runs rebuild from
+ * `src/serve/public/index.html`. Compiled executables cannot call `Bun.build`
+ * on `/$bunfs` (ENOENT on the virtual root), so they serve the prebuilt
+ * snapshot embedded from `assets/spa-production.json.gz`. Development keeps
+ * the live HTMLBundle so HMR still works.
  */
 export async function createSpaBundleSource(
   bundle: HTMLBundle,
@@ -54,82 +60,43 @@ export async function createSpaBundleSource(
     });
   }
 
-  return createSplitProductionSource(bundle, entryPath, nonce);
+  return createSplitProductionSource(entryPath, nonce);
 }
 
 async function createSplitProductionSource(
-  bundle: HTMLBundle,
   entryPath: string,
   nonce: string
 ): Promise<SpaBundleSource> {
-  const outdir = join(tmpdir(), `gno-spa-build-${nonce.slice(0, 20)}`);
-  await mkdir(outdir, { recursive: true });
+  const assets = await getProductionSpaAssets();
+  return hostProductionAssets(assets, entryPath, nonce);
+}
 
-  let result: Awaited<ReturnType<typeof Bun.build>>;
-  try {
-    result = await Bun.build({
-      entrypoints: [bundle.index],
-      minify: true,
-      outdir,
-      publicPath: "/",
-      splitting: true,
-      target: "browser",
-    });
-  } catch (error) {
-    await rm(outdir, { recursive: true, force: true });
-    throw error;
-  }
-
-  if (!result.success) {
-    await rm(outdir, { recursive: true, force: true });
-    throw new Error("Production SPA split build failed");
-  }
-
-  const htmlArtifact = result.outputs.find((output) =>
-    output.path.endsWith(".html")
-  );
-  if (!htmlArtifact) {
-    await rm(outdir, { recursive: true, force: true });
-    throw new Error("Production SPA split build did not emit HTML");
-  }
-
-  const html = await htmlArtifact.text();
-  const files = new Map<string, ReturnType<typeof Bun.file>>();
-  for (const output of result.outputs) {
-    if (output.path.endsWith(".html")) {
-      continue;
-    }
-    files.set(`/${basename(output.path)}`, Bun.file(output.path));
-  }
-
+async function hostProductionAssets(
+  assets: ProductionSpaAssets,
+  entryPath: string,
+  nonce: string
+): Promise<SpaBundleSource> {
   const resolve = (pathname: string): Response => {
     if (pathname === entryPath) {
-      return new Response(html, {
+      return new Response(assets.html, {
         headers: { "Content-Type": "text/html;charset=utf-8" },
       });
     }
-    const file = files.get(pathname);
+    const file = assets.files[pathname];
     if (!file) {
       return notFound();
     }
-    return new Response(file);
+    return new Response(file.text, {
+      headers: { "Content-Type": file.type },
+    });
   };
 
-  const source = await hostPrivateSource({
+  return hostPrivateSource({
     entryPath,
     fetchAsset: resolve,
     isDev: false,
     nonce,
   });
-
-  return {
-    close: async (): Promise<void> => {
-      await source.close();
-      await rm(outdir, { recursive: true, force: true });
-    },
-    entryPath: source.entryPath,
-    fetch: (request) => source.fetch(request),
-  };
 }
 
 async function hostPrivateSource(options: {

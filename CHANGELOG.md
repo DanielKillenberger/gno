@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Production WebUI split now paints Dashboard chrome from source and from a
+  `bun build --compile` binary. The HTML document references the mount entry
+  (not a shared chunk), compiled executables serve a prebuilt SPA snapshot
+  instead of calling `Bun.build` on `/$bunfs`, and the first-page harness
+  measures painted visibility rather than DOM insertion.
+
 ## [1.36.1] - 2026-08-29
 
 ### Fixed
