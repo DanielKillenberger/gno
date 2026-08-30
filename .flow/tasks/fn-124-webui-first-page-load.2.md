@@ -46,9 +46,12 @@ Make default `gno serve` ship the production bundle unless the operator asked fo
 
 
 ## Done summary
-TBD
+Default `gno serve` is now the production bundle. The CLI sets `NODE_ENV=production` on the process and detached child unless `--dev` is passed (`--dev` sets `NODE_ENV=development` for HMR + `ws:` CSP). `--status` / `--stop` return before that env change. `startServer`'s `NODE_ENV !== "production"` check is unchanged so injected `bun test` servers stay isDev.
 
+`spec/cli.md`, `docs/WEB-UI.md`, `docs/CLI.md`, and `serve:dev` document `--dev` as the HMR switch.
+
+In-harness review: SHIP.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: fc08e9e4c392c1188df79218e2bc7dc393962aa7
+- Tests: bun test test/cli/serve-flags.test.ts
 - PRs:
