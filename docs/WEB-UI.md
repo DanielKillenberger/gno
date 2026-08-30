@@ -767,6 +767,7 @@ gno serve [options]
 | Flag                | Description                                                               | Default            |
 | :------------------ | :------------------------------------------------------------------------ | :----------------- |
 | `-p, --port <num>`  | Port to listen on                                                         | 3000               |
+| `--dev`             | Serve the development bundle with HMR                                     | false              |
 | `--index <name>`    | Use named index                                                           | default            |
 | `--detach`          | Self-spawn a detached background process (macOS/Linux only)               | false              |
 | `--status`          | Read pid-file, check liveness, print status (`--json` for machine output) | false              |
@@ -774,18 +775,23 @@ gno serve [options]
 | `--pid-file <path>` | Override pid-file location                                                | `{data}/serve.pid` |
 | `--log-file <path>` | Override log-file location (append-only)                                  | `{data}/serve.log` |
 
+Default `gno serve` is the production bundle. Use `--dev` (or `bun run serve:dev`
+/ `bun --hot … serve --dev`) for HMR. `--dev` does not apply to `--status` or
+`--stop`. A detached child inherits the production default unless the parent
+was started with `--dev`.
+
 `--detach`, `--status`, `--stop` are mutually exclusive. `--json` is gated to
 `--status`. See [CLI reference](CLI.md#long-running-processes) for the full
 management contract.
 
 ### Environment Variables
 
-| Variable                 | Description                                              |
-| :----------------------- | :------------------------------------------------------- |
-| `NODE_ENV=production`    | Disable HMR, stricter CSP                                |
-| `GNO_VERBOSE=1`          | Enable debug logging                                     |
-| `HF_HUB_OFFLINE=1`       | Offline mode: use cached models only                     |
-| `GNO_NO_AUTO_DOWNLOAD=1` | Disable auto-download (allow explicit `gno models pull`) |
+| Variable                 | Description                                                                          |
+| :----------------------- | :----------------------------------------------------------------------------------- |
+| `NODE_ENV`               | Default `gno serve` sets `production`. `--dev` sets `development` (HMR + `ws:` CSP). |
+| `GNO_VERBOSE=1`          | Enable debug logging                                                                 |
+| `HF_HUB_OFFLINE=1`       | Offline mode: use cached models only                                                 |
+| `GNO_NO_AUTO_DOWNLOAD=1` | Disable auto-download (allow explicit `gno models pull`)                             |
 
 `gno serve` is not the only live-refresh path anymore. For headless continuous
 indexing without the Web UI, use `gno daemon`.

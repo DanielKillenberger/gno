@@ -142,7 +142,7 @@
     "sync:agents": "scripts/sync-agents.sh",
     "build:css": "tailwindcss -i src/serve/public/globals.css -o src/serve/public/globals.built.css --minify",
     "serve": "bun src/index.ts serve",
-    "serve:dev": "NODE_ENV=development bun --hot src/index.ts serve",
+    "serve:dev": "bun --hot src/index.ts serve --dev",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
     "version:major": "npm version major --no-git-tag-version",
