@@ -47,9 +47,14 @@ Lazy-load non-home routes and keep Shiki, PDF, and graph off the first JS file (
 
 
 ## Done summary
-TBD
+Non-home routes (Search, Browse, DocView, DocumentEditor, Collections, Connectors, Ask, GraphView, TraceHistory) are `React.lazy` + `Suspense`. Dashboard, WorkspaceTabs, HelpButton, QuickSwitcher, CaptureModal, and `/clipper/pair` stay on the existing eager / separate-render paths.
 
+`resolveCodeLanguage` uses a string-id allowlist instead of value-importing `bundledLanguages`. `createHighlighter` runs on first highlight, not at module eval. Unknown fence languages still resolve to `text` without throw.
+
+Production first JS is a split entry (~481 KB) and does not contain pdfjs, `react-force-graph-2d`, Shiki grammars, or the editor/ask/graph page modules.
+
+In-harness review: SHIP.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: fabd7add8e593b6aa6fe157d131167c1e3cc4650
+- Tests: bun test test/serve/public/code-language.test.ts test/serve/public/navigation.test.tsx test/serve/spa-first-chunk.test.ts
 - PRs:
