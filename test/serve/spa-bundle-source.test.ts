@@ -2,6 +2,10 @@ import { expect, test } from "bun:test";
 
 import homepage from "../../src/serve/public/index.html";
 import { createSpaBundleSource } from "../../src/serve/spa-bundle-source";
+import {
+  buildProductionSpaAssets,
+  ROOT_MOUNT_MARKER,
+} from "../../src/serve/spa-production-build";
 
 const DOCUMENT_ASSET_RE = /<(?:script|link)\b[^>]*\b(?:src|href)="(\/[^"]+)"/gu;
 const CHUNK_HREF_RE = /\/chunk-[a-z0-9]+\.js/g;
@@ -49,6 +53,8 @@ test("production SPA source emits a split first JS file plus extra chunks", asyn
     expect(firstJs.status).toBe(200);
     const firstJsText = await firstJs.text();
     expect(firstJsText.length).toBeLessThan(MONOLITH_JS_BYTES);
+    expect(firstJsText.includes(ROOT_MOUNT_MARKER)).toBe(true);
+    expect(html.includes("<base")).toBe(false);
 
     const extraChunks = [
       ...new Set(firstJsText.match(CHUNK_HREF_RE) ?? []),
@@ -87,4 +93,14 @@ test("private SPA bundle source serves entry and generated assets", async () => 
   } finally {
     await source.close();
   }
+});
+
+test("production SPA build refuses a bunfs HTML entry", async () => {
+  let thrown: unknown;
+  try {
+    await buildProductionSpaAssets("/$bunfs/root/index-eenebfbp.html");
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown instanceof Error && /bunfs/.test(thrown.message)).toBe(true);
 });

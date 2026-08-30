@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import homepage from "../../src/serve/public/index.html";
 import { createSpaBundleSource } from "../../src/serve/spa-bundle-source";
+import { ROOT_MOUNT_MARKER } from "../../src/serve/spa-production-build";
 
 const DOCUMENT_JS_RE = /<script\b[^>]*\bsrc="(\/[^"]+\.js)"/u;
 const MONOLITH_JS_BYTES = 8_000_000;
@@ -36,6 +37,7 @@ test("production first JS is a split entry without pdf, graph, or Shiki grammars
     expect(firstJs.status).toBe(200);
     const firstJsText = await firstJs.text();
     expect(firstJsText.length).toBeLessThan(MONOLITH_JS_BYTES);
+    expect(firstJsText.includes(ROOT_MOUNT_MARKER)).toBe(true);
 
     for (const marker of FORBIDDEN_FIRST_FILE) {
       expect(firstJsText.includes(marker)).toBe(false);

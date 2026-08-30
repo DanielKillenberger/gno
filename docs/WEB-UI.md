@@ -800,10 +800,10 @@ indexing without the Web UI, use `gno daemon`.
 
 Two bars, same localhost production harness, cold JS cache:
 
-| Bar         | Meaning                                                                           |     P95 |
-| ----------- | --------------------------------------------------------------------------------- | ------: |
-| First paint | Navigation start → Dashboard chrome visible (`h1` GNO plus the Search nav button) | ≤ 200ms |
-| TTI         | Same navigation start → Search click starts in-app navigation to `/search`        |    ≤ 1s |
+| Bar         | Meaning                                                                                                           |     P95 |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- | ------: |
+| First paint | Navigation start → Dashboard chrome painted visible (`h1` GNO plus the Search nav button; not mere DOM insertion) | ≤ 200ms |
+| TTI         | Same navigation start → Search click starts in-app navigation to `/search`                                        |    ≤ 1s |
 
 Filled Dashboard health data is not either bar. This is not a 200ms TTI claim.
 
@@ -815,8 +815,10 @@ bun run bench:webui-first-page
 
 The script prints N, every sample, nearest-rank P95 (19th of 20 sorted), the
 cache rule (`Network.setCacheDisabled` plus a new browser context per sample),
-and the selectors. A warm JS cache, unreachable server, or missing shell
-selector exits non-zero and does not publish a P95.
+and the selectors. First paint waits until the heading and Search button have
+a non-zero painted box (not `display`/`visibility`/`opacity` hidden) and a
+following paint frame has committed. A warm JS cache, unreachable server, or
+missing shell selector exits non-zero and does not publish a P95.
 
 ---
 

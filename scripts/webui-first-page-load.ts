@@ -20,7 +20,9 @@
  *     fails the run and does not publish a P95
  *
  * Selectors:
- *   first paint — in-page rAF until h1 "GNO" and nav Search are in the DOM
+ *   first paint — navigation start → h1 "GNO" and nav Search are visible
+ *                 (non-zero box, not display/visibility/opacity-hidden) and
+ *                 a following paint frame has committed (double rAF)
  *   TTI         — Playwright Search click → URL /search
  *
  * P95 math: nearest-rank, 19th of 20 sorted samples (ceil(0.95 * N)).
@@ -122,6 +124,23 @@ const measureSample = async (page: Page, baseUrl: string): Promise<Sample> => {
   let firstPaintMs: number;
   try {
     firstPaintMs = await page.evaluate(async () => {
+      const isPaintedVisible = (element: Element | null): boolean => {
+        if (!(element instanceof HTMLElement)) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          style.visibility === "collapse" ||
+          Number.parseFloat(style.opacity) === 0
+        ) {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+
       return await new Promise<number>((resolve, reject) => {
         const timeout = window.setTimeout(() => {
           reject(
@@ -131,14 +150,21 @@ const measureSample = async (page: Page, baseUrl: string): Promise<Sample> => {
         const check = (): void => {
           const heading = document.querySelector("h1");
           const nav = document.querySelector("nav");
-          const searchVisible = nav
-            ? [...nav.querySelectorAll("button")].some(
+          const search = nav
+            ? [...nav.querySelectorAll("button")].find(
                 (button) => button.textContent?.trim() === "Search"
               )
-            : false;
-          if (heading?.textContent?.trim() === "GNO" && searchVisible) {
+            : undefined;
+          const headingVisible =
+            heading?.textContent?.trim() === "GNO" && isPaintedVisible(heading);
+          const searchVisible = Boolean(search && isPaintedVisible(search));
+          if (headingVisible && searchVisible) {
             window.clearTimeout(timeout);
-            resolve(performance.now());
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                resolve(performance.now());
+              });
+            });
             return;
           }
           requestAnimationFrame(check);
@@ -177,7 +203,9 @@ const printReport = (
   console.log("WebUI first page load harness");
   console.log("  localhost production gno serve, cold JS cache");
   console.log(`  N=${n}  cache=CDP Network.setCacheDisabled + new context`);
-  console.log("  first paint: heading GNO + nav Search visible");
+  console.log(
+    "  first paint: heading GNO + nav Search painted visible (geometry + computed style + paint frame)"
+  );
   console.log("  TTI: Search click → /search  (not a 200ms TTI bar)");
   console.log("  health cards are excluded from both bars");
   console.log(

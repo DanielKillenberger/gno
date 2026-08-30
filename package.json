@@ -142,6 +142,7 @@
     "website:sync-assets": "bun scripts/sync-assets.ts",
     "sync:agents": "scripts/sync-agents.sh",
     "build:css": "tailwindcss -i src/serve/public/globals.css -o src/serve/public/globals.built.css --minify",
+    "build:spa": "bun scripts/build-spa-production.ts",
     "serve": "bun src/index.ts serve",
     "serve:dev": "bun --hot src/index.ts serve --dev",
     "version:patch": "npm version patch --no-git-tag-version",
