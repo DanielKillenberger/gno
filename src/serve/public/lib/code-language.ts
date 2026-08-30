@@ -1,4 +1,6 @@
-import { bundledLanguages, type BundledLanguage } from "shiki";
+import type { BundledLanguage } from "shiki";
+
+import { BUNDLED_LANGUAGE_IDS } from "./shiki-language-ids";
 
 export type CodeLanguage = BundledLanguage | "text";
 
@@ -41,7 +43,7 @@ export function resolveCodeLanguage(
     return "text";
   }
 
-  if (aliased in bundledLanguages) {
+  if (BUNDLED_LANGUAGE_IDS.has(aliased)) {
     return aliased as BundledLanguage;
   }
 
