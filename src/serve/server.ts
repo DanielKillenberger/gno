@@ -304,16 +304,16 @@ export async function startServer(
 
   // Start server with try/catch for port-in-use etc.
   let server: ReturnType<typeof Bun.serve>;
-  // Bun HTMLBundle route values cannot carry custom headers. In production,
-  // host it on a private Unix socket (ephemeral loopback on Windows), then
-  // proxy bytes through this public listener's security envelope. Injected
-  // server tests keep an in-listener bundle route because their fake Bun
-  // server cannot host the private source.
+  // Bun HTMLBundle / built-chunk route values cannot carry custom headers.
+  // Host them on a private Unix socket (ephemeral loopback on Windows), then
+  // proxy bytes through this public listener's security envelope. Production
+  // emits split JS chunks; injected-server tests keep an in-listener bundle
+  // route because their fake Bun server cannot host the private source.
   let spaBundleSource: SpaBundleSource | null = null;
   const usesInjectedServer = dependencies.serve !== undefined;
   try {
     if (!usesInjectedServer) {
-      spaBundleSource = createSpaBundleSource(homepage, isDev);
+      spaBundleSource = await createSpaBundleSource(homepage, isDev);
     }
   } catch (error) {
     removeShutdownHandlers();
