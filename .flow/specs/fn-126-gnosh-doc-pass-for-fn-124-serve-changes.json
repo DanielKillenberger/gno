@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-126-gnosh-doc-pass-for-fn-124-serve-changes.md",
-  "status": "open",
+  "status": "done",
   "title": "gno.sh doc pass for fn-124 serve changes (post-merge)",
   "tracker": {
     "baseHashFlow": null,
@@ -20,5 +20,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-30T19:40:35.321836Z"
+  "updated_at": "2026-08-30T20:11:16.762401Z"
 }

@@ -9,13 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Guard the committed production SPA snapshot against source drift with a
-  `sourceHash` of `src/serve/public/**` (tests fail with `bun run build:spa`)
-  and pin the shiki language-id table to installed `bundledLanguages`.
-
 ### Changed
 
 ### Fixed
+
+## [1.37.1] - 2026-08-30
+
+### Added
+
+- Guard the committed production SPA snapshot against source drift with a
+  `sourceHash` of `src/serve/public/**` (tests fail with `bun run build:spa`)
+  and pin the shiki language-id table to installed `bundledLanguages`.
 
 ## [1.37.0] - 2026-08-30
 
@@ -2276,7 +2280,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.37.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.37.1...HEAD
+[1.37.1]: https://github.com/gmickel/gno/compare/v1.37.0...v1.37.1
 [1.37.0]: https://github.com/gmickel/gno/compare/v1.36.1...v1.37.0
 [1.36.1]: https://github.com/gmickel/gno/compare/v1.36.0...v1.36.1
 [1.36.0]: https://github.com/gmickel/gno/compare/v1.35.0...v1.36.0
