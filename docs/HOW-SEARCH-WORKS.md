@@ -435,6 +435,14 @@ GNO retrieves more candidates than you request, then filters down:
 | Reranking               | Top 20                 |
 | Final output            | Your requested `limit` |
 
+## Display snippets
+
+After ranking, default search and query snippets skip a leading YAML
+frontmatter fence and prefer document prose. When the FTS window is
+frontmatter-dominated, GNO falls back to the stripped chunk prose. `line` and
+`snippetRange.startLine` follow that trimmed display range. `--full` and
+`--line-numbers` still emit the raw source. Indexed text is unchanged.
+
 ## Content Types and Categories
 
 GNO stores a canonical `contentType` and category filters for every indexed document. JSON search/query results include both fields per result:

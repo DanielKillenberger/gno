@@ -271,6 +271,12 @@ JSON results include a top-level `line` anchor when the matching chunk is known.
 file-backed document (collection root + relative path). There is no `--source`
 flag. If `absPath` is absent, show the URI tail and do not offer file-open for
 that row.
+
+Default snippets skip a leading YAML frontmatter fence and prefer document
+prose. When the FTS window is frontmatter-dominated, GNO falls back to the
+stripped chunk prose. `line` and `snippetRange.startLine` follow that trimmed
+display range. `--full` and `--line-numbers` still emit the raw source. This
+display cleaning applies to `gno search`, `gno vsearch`, and `gno query`.
 For non-default indexes, emitted `gno://` URIs include output-only index
 metadata, e.g. `gno://docs/api.md?index=research`; readers such as `gno get`
 can round-trip that URI back to the named index.
@@ -1530,12 +1536,16 @@ gno peek --json
 ```
 
 Uninitialized is success: `--json` returns `initialized: false` with pinned
-nulls and `recent: []`, exit 0.
+nulls and `recent: []`, exit 0. Any subquery failure returns an atomic
+`RUNTIME` envelope and exits 2. Peek never emits a half-filled snapshot.
 
 JSON is `peek@1.0`. `recent[].absPath` is the path to open a recent file
-without `gno get`. When `serve.running` is true, open a document in the Web
-UI with the frozen template `{serveUrl}/doc?uri=<encodeURIComponent(uri)>`
-(`serve.url` + document URI; optional `#anchor`). See
+without `gno get`. `serve.running` reads the serve pid-file written by
+`gno serve --detach`. A foreground `gno serve` is not detected. There is no
+HTTP probe. A stale pid reports `running: false` and `url: null`. When
+`serve.running` is true, open a document in the Web UI with the frozen
+template `{serveUrl}/doc?uri=<encodeURIComponent(uri)>` (`serve.url` +
+document URI; optional `#anchor`). See
 [Document deep links](./WEB-UI.md#document-deep-links).
 
 ### gno status
@@ -1779,6 +1789,9 @@ gno serve
 gno serve --port 8080
 gno serve --detach
 ```
+
+`gno peek --json` reports `serve.running` only for a detached child that wrote
+the serve pid-file. A foreground `gno serve` stays invisible to peek.
 
 Options:
 

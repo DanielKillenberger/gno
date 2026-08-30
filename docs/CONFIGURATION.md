@@ -724,7 +724,9 @@ Precedence:
 Supported placeholders:
 
 - `{path}` absolute filesystem path
-- `{line}` best-effort line number from the result snippet, when available
+- `{line}` best-effort line number from the result snippet, when available.
+  Default snippets skip leading YAML frontmatter, so this line follows the
+  trimmed display range rather than the raw source fence.
 - `{col}` best-effort column placeholder (`1` when line is available)
 
 If the chosen template requires `{line}` but a result has no line hint, GNO falls back to plain text for that result instead of inventing `:1`.

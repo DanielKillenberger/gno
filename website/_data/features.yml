@@ -14,6 +14,7 @@
     - Cross-encoder reranking for precision
     - Strong signal detection skips expansion when confident
     - Clickable terminal hyperlinks for TTY search workflows
+    - Default snippets skip leading YAML frontmatter and prefer document prose
     - Configurable fast/balanced/thorough modes
   commands:
     - "gno search 'exact terms'"
@@ -317,10 +318,12 @@
     - Instant cold start with Bun
     - Sub-second search across large collections
     - JSON, CSV, Markdown, XML, URI output formats
+    - `gno peek --json` cheap peek@1.0 snapshot for status bars and widgets
     - Scriptable and pipeable
     - Structured query documents for complex retrieval
   commands:
     - "gno search 'query' --json"
+    - "gno peek --json"
     - "gno query 'topic' --limit 20"
     - "gno query 'topic' --explain"
 

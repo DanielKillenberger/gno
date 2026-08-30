@@ -2482,6 +2482,12 @@ is the correct value for subsequent get calls.
 }
 ```
 
+Default snippets skip leading YAML frontmatter and prefer document prose. When
+the FTS window is frontmatter-dominated, GNO falls back to stripped chunk
+prose. `line` follows that trimmed display range. File-backed hits include
+`results[].source.absPath` (collection root + relative path). If `absPath` is
+absent, show the URI tail and do not offer file-open for that row.
+
 **Example**:
 
 ```bash
@@ -2681,10 +2687,13 @@ Combined BM25 + vector search with optional reranking. **Recommended for best re
 
 JSON search/query results include `contentType` when a configured content type
 or built-in heuristic is available, plus the full `categories` array used by
-category filters. Plain text, CSV, Markdown, and XML formatters keep their
-existing shapes. They also preserve optional configured `context` guidance and
-the exact source `uri`/`docid`; grounded Ask delimits that trusted guidance from
-untrusted retrieved document content.
+category filters. Default snippets skip leading YAML frontmatter and prefer
+document prose. A frontmatter-dominated FTS window falls back to stripped chunk
+prose. `line` follows that trimmed display range. File-backed hits include
+`results[].source.absPath`. Plain text, CSV, Markdown, and XML formatters keep
+their existing shapes. They also preserve optional configured `context` guidance
+and the exact source `uri`/`docid`; grounded Ask delimits that trusted guidance
+from untrusted retrieved document content.
 
 With `explain: true`, `meta.explain.results[].contentTypeBoost` is present for
 non-neutral configured types. It records the raw/base score, configured factor,

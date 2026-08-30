@@ -117,12 +117,25 @@ gno daemon --detach  # headless indexing + resident MCP gateway
 
 <!-- public-truth:current-version -->
 
-> Current release: **v1.35.0** — see [CHANGELOG.md](./CHANGELOG.md)
+> Current release: **v1.36.1**. See [CHANGELOG.md](./CHANGELOG.md).
 
 <!-- /public-truth -->
 
 > Full release history: [CHANGELOG.md](./CHANGELOG.md)
 
+- **Cheap peek snapshot**: `gno peek --json` and MCP `gno_peek` return a
+  model-free `peek@1.0` snapshot (document/collection counts, embedding backlog,
+  10 recent docs with `docid` and `absPath`, pid-file serve detection).
+  Uninitialized reports `initialized:false` with pinned nulls and exit 0. Any
+  subquery failure is an atomic `RUNTIME` envelope (exit 2). `serve.running` is
+  true only for `gno serve --detach`. JSON search hits pin
+  `results[].source.absPath`. Open a document in the Web UI with
+  `{serveUrl}/doc?uri=<encodeURIComponent(uri)>`.
+- **Prose-first snippets**: `gno search`, `gno vsearch`, and `gno query` skip
+  leading YAML frontmatter and prefer document prose. A frontmatter-dominated
+  FTS window falls back to stripped chunk prose. `--full` and `--line-numbers`
+  still emit raw source. `line` and `snippetRange.startLine` follow the trimmed
+  display range.
 - **Trustworthy local context compiler**: deterministic Context Capsules replace
   repeated agent `query → get → multi-get` orchestration with one bounded,
   citation-complete evidence handoff. The promoted benchmark retained 100%
@@ -544,7 +557,10 @@ Output formats: `--json`, `--files`, `--csv`, `--md`, `--xml`
 # Search one collection
 gno search "PostgreSQL connection pool" --collection work-docs
 
-# Export retrieval results for an agent
+# Cheap index snapshot for a status bar or desktop widget
+gno peek --json
+
+# Export retrieval results for an agent (`source.absPath` on file-backed hits)
 gno query "authentication flow" --json -n 10
 gno query "deployment rollback" --all --files --min-score 0.4
 
@@ -649,26 +665,27 @@ GNO exposes 25 tools by default via [Model Context Protocol](https://modelcontex
 including the core retrieval tools below. Starting MCP with `--enable-write`
 adds 15 opt-in mutation tools, for 40 total.
 
-| Tool                 | Description                           |
-| :------------------- | :------------------------------------ |
-| `gno_search`         | BM25 keyword search                   |
-| `gno_vsearch`        | Vector semantic search                |
-| `gno_query`          | Hybrid search (recommended)           |
-| `gno_context`        | Budgeted exact evidence Capsule       |
-| `gno_context_verify` | Verify saved Capsule provenance       |
-| `gno_ask`            | Opt-in closed-Capsule verified answer |
-| `gno_get`            | Retrieve document by ID               |
-| `gno_multi_get`      | Batch document retrieval              |
-| `gno_links`          | Get outgoing links from document      |
-| `gno_backlinks`      | Get documents linking TO document     |
-| `gno_similar`        | Find semantically similar documents   |
-| `gno_graph`          | Get knowledge graph (nodes and edges) |
-| `gno_status`         | Index health check                    |
-| `gno_trace_list`     | List private local retrieval receipts |
-| `gno_trace_show`     | Inspect one bounded trace receipt     |
-| `gno_changes`        | Read retained metadata-only changes   |
-| `gno_diff`           | Read one structural document delta    |
-| `gno_impact`         | Trace bounded dependency impact       |
+| Tool                 | Description                                     |
+| :------------------- | :---------------------------------------------- |
+| `gno_search`         | BM25 keyword search                             |
+| `gno_vsearch`        | Vector semantic search                          |
+| `gno_query`          | Hybrid search (recommended)                     |
+| `gno_context`        | Budgeted exact evidence Capsule                 |
+| `gno_context_verify` | Verify saved Capsule provenance                 |
+| `gno_ask`            | Opt-in closed-Capsule verified answer           |
+| `gno_get`            | Retrieve document by ID                         |
+| `gno_multi_get`      | Batch document retrieval                        |
+| `gno_links`          | Get outgoing links from document                |
+| `gno_backlinks`      | Get documents linking TO document               |
+| `gno_similar`        | Find semantically similar documents             |
+| `gno_graph`          | Get knowledge graph (nodes and edges)           |
+| `gno_peek`           | Cheap `peek@1.0` counts, backlog, recent, serve |
+| `gno_status`         | Index health check                              |
+| `gno_trace_list`     | List private local retrieval receipts           |
+| `gno_trace_show`     | Inspect one bounded trace receipt               |
+| `gno_changes`        | Read retained metadata-only changes             |
+| `gno_diff`           | Read one structural document delta              |
+| `gno_impact`         | Trace bounded dependency impact                 |
 
 **Design**: Default MCP mode is read-only: retrieval, opt-in verified synthesis,
 graph, status, and job inspection. Raw retrieval tools leave synthesis to your

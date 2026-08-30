@@ -74,7 +74,12 @@ Check what's indexed:
 ```bash
 gno ls
 gno status --json | jq '.activation'
+gno peek --json
 ```
+
+`gno peek --json` is the cheap snapshot for counts, backlog, 10 recents, and
+whether `gno serve --detach` is up. A foreground serve is not detected. Keep
+`gno status` for activation and the full health payload.
 
 The activation result is stronger than a document count: each ready collection
 returned one of its own corpus-derived sources through local lexical search.

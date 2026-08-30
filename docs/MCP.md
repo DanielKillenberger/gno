@@ -108,7 +108,7 @@ Use the narrower tools when the request is explicit:
 | `gno_get`            | One known `gno://` URI, `#docid`, or `collection/path`                          | Use `fromLine` + `lineCount` first                  |
 | `gno_section`        | Create/resolve a durable section target; cite only exact/recovered              | Follow citation lines with `gno_get`                |
 | `gno_multi_get`      | Batch several top result refs or glob-matched docs                              | Keep `maxBytes` bounded                             |
-| `gno_peek`           | Cheap counts, backlog, recent files, or whether serve is up                     | Same `peek@1.0` snapshot as `gno peek --json`       |
+| `gno_peek`           | Cheap counts, backlog, recent files, or whether `gno serve --detach` is up      | Same `peek@1.0` snapshot as `gno peek --json`       |
 | `gno_status`         | Results look stale, vector search fails, or embeddings may be missing           | Run write-enabled `gno_index` or `gno_embed`        |
 
 With private retrieval tracing enabled, `gno_search`, `gno_vsearch`,
@@ -1096,7 +1096,11 @@ Limit: 5 (default)
 Structured search results include per-result `contentType` and `categories`
 fields, alongside `tags`, `docid`, `uri`, scores, and source metadata. Use those
 fields when an agent needs to distinguish canonical typed pages from broader
-category filters.
+category filters. File-backed hits include `source.absPath`. Default snippets
+skip leading YAML frontmatter and prefer document prose. A frontmatter-dominated
+FTS window falls back to stripped chunk prose. `line` follows that trimmed
+display range. This display cleaning applies to `gno_search`, `gno_vsearch`,
+and `gno_query`.
 
 Portable export records additionally expose a bounded `record` object in
 structured search/get/multi-get/Ask results. Read its exact locator and anchors
@@ -1278,15 +1282,18 @@ into one `gno_multi_get` call per index.
 
 ### gno_peek
 
-Cheap read-only snapshot (`peek@1.0`) — the same payload as `gno peek --json`.
+Cheap read-only snapshot (`peek@1.0`). Same payload as `gno peek --json`.
 One snapshot, three surfaces: CLI `gno peek --json`, this tool, and the skill
 recipe. Do not compose `status` + `ls` + `changes` for this job.
 
 Returns initialized flag, document/collection counts, embedding backlog, up to
-10 recent files (with `docid` and `absPath`), and pid-file serve liveness. Never
-initializes models or embeddings. Uninitialized is success (`initialized:false`
-plus pinned nulls), not an error. Use this for counts/backlog/recent/serve
-questions; use `gno_status` for the heavy health and activation payload.
+10 recent files (with `docid` and `absPath`), and pid-file serve liveness.
+`serve.running` is true only for `gno serve --detach`. A foreground serve is
+not detected. There is no HTTP probe. Never initializes models or embeddings.
+Uninitialized is success (`initialized:false` plus pinned nulls), not an error.
+A subquery failure is an atomic `RUNTIME` error, never a half-filled snapshot.
+Use this for counts/backlog/recent/serve questions; use `gno_status` for the
+heavy health and activation payload.
 
 Open without fetching content via `gno_get`: Web UI
 `{serveUrl}/doc?uri=<encodeURIComponent(uri)>` from `serve.url` + `uri`

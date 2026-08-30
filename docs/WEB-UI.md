@@ -636,9 +636,10 @@ Optional section fragment: `{serveUrl}/doc?uri=<encodeURIComponent(uri)>#anchor`
 
 `serveUrl` is the operator-facing serve origin (`http://localhost:${port}` when
 bound to loopback). Integrations derive it from `gno peek --json` `serve.url`
-plus a document URI. There is no CLI resolver and no CLI error surface for
-unknown URIs — they stay on this page and use the Web UI's own not-found
-handling.
+plus a document URI. Peek reports `serve.running` only when `gno serve --detach`
+wrote a live pid-file. A foreground `gno serve` is not detected. There is no
+HTTP probe. There is no CLI resolver and no CLI error surface for unknown URIs.
+They stay on this page and use the Web UI's own not-found handling.
 
 This page URL is distinct from the REST document endpoint
 `GET /api/doc?uri=`. See [Get Document](./API.md#get-document).

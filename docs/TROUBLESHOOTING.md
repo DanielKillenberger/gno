@@ -632,6 +632,11 @@ Run `gno doctor` and look for the `code-chunking` check.
 - unsupported extensions fall back to the default markdown chunker
 - files without useful structural boundaries also fall back to the default chunker
 
+Default search and query snippets skip leading YAML frontmatter. `--full` and
+`--line-numbers` still emit the raw source, including the fence. If a snippet
+still opens on metadata, the FTS window was frontmatter-dominated and the
+chunk prose fallback had nothing left to show.
+
 If search snippets still look oddly split for a supported code file:
 
 1. confirm the file extension is one of the supported code types
