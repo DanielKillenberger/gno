@@ -318,7 +318,7 @@
     - Instant cold start with Bun
     - Sub-second search across large collections
     - JSON, CSV, Markdown, XML, URI output formats
-    - `gno peek --json` cheap peek@1.0 snapshot for status bars and widgets
+    - "`gno peek --json` cheap peek@1.0 snapshot for status bars and widgets"
     - Scriptable and pipeable
     - Structured query documents for complex retrieval
   commands:
