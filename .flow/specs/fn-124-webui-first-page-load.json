@@ -1,7 +1,7 @@
 {
   "branch_name": "fn-124-webui-first-page-load",
-  "completion_review_status": "needs_work",
-  "completion_reviewed_at": "2026-08-30T17:12:02.992187Z",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-08-30T17:41:13.291474Z",
   "created_at": "2026-08-30T15:47:51.974114Z",
   "default_impl": null,
   "default_review": null,
@@ -10,7 +10,7 @@
   "id": "fn-124-webui-first-page-load",
   "impl_review_rounds": {},
   "next_task": 1,
-  "plan_review_rounds": 1,
+  "plan_review_rounds": 0,
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-08-30T16:05:22.780631Z",
   "ready": true,
@@ -28,6 +28,20 @@
       "task": null,
       "timestamp": "2026-08-30T17:11:52.405710Z",
       "verdict": "NEEDS_WORK"
+    },
+    {
+      "backend": "gpt-5.6-sol",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "head_sha": "08bb351c48e301114b45c183565d8815d538026e",
+      "kind": "completion",
+      "outcome": "verdict",
+      "output_sha256": "a5503d38305e4aacbcee7a3a0c709acaacb96acc61741af7dcc090a7f1875380",
+      "round_consumed": true,
+      "scope": "completion",
+      "task": null,
+      "timestamp": "2026-08-30T17:41:12.825654Z",
+      "verdict": "SHIP"
     }
   ],
   "review_pending_rounds": {},
@@ -48,5 +62,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-30T17:12:02.992198Z"
+  "updated_at": "2026-08-30T17:41:13.754951Z"
 }
