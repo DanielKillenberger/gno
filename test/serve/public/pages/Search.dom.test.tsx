@@ -20,35 +20,34 @@ void mock.module(
   })
 );
 
+// Contained Search-only widget mocks so the real TagFacets / AIModelSelector
+// suites are not sticky-mocked (fn-123.2 isolation).
 void mock.module(
-  "../../../../src/serve/public/components/AIModelSelector",
+  "../../../../src/serve/public/pages/search-page-widgets",
   () => ({
     AIModelSelector: () => <div data-testid="model-selector">Preset</div>,
+    TagFacets: ({
+      activeTags,
+      onTagSelect,
+      onTagRemove,
+    }: {
+      activeTags: string[];
+      onTagSelect: (tag: string) => void;
+      onTagRemove: (tag: string) => void;
+    }) => (
+      <div>
+        <button onClick={() => onTagSelect("work")} type="button">
+          Mock add tag
+        </button>
+        {activeTags.includes("work") && (
+          <button onClick={() => onTagRemove("work")} type="button">
+            Mock remove tag
+          </button>
+        )}
+      </div>
+    ),
   })
 );
-
-void mock.module("../../../../src/serve/public/components/TagFacets", () => ({
-  TagFacets: ({
-    activeTags,
-    onTagSelect,
-    onTagRemove,
-  }: {
-    activeTags: string[];
-    onTagSelect: (tag: string) => void;
-    onTagRemove: (tag: string) => void;
-  }) => (
-    <div>
-      <button onClick={() => onTagSelect("work")} type="button">
-        Mock add tag
-      </button>
-      {activeTags.includes("work") && (
-        <button onClick={() => onTagRemove("work")} type="button">
-          Mock remove tag
-        </button>
-      )}
-    </div>
-  ),
-}));
 
 describe("Search page DOM interactions", () => {
   beforeEach(() => {

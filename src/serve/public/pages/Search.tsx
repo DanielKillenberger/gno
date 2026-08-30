@@ -12,8 +12,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { resolveDepthPolicy } from "../../../core/depth-policy";
 import { normalizeStructuredQueryInput } from "../../../core/structured-query";
 import { Loader } from "../components/ai-elements/loader";
-import { AIModelSelector } from "../components/AIModelSelector";
-import { TagFacets } from "../components/TagFacets";
 import {
   ThoroughnessSelector,
   type Thoroughness,
@@ -47,6 +45,7 @@ import {
   type TagMode,
 } from "../lib/retrieval-filters";
 import { cn } from "../lib/utils";
+import { AIModelSelector, TagFacets } from "./search-page-widgets";
 
 /**
  * Render snippet with <mark> tags as highlighted spans.

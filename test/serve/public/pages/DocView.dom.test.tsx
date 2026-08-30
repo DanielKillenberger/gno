@@ -51,8 +51,10 @@ void mock.module("../../../../src/serve/public/components/editor", () => ({
   ),
 }));
 
+// Contained DocView-only FrontmatterDisplay mock so the real suite is not
+// sticky-mocked (fn-123.2 isolation).
 void mock.module(
-  "../../../../src/serve/public/components/FrontmatterDisplay",
+  "../../../../src/serve/public/pages/doc-frontmatter-display",
   () => ({
     FrontmatterDisplay: ({ content }: { content: string }) => (
       <div>

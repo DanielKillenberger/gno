@@ -44,10 +44,6 @@ import { Loader } from "../components/ai-elements/loader";
 import { BacklinksPanel } from "../components/BacklinksPanel";
 import { MarkdownPreview } from "../components/editor";
 import {
-  FrontmatterDisplay,
-  parseFrontmatter,
-} from "../components/FrontmatterDisplay";
-import {
   OutgoingLinksPanel,
   type OutgoingLink,
 } from "../components/OutgoingLinksPanel";
@@ -99,6 +95,10 @@ import {
   type SectionLinkNoticeKind,
 } from "../lib/section-links";
 import { subscribeWorkspaceActionRequest } from "../lib/workspace-events";
+import {
+  FrontmatterDisplay,
+  parseFrontmatter,
+} from "./doc-frontmatter-display";
 
 /** Lazy so pdfjs is never pulled for non-PDF documents. */
 const PdfViewer = lazy(() => import("./doc-pdf-viewer"));
