@@ -1,6 +1,7 @@
 import type { ProjectAffinityScoringInput } from "../../src/pipeline/project-affinity";
 import type { LoadedAgenticFixture } from "./fixture-db";
 import type { ProjectAffinityPromotionArtifact } from "./project-affinity-promotion";
+import type { ProjectAffinityProvenance } from "./project-affinity-provenance";
 import type { CallObservation } from "./project-affinity-runtime";
 
 import { DEFAULT_FTS_TOKENIZER } from "../../src/config/types";
@@ -109,7 +110,8 @@ const auxiliaryReceipts =
   };
 
 export const runProjectAffinityOutcomeBenchmark = async (
-  fixture: LoadedAgenticFixture
+  fixture: LoadedAgenticFixture,
+  options?: { provenance?: ProjectAffinityProvenance }
 ): Promise<ProjectAffinityPromotionArtifact> => {
   const cases = await loadProjectAffinityCases();
   const bindings = bindProjectAffinityCases(fixture, cases.fixture);
@@ -410,7 +412,7 @@ export const runProjectAffinityOutcomeBenchmark = async (
       {
         schemaVersion: "1.0",
         benchmarkId: "project-affinity-promotion@1",
-        provenance: await projectAffinityProvenance(),
+        provenance: options?.provenance ?? (await projectAffinityProvenance()),
         fixture: {
           fixtureVersion: cases.fixture.fixtureVersion,
           fixtureFingerprint: cases.fingerprint,

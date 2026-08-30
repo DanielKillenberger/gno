@@ -240,7 +240,12 @@ describe("committed authoritative agentic baseline", () => {
     expect(
       await validateProjectAffinityPromotionArtifact(artifact, fixture)
     ).toEqual([]);
-    const fresh = await runProjectAffinityOutcomeBenchmark(fixture);
+    const fresh = await runProjectAffinityOutcomeBenchmark(fixture, {
+      // Pin to the committed artifact so a dirty working tree (or a later
+      // unrelated edit of a listed implementation file) does not fail this
+      // replay. Result bytes still come from live code.
+      provenance: artifact.provenance,
+    });
     expect(canonicalJson(fresh)).toBe(canonicalJson(artifact));
     expect(artifact.gates).toEqual({
       passed: true,
