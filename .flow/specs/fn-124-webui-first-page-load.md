@@ -18,30 +18,38 @@
 > user (turn 1, part 14): Default `gno serve` is not the 17 MB dev bundle.
 > user (turn 1, part 15): Other flow specs untouched.
 > user (turn 1, part 16): Do not implement in capture. Do not mark ready. Do not claim 200ms TTI. Do not change retrieval/KB/MCP. Do not require a live remote tap (unreachable in the investigation).
+> user (turn 2): P95 ≤ 200ms is FIRST PAINT of home chrome (navigation start → first paint), localhost, production serve, cold JS cache.
+> user (turn 2, part 2): Second bar: P95 TTI (Time to Interactive: clicks respond) ≤ 1s on the same harness. Not 200ms TTI.
+> user (turn 2, part 3): No major architectural rewrite. Stay on the current client SPA. Work is: HTMLBundle emits split chunks, lazy non-home routes, Shiki/pdf/graph off the first file, default serve is production bundle. Not SSR, not a new framework, not a rewrite of retrieval/KB.
 
 ## Goal & Context
 
 <!-- scope: business -->
-<!-- Source-tag breakdown: 80% [user] / 20% [paraphrase] -->
+<!-- Source-tag breakdown: 85% [user] / 15% [paraphrase] -->
 
-First-time load of the GNO WebUI home page is too heavy. The user bar is P95 ≤ 200ms from navigation start to first paint of home chrome (Dashboard shell visible), measured on localhost, production serve, cold JS cache.
+First-time load of the GNO WebUI home page is too heavy. Two bars, same harness (localhost, production serve, cold JS cache):
 
-That 200ms bar is first paint of the shell — not time-to-interactive, and not Dashboard health data filled in. Those are a separate, slower budget. A painted shell at 200ms P95 is treated as achievable after the first-chunk split. 200ms P95 TTI with leftover multi-megabyte home JS is a different metric and is not claimed.
+1. P95 ≤ 200ms from navigation start to first paint of home chrome (Dashboard shell visible). That 200ms bar is first paint only. [user]
+2. P95 TTI (Time to Interactive: clicks respond) ≤ 1s. This is not a 200ms TTI bar. [user]
 
-The product work is to stop shipping one fat first JavaScript file, keep non-home features off that file, and make default WebUI serve the production bundle unless the operator asked for dev/hot.
+Dashboard health data filled in is not either bar. A painted shell at 200ms P95 is treated as achievable after the first-chunk split. 200ms P95 TTI is a different metric and is not claimed.
+
+The product work is incremental on the current client SPA: stop shipping one fat first JavaScript file, keep non-home features off that file, and make default WebUI serve the production bundle unless the operator asked for dev/hot. No major architectural rewrite. [user]
 
 ## Architecture & Data Models
 
 <!-- scope: technical -->
-<!-- Source-tag breakdown: 90% [paraphrase] / 10% [inferred] -->
+<!-- Source-tag breakdown: 80% [paraphrase] / 20% [user] -->
 
-Home is a client-rendered SPA. The HTML shell paints an empty root; Dashboard chrome appears only after the first JavaScript module evaluates.
+Stay on the current client-rendered SPA. The HTML shell paints an empty root; Dashboard chrome appears only after the first JavaScript module evaluates. This spec does not introduce server-side rendering or a new UI framework. [user]
 
 The production serve path currently emits one non-split JavaScript payload (investigation-measured about 11.8 MB uncompressed / about 2.4 MB gzip) plus a small CSS file. Default CLI serve is development when the environment is not production (investigation-measured about 17.1 MB JS). Desktop already forces production.
 
 Existing lazy imports on graph and PDF viewers do not reduce first-load bytes while the serve path inlines. The app entry statically binds every route, so even a splitting bundler still puts editor, markdown, ask, graph, and PDF on the home graph until those routes are lazy.
 
-Home first data calls are status endpoints (counts and health), not a vault dump. Chrome may also request model presets. That work can delay filled-in health content; it is not the 200ms first-paint bar.
+The allowed work is: make the HTMLBundle emit split chunks; then lazy non-home routes; then keep Shiki, PDF, and graph off the first file; then default serve the production bundle unless explicitly dev/hot. [user]
+
+Home first data calls are status endpoints (counts and health), not a vault dump. Chrome may also request model presets. That work can delay filled-in health content; it is not the 200ms first-paint bar and is not the 1s TTI bar.
 
 Syntax highlighting currently value-imports the full language table and creates the highlighter when that module evaluates. Until the serve path emits real split chunks, route-lazy and highlighter delays will not change first-load bytes.
 
@@ -49,14 +57,17 @@ Syntax highlighting currently value-imports the full language table and creates 
 
 <!-- scope: technical -->
 
-- The 200ms P95 bar applies only to localhost, production serve, cold JS cache, navigation start → first paint of home chrome. [user]
-- Time-to-interactive and Dashboard health data filled in are a separate, slower budget and are not the 200ms bar. [user]
-- 200ms P95 TTI is not claimed while leftover home JS stays multi-megabyte after a split. [paraphrase]
+- The 200ms P95 bar applies only to first paint of home chrome (navigation start → first paint), localhost, production serve, cold JS cache. [user]
+- The second bar is P95 TTI (clicks respond) ≤ 1s on that same harness. It is not a 200ms TTI bar. [user]
+- Dashboard health data filled in is a separate, slower budget and is not either bar. [user]
+- 200ms P95 TTI is not claimed. [user]
 - Route-lazy does not count as done while the serve path still inlines a single chunk. [paraphrase]
+- Delivery stays on the current client SPA: no SSR, no new framework, no major architectural rewrite. [user]
+- Retrieval, knowledge-base, and MCP behavior are out of scope. [user]
 - A live remote tap is not required to accept this spec. [user]
 - Default WebUI serve is production unless the operator explicitly requested dev/hot. [user]
 - An optional tiny static skeleton in the HTML shell is cosmetic only; it does not satisfy the 200ms bar. [user]
-- Measurement must record N and the harness so two reviewers can repeat the same P95. [user]
+- Measurement must record N and the harness so two reviewers can repeat the same P95 for both bars. [user]
 
 ## Acceptance Criteria
 
@@ -69,6 +80,8 @@ Syntax highlighting currently value-imports the full language table and creates 
 - **R5:** The WebUI serve path emits split chunks; route-lazy alone does not satisfy this while the serve path inlines. [paraphrase]
 - **R6:** Non-home routes load after home so Dashboard does not pay for editor, markdown, ask, graph, or PDF on first paint. [paraphrase]
 - **R7:** Syntax highlighting on the home graph uses an allowlist or delayed highlighter so unused grammars are not in the first file. [paraphrase]
+- **R8:** P95 TTI (Time to Interactive: clicks respond) is ≤ 1s on the same harness as R1 (localhost, production serve, cold JS cache). This is not a 200ms TTI bar. [user]
+- **R9:** Delivery stays on the current client SPA: HTMLBundle split chunks, lazy non-home routes, Shiki/PDF/graph off the first file, default production serve. Not SSR and not a new framework. [user]
 
 ## Boundaries
 
@@ -80,6 +93,7 @@ Syntax highlighting currently value-imports the full language table and creates 
 - Do not modify other flow specs. [user]
 - Do not treat an optional HTML skeleton as the performance win. [user]
 - Do not expand this spec into Browse-tree, autocomplete, or other non-home surfaces. [paraphrase]
+- Do not perform a major architectural rewrite: no SSR, no new framework, no replacement of the current client SPA. [user]
 
 ## Decision Context
 
@@ -88,15 +102,16 @@ Syntax highlighting currently value-imports the full language table and creates 
 ### Motivation
 <!-- scope: business -->
 
-- Success is P95 ≤ 200ms to a painted home shell, not a filled health panel. [user]
-- Sequence the work: emit split chunks on the serve path, then lazy non-home routes, then shrink highlighting on the home graph. [paraphrase]
+- Success is two bars on one harness: P95 ≤ 200ms to a painted home shell, and P95 TTI (clicks respond) ≤ 1s. Neither is a filled health panel. [user]
+- Sequence the work: emit split chunks on the serve path, then lazy non-home routes, then shrink highlighting / keep PDF and graph off the first file. [paraphrase]
 - JavaScript weight is the real win; a static skeleton is optional and cosmetic. [user]
-- A 200ms painted shell is treated as achievable after the first-chunk split; a 200ms TTI claim is rejected. [paraphrase]
+- A 200ms painted shell is treated as achievable after the first-chunk split; a 200ms TTI claim is rejected in favor of the 1s TTI bar. [user]
+- Stay on the current client SPA. Incremental bundle and route-lazy work; not a rewrite. [user]
 
 ## Parked unknowns
 
-- No numeric budget is set for time-to-interactive or for Dashboard health data filled in. Resolve only if a later spec takes that bar.
-- Exact N for the P95 harness is not prescribed here; R2 requires the implementation to document it.
+- No numeric budget is set for Dashboard health data filled in. Resolve only if a later spec takes that bar.
+- Exact N for the P95 harness is not prescribed here; R2 requires the implementation to document it. Both R1 (first paint) and R8 (TTI) use that same harness.
 
 ## Requirement coverage
 
@@ -109,3 +124,5 @@ Syntax highlighting currently value-imports the full language table and creates 
 | R5 | fn-N.M (TBD — populate via /flow-next:plan) | Serve path emits split chunks |
 | R6 | fn-N.M (TBD — populate via /flow-next:plan) | Lazy non-home routes |
 | R7 | fn-N.M (TBD — populate via /flow-next:plan) | Highlight allowlist or delayed highlighter |
+| R8 | fn-N.M (TBD — populate via /flow-next:plan) | P95 TTI (clicks respond) ≤ 1s, same harness; not 200ms TTI |
+| R9 | fn-N.M (TBD — populate via /flow-next:plan) | Stay on current client SPA; no SSR / no new framework |
