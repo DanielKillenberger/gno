@@ -39,3 +39,10 @@ Decide the target layout and excise the dead parts:
 
 - The `gno.sh` repo is untouched by this spec.
 - OG image generation must keep working (CI PR flow unchanged).
+
+## Resolution (2026-08-30)
+
+User decision: keep `website/` in place for historical reference and never
+update it again. No excision. Root AGENTS.md now carries the never-update
+rule; the OG/asset pipeline keeps consuming `website/assets/` unchanged.
+Closed without tasks.
