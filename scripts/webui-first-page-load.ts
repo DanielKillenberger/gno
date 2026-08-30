@@ -20,8 +20,8 @@
  *     fails the run and does not publish a P95
  *
  * Selectors:
- *   first paint — role=heading name=GNO + nav role=button name=Search
- *   TTI         — that Search button click → URL /search
+ *   first paint — in-page rAF until h1 "GNO" and nav Search are in the DOM
+ *   TTI         — Playwright Search click → URL /search
  *
  * P95 math: nearest-rank, 19th of 20 sorted samples (ceil(0.95 * N)).
  */
@@ -119,18 +119,40 @@ const measureSample = async (page: Page, baseUrl: string): Promise<Sample> => {
   });
 
   await page.goto(baseUrl, { waitUntil: "commit" });
-  const heading = page.getByRole("heading", { level: 1, name: "GNO" });
-  const search = page.getByRole("navigation").getByRole("button", {
-    name: "Search",
-  });
+  let firstPaintMs: number;
   try {
-    await heading.waitFor({ state: "visible" });
-    await search.waitFor({ state: "visible" });
+    firstPaintMs = await page.evaluate(async () => {
+      return await new Promise<number>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          reject(
+            new Error("Missing shell selector: h1 GNO and/or nav Search button")
+          );
+        }, 5000);
+        const check = (): void => {
+          const heading = document.querySelector("h1");
+          const nav = document.querySelector("nav");
+          const searchVisible = nav
+            ? [...nav.querySelectorAll("button")].some(
+                (button) => button.textContent?.trim() === "Search"
+              )
+            : false;
+          if (heading?.textContent?.trim() === "GNO" && searchVisible) {
+            window.clearTimeout(timeout);
+            resolve(performance.now());
+            return;
+          }
+          requestAnimationFrame(check);
+        };
+        check();
+      });
+    });
   } catch {
     throw new Error("Missing shell selector: h1 GNO and/or nav Search button");
   }
 
-  const firstPaintMs = await page.evaluate(() => performance.now());
+  const search = page.getByRole("navigation").getByRole("button", {
+    name: "Search",
+  });
   await search.click();
   try {
     await page.waitForURL(/\/search(?:\?|$)/);

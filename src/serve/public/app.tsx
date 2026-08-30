@@ -9,8 +9,6 @@ import {
 import { createRoot } from "react-dom/client";
 
 import { HelpButton } from "./components/HelpButton";
-import { QuickSwitcher } from "./components/QuickSwitcher";
-import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
 import { CaptureModalProvider, useCaptureModal } from "./hooks/useCaptureModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -31,6 +29,16 @@ import {
 import ClipperPairing from "./pages/ClipperPairing";
 import Dashboard from "./pages/Dashboard";
 
+const QuickSwitcher = lazy(() =>
+  import("./components/QuickSwitcher").then((module) => ({
+    default: module.QuickSwitcher,
+  }))
+);
+const ShortcutHelpModal = lazy(() =>
+  import("./components/ShortcutHelpModal").then((module) => ({
+    default: module.ShortcutHelpModal,
+  }))
+);
 const Search = lazy(() => import("./pages/Search"));
 const Browse = lazy(() => import("./pages/Browse"));
 const DocView = lazy(() => import("./pages/DocView"));
@@ -227,17 +235,19 @@ function AppContent({
         </footer>
       </div>
       <HelpButton onClick={() => setShortcutHelpOpen(true)} />
-      <QuickSwitcher
-        location={location}
-        navigate={(to) => navigate(to)}
-        onCreateNote={openCapture}
-        onOpenChange={setQuickSwitcherOpen}
-        open={quickSwitcherOpen}
-      />
-      <ShortcutHelpModal
-        onOpenChange={setShortcutHelpOpen}
-        open={shortcutHelpOpen}
-      />
+      <Suspense fallback={null}>
+        <QuickSwitcher
+          location={location}
+          navigate={(to) => navigate(to)}
+          onCreateNote={openCapture}
+          onOpenChange={setQuickSwitcherOpen}
+          open={quickSwitcherOpen}
+        />
+        <ShortcutHelpModal
+          onOpenChange={setShortcutHelpOpen}
+          open={shortcutHelpOpen}
+        />
+      </Suspense>
     </>
   );
 }
