@@ -46,9 +46,12 @@ Make the production WebUI serve path emit split JavaScript chunks (R5, R3 first-
 
 
 ## Done summary
-TBD
+Production WebUI serve (`development: false`) now runs `Bun.build` with `splitting: true` on the HTML entry and hosts every emitted file on the existing private Unix-socket / Windows-loopback source.
 
+Verified: production HTML is a small document with an external first JS module (about 1.87 MB, not the 11.8 MB monolith), extra `/chunk-*.js` files are reachable with 200 through `source.fetch`, and the public proxy still wraps those bytes in `withSecurityHeaders` (production CSP `script-src 'self'`, no `ws:`). Development still uses the live HTMLBundle. No SSR, Vite, or new framework.
+
+In-harness review: SHIP. Route-lazy work may proceed.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: d8e56e1532feb2330c06ed954022ce7974c43b6b
+- Tests: bun test test/serve/spa-bundle-source.test.ts test/serve/security.test.ts
 - PRs:
