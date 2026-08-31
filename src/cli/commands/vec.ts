@@ -20,6 +20,7 @@ import {
 
 export interface VecOptions {
   configPath?: string;
+  indexName?: string;
   json?: boolean;
 }
 
@@ -91,11 +92,15 @@ export async function vecSync(
   const modelUri = preset.embed;
 
   const store = new SqliteAdapter();
-  const dbPath = getIndexDbPath();
+  const dbPath = getIndexDbPath(options.indexName);
   const paths = getConfigPaths();
   store.setConfigPath(paths.configFile);
 
-  const openResult = await store.open(dbPath, config.ftsTokenizer);
+  const openResult = await store.open(
+    dbPath,
+    config.ftsTokenizer,
+    config.busyTimeoutMs
+  );
   if (!openResult.ok) {
     return { success: false, error: openResult.error.message };
   }
@@ -165,11 +170,15 @@ export async function vecRebuild(
   const modelUri = preset.embed;
 
   const store = new SqliteAdapter();
-  const dbPath = getIndexDbPath();
+  const dbPath = getIndexDbPath(options.indexName);
   const paths = getConfigPaths();
   store.setConfigPath(paths.configFile);
 
-  const openResult = await store.open(dbPath, config.ftsTokenizer);
+  const openResult = await store.open(
+    dbPath,
+    config.ftsTokenizer,
+    config.busyTimeoutMs
+  );
   if (!openResult.ok) {
     return { success: false, error: openResult.error.message };
   }

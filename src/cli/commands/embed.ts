@@ -17,6 +17,11 @@ import {
   isInitialized,
   loadConfig,
 } from "../../config";
+import {
+  type CliWriteLeaseOptions,
+  type WriteLeaseContention,
+  withCliWriteLease,
+} from "../../core/write-lease";
 import { getEmbeddingFingerprint } from "../../embed/fingerprint";
 import {
   addUniqueSamples,
@@ -47,7 +52,7 @@ import {
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface EmbedOptions {
+export interface EmbedOptions extends CliWriteLeaseOptions {
   /** Override config path */
   configPath?: string;
   /** Index name */
@@ -77,6 +82,8 @@ export type EmbedResult =
       success: true;
       embedded: number;
       errors: number;
+      /** Chunks deferred by SQLITE_BUSY/LOCKED after retries (fn-127 R6). */
+      contentionErrors: number;
       duration: number;
       model: string;
       searchAvailable: boolean;
@@ -84,7 +91,7 @@ export type EmbedResult =
       suggestion?: string;
       syncError?: string;
     }
-  | { success: false; error: string };
+  | { success: false; error: string; contention?: WriteLeaseContention };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -137,6 +144,7 @@ type BatchResult =
       ok: true;
       embedded: number;
       errors: number;
+      contentionErrors: number;
       duration: number;
       errorSamples: string[];
       suggestion?: string;
@@ -152,6 +160,7 @@ async function processBatches(ctx: BatchContext): Promise<BatchResult> {
   const startTime = Date.now();
   let embedded = 0;
   let errors = 0;
+  let contentionErrors = 0;
   const errorSamples: string[] = [];
   let suggestion: string | undefined;
   let cursor: Cursor | undefined;
@@ -279,6 +288,7 @@ async function processBatches(ctx: BatchContext): Promise<BatchResult> {
       suggestion ||= retryResult.suggestion;
       embedded += retryResult.embedded;
       errors += retryResult.errors;
+      contentionErrors += retryResult.contentionErrors;
       retryEmbedded += retryResult.embedded;
 
       const retryByKey = new Set(
@@ -331,6 +341,7 @@ async function processBatches(ctx: BatchContext): Promise<BatchResult> {
     suggestion ||= batchStoreResult.suggestion;
     embedded += batchStoreResult.embedded;
     errors += batchStoreResult.errors;
+    contentionErrors += batchStoreResult.contentionErrors;
     enqueueRetryItems(batchStoreResult.retryItems, 1);
 
     if (embedded > beforeEmbedded) {
@@ -358,6 +369,7 @@ async function processBatches(ctx: BatchContext): Promise<BatchResult> {
     ok: true,
     embedded,
     errors,
+    contentionErrors,
     duration: (Date.now() - startTime) / 1000,
     errorSamples,
     suggestion,
@@ -407,7 +419,11 @@ async function initEmbedContext(
   const paths = getConfigPaths();
   store.setConfigPath(configPath ?? paths.configFile);
 
-  const openResult = await store.open(dbPath, config.ftsTokenizer);
+  const openResult = await store.open(
+    dbPath,
+    config.ftsTokenizer,
+    config.busyTimeoutMs
+  );
   if (!openResult.ok) {
     return { ok: false, error: openResult.error.message };
   }
@@ -427,226 +443,232 @@ export async function embed(options: EmbedOptions = {}): Promise<EmbedResult> {
   const force = options.force ?? false;
   const dryRun = options.dryRun ?? false;
 
-  // Initialize config and store
-  const initResult = await initEmbedContext(
-    options.configPath,
-    options.indexName,
-    options.collection,
-    options.model
-  );
-  if (!initResult.ok) {
-    return { success: false, error: initResult.error };
-  }
-  const { config, modelUri, store } = initResult;
-
-  // Get raw DB for vector ops (SqliteAdapter always implements SqliteDbProvider)
-  const db = store.getRawDb();
-  let embedPort: EmbeddingPort | null = null;
-  let vectorIndex: VectorIndexPort | null = null;
-
-  try {
-    // Create stats port for backlog detection
-    const stats: VectorStatsPort = createVectorStatsPort(db);
-
-    let totalToEmbed = 0;
-    if (force) {
-      const forceCount = await getActiveChunkCount(db, options.collection);
-      if (!forceCount.ok) {
-        return { success: false, error: forceCount.error.message };
-      }
-      totalToEmbed = forceCount.value;
-
-      if (totalToEmbed === 0 || dryRun) {
-        const vecAvailable = await checkVecAvailable(db);
-        return {
-          success: true,
-          embedded: totalToEmbed,
-          errors: 0,
-          duration: 0,
-          model: modelUri,
-          searchAvailable: vecAvailable,
-          errorSamples: [],
-        };
-      }
+  return await withCliWriteLease(options, async () => {
+    // Initialize config and store
+    const initResult = await initEmbedContext(
+      options.configPath,
+      options.indexName,
+      options.collection,
+      options.model
+    );
+    if (!initResult.ok) {
+      return { success: false, error: initResult.error };
     }
+    const { config, modelUri, store } = initResult;
 
-    // Create LLM adapter and embedding port with auto-download
-    let offline = options.offline;
-    if (offline === undefined) {
-      offline = getGlobals().offline;
-    }
-    const policy = resolveDownloadPolicy(process.env, {
-      offline,
-    });
+    // Get raw DB for vector ops (SqliteAdapter always implements SqliteDbProvider)
+    const db = store.getRawDb();
+    let embedPort: EmbeddingPort | null = null;
+    let vectorIndex: VectorIndexPort | null = null;
 
-    // Create progress renderer for model download (throttled to avoid spam)
-    const showDownloadProgress = !options.json && process.stderr.isTTY;
-    const downloadProgress = showDownloadProgress
-      ? createThrottledProgressRenderer(createProgressRenderer())
-      : undefined;
+    try {
+      // Create stats port for backlog detection
+      const stats: VectorStatsPort = createVectorStatsPort(db);
 
-    const llm = new LlmAdapter(config);
-    const recreateEmbedPort = async () => {
-      if (embedPort) {
-        await embedPort.dispose();
+      let totalToEmbed = 0;
+      if (force) {
+        const forceCount = await getActiveChunkCount(db, options.collection);
+        if (!forceCount.ok) {
+          return { success: false, error: forceCount.error.message };
+        }
+        totalToEmbed = forceCount.value;
+
+        if (totalToEmbed === 0 || dryRun) {
+          const vecAvailable = await checkVecAvailable(db);
+          return {
+            success: true,
+            embedded: totalToEmbed,
+            errors: 0,
+            contentionErrors: 0,
+            duration: 0,
+            model: modelUri,
+            searchAvailable: vecAvailable,
+            errorSamples: [],
+          };
+        }
       }
-      await llm.getManager().dispose(modelUri);
-      const recreated = await llm.createEmbeddingPort(modelUri, {
+
+      // Create LLM adapter and embedding port with auto-download
+      let offline = options.offline;
+      if (offline === undefined) {
+        offline = getGlobals().offline;
+      }
+      const policy = resolveDownloadPolicy(process.env, {
+        offline,
+      });
+
+      // Create progress renderer for model download (throttled to avoid spam)
+      const showDownloadProgress = !options.json && process.stderr.isTTY;
+      const downloadProgress = showDownloadProgress
+        ? createThrottledProgressRenderer(createProgressRenderer())
+        : undefined;
+
+      const llm = new LlmAdapter(config);
+      const recreateEmbedPort = async () => {
+        if (embedPort) {
+          await embedPort.dispose();
+        }
+        await llm.getManager().dispose(modelUri);
+        const recreated = await llm.createEmbeddingPort(modelUri, {
+          egressCollections: options.collection ? [options.collection] : "all",
+          policy,
+          onProgress: downloadProgress
+            ? (progress) => downloadProgress("embed", progress)
+            : undefined,
+        });
+        if (!recreated.ok) {
+          return { ok: false as const, error: recreated.error.message };
+        }
+        const initResult = await recreated.value.init();
+        if (!initResult.ok) {
+          await recreated.value.dispose();
+          return { ok: false as const, error: initResult.error.message };
+        }
+        return { ok: true as const, value: recreated.value };
+      };
+      const embedResult = await llm.createEmbeddingPort(modelUri, {
         egressCollections: options.collection ? [options.collection] : "all",
         policy,
         onProgress: downloadProgress
           ? (progress) => downloadProgress("embed", progress)
           : undefined,
       });
-      if (!recreated.ok) {
-        return { ok: false as const, error: recreated.error.message };
+      if (!embedResult.ok) {
+        return { success: false, error: embedResult.error.message };
       }
-      const initResult = await recreated.value.init();
-      if (!initResult.ok) {
-        await recreated.value.dispose();
-        return { ok: false as const, error: initResult.error.message };
+      embedPort = embedResult.value;
+
+      // Clear download progress line if shown
+      if (showDownloadProgress) {
+        process.stderr.write("\n");
       }
-      return { ok: true as const, value: recreated.value };
-    };
-    const embedResult = await llm.createEmbeddingPort(modelUri, {
-      egressCollections: options.collection ? [options.collection] : "all",
-      policy,
-      onProgress: downloadProgress
-        ? (progress) => downloadProgress("embed", progress)
-        : undefined,
-    });
-    if (!embedResult.ok) {
-      return { success: false, error: embedResult.error.message };
-    }
-    embedPort = embedResult.value;
 
-    // Clear download progress line if shown
-    if (showDownloadProgress) {
-      process.stderr.write("\n");
-    }
+      // Discover dimensions via probe embedding
+      const probeResult = await embedPort.embed("dimension probe");
+      if (!probeResult.ok) {
+        return { success: false, error: probeResult.error.message };
+      }
+      const dimensions = probeResult.value.length;
 
-    // Discover dimensions via probe embedding
-    const probeResult = await embedPort.embed("dimension probe");
-    if (!probeResult.ok) {
-      return { success: false, error: probeResult.error.message };
-    }
-    const dimensions = probeResult.value.length;
-
-    // Create vector index port
-    const vectorResult = await createVectorIndexPort(db, {
-      model: modelUri,
-      dimensions,
-    });
-    if (!vectorResult.ok) {
-      return { success: false, error: vectorResult.error.message };
-    }
-    vectorIndex = vectorResult.value;
-
-    if (!force) {
-      const embedFingerprint = getEmbeddingFingerprint({
-        modelUri,
+      // Create vector index port
+      const vectorResult = await createVectorIndexPort(db, {
+        model: modelUri,
         dimensions,
       });
-      const backlogResult = await stats.countBacklog(
-        modelUri,
-        embedFingerprint,
-        {
-          collection: options.collection,
+      if (!vectorResult.ok) {
+        return { success: false, error: vectorResult.error.message };
+      }
+      vectorIndex = vectorResult.value;
+
+      if (!force) {
+        const embedFingerprint = getEmbeddingFingerprint({
+          modelUri,
+          dimensions,
+        });
+        const backlogResult = await stats.countBacklog(
+          modelUri,
+          embedFingerprint,
+          {
+            collection: options.collection,
+          }
+        );
+
+        if (!backlogResult.ok) {
+          return { success: false, error: backlogResult.error.message };
         }
-      );
 
-      if (!backlogResult.ok) {
-        return { success: false, error: backlogResult.error.message };
+        totalToEmbed = backlogResult.value;
+
+        if (totalToEmbed === 0 || dryRun) {
+          return {
+            success: true,
+            embedded: totalToEmbed,
+            errors: 0,
+            contentionErrors: 0,
+            duration: 0,
+            model: modelUri,
+            searchAvailable: vectorIndex.searchAvailable,
+            errorSamples: [],
+          };
+        }
       }
 
-      totalToEmbed = backlogResult.value;
+      // Process batches
+      const result = await processBatches({
+        db,
+        stats,
+        embedPort,
+        vectorIndex,
+        modelUri,
+        collection: options.collection,
+        batchSize,
+        force,
+        showProgress: !options.json,
+        totalToEmbed,
+        verbose: options.verbose ?? false,
+        recreateEmbedPort,
+      });
 
-      if (totalToEmbed === 0 || dryRun) {
-        return {
-          success: true,
-          embedded: totalToEmbed,
-          errors: 0,
-          duration: 0,
-          model: modelUri,
-          searchAvailable: vectorIndex.searchAvailable,
-          errorSamples: [],
-        };
+      if (!result.ok) {
+        return { success: false, error: result.error };
       }
-    }
 
-    // Process batches
-    const result = await processBatches({
-      db,
-      stats,
-      embedPort,
-      vectorIndex,
-      modelUri,
-      collection: options.collection,
-      batchSize,
-      force,
-      showProgress: !options.json,
-      totalToEmbed,
-      verbose: options.verbose ?? false,
-      recreateEmbedPort,
-    });
-
-    if (!result.ok) {
-      return { success: false, error: result.error };
-    }
-
-    // Sync vec index if any vec0 writes failed (matches embedBacklog behavior)
-    if (vectorIndex.vecDirty) {
-      const syncResult = await vectorIndex.syncVecIndex();
-      if (syncResult.ok) {
-        const { added, removed } = syncResult.value;
-        if (added > 0 || removed > 0) {
+      // Sync vec index if any vec0 writes failed (matches embedBacklog behavior)
+      if (vectorIndex.vecDirty) {
+        const syncResult = await vectorIndex.syncVecIndex();
+        if (syncResult.ok) {
+          const { added, removed } = syncResult.value;
+          if (added > 0 || removed > 0) {
+            if (!options.json) {
+              process.stdout.write(
+                `\n[vec] Synced index: +${added} -${removed}\n`
+              );
+            }
+          }
+          vectorIndex.vecDirty = false;
+        } else {
           if (!options.json) {
             process.stdout.write(
-              `\n[vec] Synced index: +${added} -${removed}\n`
+              `\n[vec] Sync failed: ${syncResult.error.message}\n`
             );
           }
+          return {
+            success: true,
+            embedded: result.embedded,
+            errors: result.errors,
+            contentionErrors: result.contentionErrors,
+            duration: result.duration,
+            model: modelUri,
+            searchAvailable: vectorIndex.searchAvailable,
+            errorSamples: [
+              ...result.errorSamples,
+              syncResult.error.message,
+            ].slice(0, 5),
+            suggestion:
+              "Vector index sync failed after embedding. Rerun `gno embed` once more. If it repeats, run `gno vec sync`.",
+            syncError: syncResult.error.message,
+          };
         }
-        vectorIndex.vecDirty = false;
-      } else {
-        if (!options.json) {
-          process.stdout.write(
-            `\n[vec] Sync failed: ${syncResult.error.message}\n`
-          );
-        }
-        return {
-          success: true,
-          embedded: result.embedded,
-          errors: result.errors,
-          duration: result.duration,
-          model: modelUri,
-          searchAvailable: vectorIndex.searchAvailable,
-          errorSamples: [
-            ...result.errorSamples,
-            syncResult.error.message,
-          ].slice(0, 5),
-          suggestion:
-            "Vector index sync failed after embedding. Rerun `gno embed` once more. If it repeats, run `gno vec sync`.",
-          syncError: syncResult.error.message,
-        };
       }
-    }
 
-    return {
-      success: true,
-      embedded: result.embedded,
-      errors: result.errors,
-      duration: result.duration,
-      model: modelUri,
-      searchAvailable: vectorIndex.searchAvailable,
-      errorSamples: result.errorSamples,
-      suggestion: result.suggestion,
-    };
-  } finally {
-    if (embedPort) {
-      await embedPort.dispose();
+      return {
+        success: true,
+        embedded: result.embedded,
+        errors: result.errors,
+        contentionErrors: result.contentionErrors,
+        duration: result.duration,
+        model: modelUri,
+        searchAvailable: vectorIndex.searchAvailable,
+        errorSamples: result.errorSamples,
+        suggestion: result.suggestion,
+      };
+    } finally {
+      if (embedPort) {
+        await embedPort.dispose();
+      }
+      await store.close();
     }
-    await store.close();
-  }
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -761,6 +783,7 @@ export function formatEmbed(
       {
         embedded: result.embedded,
         errors: result.errors,
+        contentionErrors: result.contentionErrors,
         duration: result.duration,
         model: result.model,
         searchAvailable: result.searchAvailable,
@@ -777,7 +800,11 @@ export function formatEmbed(
     return `Dry run: would embed ${result.embedded.toLocaleString()} chunks with model ${result.model}`;
   }
 
-  if (result.embedded === 0 && result.errors === 0) {
+  if (
+    result.embedded === 0 &&
+    result.errors === 0 &&
+    result.contentionErrors === 0
+  ) {
     return "No chunks need embedding. All up to date.";
   }
 
@@ -796,6 +823,12 @@ export function formatEmbed(
     if (result.suggestion) {
       lines.push(`Hint: ${result.suggestion}`);
     }
+  }
+
+  if (result.contentionErrors > 0) {
+    lines.push(
+      `${result.contentionErrors} chunks deferred by index contention (SQLITE_BUSY) — not embedding failures. Rerun \`gno embed\` when the other writer finishes.`
+    );
   }
 
   if (!result.searchAvailable) {

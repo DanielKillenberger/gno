@@ -21,6 +21,14 @@ import {
 import { INDEX_NAME_REQUIREMENTS, isValidIndexName } from "../app/index-name";
 import { resolveDepthPolicy } from "../core/depth-policy";
 import { parseAndValidateTagFilter } from "../core/tags";
+import {
+  formatWriteLeaseBusyJson,
+  formatWriteLeaseBusyMessage,
+  isWriteLeaseBusyResult,
+  parseLockWaitMs,
+  withCliWriteLease,
+  type WriteLeaseBusyFailure,
+} from "../core/write-lease";
 import { setColorsEnabled } from "./colors";
 import {
   applyGlobalOptions,
@@ -219,6 +227,49 @@ function parseCsvValues(raw: unknown): string[] | undefined {
     .map((v) => v.trim().toLowerCase())
     .filter((v) => v.length > 0);
   return values.length > 0 ? values : undefined;
+}
+
+function addWriteLeaseFlags(command: Command): Command {
+  return command
+    .option(
+      "--lock-wait <duration>",
+      "how long to wait for the index write lease (default: 120s)",
+      "120s"
+    )
+    .option("--no-wait", "fail immediately if the index write lease is held");
+}
+
+function parseWriteLeaseFlags(cmdOpts: Record<string, unknown>): {
+  lockWaitMs: number;
+  noWait: boolean;
+} {
+  const parsed = parseLockWaitMs(cmdOpts.lockWait);
+  if (parsed === null) {
+    throw new CliError(
+      "VALIDATION",
+      `Invalid --lock-wait duration: ${String(cmdOpts.lockWait)}. Use seconds ("120"), "120s", or "2m".`
+    );
+  }
+  return {
+    lockWaitMs: parsed,
+    noWait: cmdOpts.wait === false,
+  };
+}
+
+function throwIfWriteLeaseBusy<
+  T extends { success: boolean; error?: string; contention?: unknown },
+>(result: T | WriteLeaseBusyFailure, json: boolean): asserts result is T {
+  if (!isWriteLeaseBusyResult(result)) {
+    return;
+  }
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify(formatWriteLeaseBusyJson(result.contention))}\n`
+    );
+  } else {
+    process.stderr.write(`${formatWriteLeaseBusyMessage(result.contention)}\n`);
+  }
+  throw new CliError("BUSY", result.error, { silent: true });
 }
 
 function parseContextInteger(
@@ -1505,39 +1556,51 @@ function wireOnboardingCommands(program: Command): void {
     });
 
   // index - Index collections
-  program
-    .command("index [collection]")
-    .description("Index files from collections")
-    .option("--no-embed", "skip embedding after sync")
-    .option("--git-pull", "run git pull in git repositories")
-    .option("--models-pull", "download models if missing")
-    .option("--json", "JSON output")
-    .action(
-      async (
-        collection: string | undefined,
-        cmdOpts: Record<string, unknown>
-      ) => {
-        const globals = getGlobals();
-        const { index, formatIndex } = await import("./commands/index-cmd");
-        const opts = {
-          configPath: globals.config,
-          indexName: globals.index,
-          collection,
-          noEmbed: cmdOpts.embed === false,
-          gitPull: Boolean(cmdOpts.gitPull),
-          modelsPull: Boolean(cmdOpts.modelsPull),
-          yes: globals.yes,
-          verbose: globals.verbose,
-          json: getFormat(cmdOpts) === "json",
-        };
-        const result = await index(opts);
+  addWriteLeaseFlags(
+    program
+      .command("index [collection]")
+      .description("Index files from collections")
+      .option("--no-embed", "skip embedding after sync")
+      .option("--git-pull", "run git pull in git repositories")
+      .option("--models-pull", "download models if missing")
+      .option("--json", "JSON output")
+  ).action(
+    async (
+      collection: string | undefined,
+      cmdOpts: Record<string, unknown>
+    ) => {
+      const globals = getGlobals();
+      const { index, formatIndex } = await import("./commands/index-cmd");
+      const lease = parseWriteLeaseFlags(cmdOpts);
+      const opts = {
+        configPath: globals.config,
+        indexName: globals.index,
+        collection,
+        noEmbed: cmdOpts.embed === false,
+        gitPull: Boolean(cmdOpts.gitPull),
+        modelsPull: Boolean(cmdOpts.modelsPull),
+        yes: globals.yes,
+        verbose: globals.verbose,
+        json: getFormat(cmdOpts) === "json",
+        lockWaitMs: lease.lockWaitMs,
+        noWait: lease.noWait,
+      };
+      const result = await index(opts);
 
-        if (!result.success) {
-          throw new CliError("RUNTIME", result.error ?? "Index failed");
-        }
-        process.stdout.write(`${formatIndex(result, opts)}\n`);
+      if (!result.success) {
+        throwIfWriteLeaseBusy(result, opts.json);
+        throw new CliError("RUNTIME", result.error ?? "Index failed");
       }
-    );
+      process.stdout.write(`${formatIndex(result, opts)}\n`);
+      if ((result.embedResult?.contentionErrors ?? 0) > 0) {
+        throw new CliError(
+          "BUSY",
+          "Some chunks were deferred by index contention",
+          { silent: true }
+        );
+      }
+    }
+  );
 
   // audit - Read-only workspace integrity report
   program
@@ -2225,19 +2288,33 @@ function wireManagementCommands(program: Command): void {
       });
     });
 
-  collectionCmd
-    .command("clear-embeddings <name>")
-    .description("Clear stale or all embeddings for a collection")
-    .option("--all", "remove all embeddings for the collection")
-    .option("--json", "JSON output")
-    .action(async (name: string, cmdOpts: Record<string, unknown>) => {
-      const { collectionClearEmbeddings } =
-        await import("./commands/collection");
-      await collectionClearEmbeddings(name, {
-        all: Boolean(cmdOpts.all),
-        json: Boolean(cmdOpts.json),
-      });
-    });
+  addWriteLeaseFlags(
+    collectionCmd
+      .command("clear-embeddings <name>")
+      .description("Clear stale or all embeddings for a collection")
+      .option("--all", "remove all embeddings for the collection")
+      .option("--json", "JSON output")
+  ).action(async (name: string, cmdOpts: Record<string, unknown>) => {
+    const { collectionClearEmbeddings } = await import("./commands/collection");
+    const json = Boolean(cmdOpts.json);
+    const lease = parseWriteLeaseFlags(cmdOpts);
+    const result = await withCliWriteLease(
+      {
+        indexName: getGlobals().index,
+        lockWaitMs: lease.lockWaitMs,
+        noWait: lease.noWait,
+      },
+      async () => {
+        await collectionClearEmbeddings(name, {
+          all: Boolean(cmdOpts.all),
+          indexName: getGlobals().index,
+          json,
+        });
+        return { success: true as const };
+      }
+    );
+    throwIfWriteLeaseBusy(result, json);
+  });
 
   const collectionPolicyCmd = collectionCmd
     .command("policy")
@@ -2771,85 +2848,110 @@ function wireManagementCommands(program: Command): void {
     });
 
   // update - Sync files from disk
-  program
-    .command("update")
-    .description("Sync files from disk into the index")
-    .option("--git-pull", "run git pull in git repositories")
-    .option("--json", "JSON output")
-    .action(async (cmdOpts: Record<string, unknown>) => {
+  addWriteLeaseFlags(
+    program
+      .command("update")
+      .description("Sync files from disk into the index")
+      .option("--git-pull", "run git pull in git repositories")
+      .option("--json", "JSON output")
+  ).action(async (cmdOpts: Record<string, unknown>) => {
+    const globals = getGlobals();
+    const { update, formatUpdate } = await import("./commands/update");
+    const lease = parseWriteLeaseFlags(cmdOpts);
+    const opts = {
+      configPath: globals.config,
+      indexName: globals.index,
+      gitPull: Boolean(cmdOpts.gitPull),
+      verbose: globals.verbose,
+      json: getFormat(cmdOpts) === "json",
+      lockWaitMs: lease.lockWaitMs,
+      noWait: lease.noWait,
+    };
+    const result = await update(opts);
+
+    if (!result.success) {
+      throwIfWriteLeaseBusy(result, opts.json);
+      throw new CliError("RUNTIME", result.error ?? "Update failed");
+    }
+    process.stdout.write(`${formatUpdate(result, opts)}\n`);
+  });
+
+  // embed - Generate embeddings
+  addWriteLeaseFlags(
+    program
+      .command("embed [collection]")
+      .description("Generate embeddings for indexed documents")
+      .option("--collection <name>", "restrict to one collection")
+      .option("--model <uri>", "embedding model URI")
+      .option("--batch-size <num>", "batch size", "32")
+      .option("--force", "regenerate all embeddings")
+      .option("--dry-run", "show what would be done")
+      .option("--json", "JSON output")
+  ).action(
+    async (
+      collectionArg: string | undefined,
+      cmdOpts: Record<string, unknown>
+    ) => {
       const globals = getGlobals();
-      const { update, formatUpdate } = await import("./commands/update");
+      const format = getFormat(cmdOpts);
+
+      const { embed, formatEmbed } = await import("./commands/embed");
+      const collection =
+        collectionArg ?? (cmdOpts.collection as string | undefined);
+      const lease = parseWriteLeaseFlags(cmdOpts);
       const opts = {
         configPath: globals.config,
         indexName: globals.index,
-        gitPull: Boolean(cmdOpts.gitPull),
+        collection,
+        model: cmdOpts.model as string | undefined,
+        batchSize: parsePositiveInt("batch-size", cmdOpts.batchSize),
+        force: Boolean(cmdOpts.force),
+        dryRun: Boolean(cmdOpts.dryRun),
+        yes: globals.yes,
+        json: format === "json",
         verbose: globals.verbose,
-        json: getFormat(cmdOpts) === "json",
+        offline: globals.offline,
+        lockWaitMs: lease.lockWaitMs,
+        noWait: lease.noWait,
       };
-      const result = await update(opts);
+      const result = await embed(opts);
 
       if (!result.success) {
-        throw new CliError("RUNTIME", result.error ?? "Update failed");
+        throwIfWriteLeaseBusy(result, opts.json);
+        throw new CliError("RUNTIME", result.error ?? "Embed failed");
       }
-      process.stdout.write(`${formatUpdate(result, opts)}\n`);
-    });
-
-  // embed - Generate embeddings
-  program
-    .command("embed [collection]")
-    .description("Generate embeddings for indexed documents")
-    .option("--collection <name>", "restrict to one collection")
-    .option("--model <uri>", "embedding model URI")
-    .option("--batch-size <num>", "batch size", "32")
-    .option("--force", "regenerate all embeddings")
-    .option("--dry-run", "show what would be done")
-    .option("--json", "JSON output")
-    .action(
-      async (
-        collectionArg: string | undefined,
-        cmdOpts: Record<string, unknown>
-      ) => {
-        const globals = getGlobals();
-        const format = getFormat(cmdOpts);
-
-        const { embed, formatEmbed } = await import("./commands/embed");
-        const collection =
-          collectionArg ?? (cmdOpts.collection as string | undefined);
-        const opts = {
-          configPath: globals.config,
-          indexName: globals.index,
-          collection,
-          model: cmdOpts.model as string | undefined,
-          batchSize: parsePositiveInt("batch-size", cmdOpts.batchSize),
-          force: Boolean(cmdOpts.force),
-          dryRun: Boolean(cmdOpts.dryRun),
-          yes: globals.yes,
-          json: format === "json",
-          verbose: globals.verbose,
-          offline: globals.offline,
-        };
-        const result = await embed(opts);
-
-        if (!result.success) {
-          throw new CliError("RUNTIME", result.error ?? "Embed failed");
-        }
-        process.stdout.write(`${formatEmbed(result, opts)}\n`);
+      process.stdout.write(`${formatEmbed(result, opts)}\n`);
+      if (result.contentionErrors > 0) {
+        throw new CliError(
+          "BUSY",
+          "Some chunks were deferred by index contention",
+          { silent: true }
+        );
       }
-    );
+    }
+  );
 
   // cleanup - Clean stale data
-  program
-    .command("cleanup")
-    .description("Clean orphaned data from index")
-    .action(async () => {
-      const { cleanup, formatCleanup } = await import("./commands/cleanup");
-      const result = await cleanup();
+  addWriteLeaseFlags(
+    program.command("cleanup").description("Clean orphaned data from index")
+  ).action(async (cmdOpts: Record<string, unknown>) => {
+    const { cleanup, formatCleanup } = await import("./commands/cleanup");
+    const lease = parseWriteLeaseFlags(cmdOpts);
+    const result = await withCliWriteLease(
+      {
+        indexName: getGlobals().index,
+        lockWaitMs: lease.lockWaitMs,
+        noWait: lease.noWait,
+      },
+      () => cleanup({ indexName: getGlobals().index })
+    );
+    throwIfWriteLeaseBusy(result, false);
 
-      if (!result.success) {
-        throw new CliError("RUNTIME", result.error ?? "Cleanup failed");
-      }
-      process.stdout.write(`${formatCleanup(result)}\n`);
-    });
+    if (!result.success) {
+      throw new CliError("RUNTIME", result.error ?? "Cleanup failed");
+    }
+    process.stdout.write(`${formatCleanup(result)}\n`);
+  });
 
   // reset - Reset GNO to fresh state
   program
@@ -2879,52 +2981,76 @@ function wireVecCommands(program: Command): void {
   const vecCmd = program.command("vec").description("Vector index maintenance");
 
   // vec sync
-  vecCmd
-    .command("sync")
-    .description("Sync vec0 index with content_vectors")
-    .option("--json", "JSON output")
-    .action(async (cmdOpts: Record<string, unknown>) => {
-      const format = getFormat(cmdOpts);
-      const globals = getGlobals();
+  addWriteLeaseFlags(
+    vecCmd
+      .command("sync")
+      .description("Sync vec0 index with content_vectors")
+      .option("--json", "JSON output")
+  ).action(async (cmdOpts: Record<string, unknown>) => {
+    const format = getFormat(cmdOpts);
+    const globals = getGlobals();
 
-      const { vecSync, formatVecSync } = await import("./commands/vec");
-      const result = await vecSync({
-        configPath: globals.config,
-        json: format === "json",
-      });
+    const { vecSync, formatVecSync } = await import("./commands/vec");
+    const lease = parseWriteLeaseFlags(cmdOpts);
+    const result = await withCliWriteLease(
+      {
+        indexName: globals.index,
+        lockWaitMs: lease.lockWaitMs,
+        noWait: lease.noWait,
+      },
+      () =>
+        vecSync({
+          configPath: globals.config,
+          indexName: globals.index,
+          json: format === "json",
+        })
+    );
+    throwIfWriteLeaseBusy(result, format === "json");
 
-      if (!result.success) {
-        throw new CliError("RUNTIME", result.error);
-      }
+    if (!result.success) {
+      throw new CliError("RUNTIME", result.error);
+    }
 
-      process.stdout.write(
-        `${formatVecSync(result, { json: format === "json" })}\n`
-      );
-    });
+    process.stdout.write(
+      `${formatVecSync(result, { json: format === "json" })}\n`
+    );
+  });
 
   // vec rebuild
-  vecCmd
-    .command("rebuild")
-    .description("Rebuild vec0 index from content_vectors")
-    .option("--json", "JSON output")
-    .action(async (cmdOpts: Record<string, unknown>) => {
-      const format = getFormat(cmdOpts);
-      const globals = getGlobals();
+  addWriteLeaseFlags(
+    vecCmd
+      .command("rebuild")
+      .description("Rebuild vec0 index from content_vectors")
+      .option("--json", "JSON output")
+  ).action(async (cmdOpts: Record<string, unknown>) => {
+    const format = getFormat(cmdOpts);
+    const globals = getGlobals();
 
-      const { vecRebuild, formatVecRebuild } = await import("./commands/vec");
-      const result = await vecRebuild({
-        configPath: globals.config,
-        json: format === "json",
-      });
+    const { vecRebuild, formatVecRebuild } = await import("./commands/vec");
+    const lease = parseWriteLeaseFlags(cmdOpts);
+    const result = await withCliWriteLease(
+      {
+        indexName: globals.index,
+        lockWaitMs: lease.lockWaitMs,
+        noWait: lease.noWait,
+      },
+      () =>
+        vecRebuild({
+          configPath: globals.config,
+          indexName: globals.index,
+          json: format === "json",
+        })
+    );
+    throwIfWriteLeaseBusy(result, format === "json");
 
-      if (!result.success) {
-        throw new CliError("RUNTIME", result.error);
-      }
+    if (!result.success) {
+      throw new CliError("RUNTIME", result.error);
+    }
 
-      process.stdout.write(
-        `${formatVecRebuild(result, { json: format === "json" })}\n`
-      );
-    });
+    process.stdout.write(
+      `${formatVecRebuild(result, { json: format === "json" })}\n`
+    );
+  });
 }
 
 function wirePublishCommand(program: Command): void {
@@ -3217,6 +3343,7 @@ function wireTagsCommands(program: Command): void {
       const { tagsList, formatTagsList } = await import("./commands/tags");
       const result = await tagsList({
         configPath: globals.config,
+        indexName: globals.index,
         collection: cmdOpts.collection as string | undefined,
         prefix: cmdOpts.prefix as string | undefined,
         json: format === "json",
@@ -3238,62 +3365,86 @@ function wireTagsCommands(program: Command): void {
     });
 
   // tags add <doc> <tag>
-  tagsCmd
-    .command("add <doc> <tag>")
-    .description("Add a tag to a document")
-    .option("--json", "JSON output")
-    .action(
-      async (doc: string, tag: string, cmdOpts: Record<string, unknown>) => {
-        const format = getFormat(cmdOpts);
-        const globals = getGlobals();
+  addWriteLeaseFlags(
+    tagsCmd
+      .command("add <doc> <tag>")
+      .description("Add a tag to a document")
+      .option("--json", "JSON output")
+  ).action(
+    async (doc: string, tag: string, cmdOpts: Record<string, unknown>) => {
+      const format = getFormat(cmdOpts);
+      const globals = getGlobals();
 
-        const { tagsAdd, formatTagsAdd } = await import("./commands/tags");
-        const result = await tagsAdd(doc, tag, {
-          configPath: globals.config,
-          json: format === "json",
-        });
+      const { tagsAdd, formatTagsAdd } = await import("./commands/tags");
+      const lease = parseWriteLeaseFlags(cmdOpts);
+      const result = await withCliWriteLease(
+        {
+          indexName: globals.index,
+          lockWaitMs: lease.lockWaitMs,
+          noWait: lease.noWait,
+        },
+        () =>
+          tagsAdd(doc, tag, {
+            configPath: globals.config,
+            indexName: globals.index,
+            json: format === "json",
+          })
+      );
+      throwIfWriteLeaseBusy(result, format === "json");
 
-        if (!result.success) {
-          throw new CliError(
-            result.isValidation ? "VALIDATION" : "RUNTIME",
-            result.error
-          );
-        }
-
-        process.stdout.write(
-          `${formatTagsAdd(result, { json: format === "json" })}\n`
+      if (!result.success) {
+        throw new CliError(
+          result.isValidation ? "VALIDATION" : "RUNTIME",
+          result.error
         );
       }
-    );
+
+      process.stdout.write(
+        `${formatTagsAdd(result, { json: format === "json" })}\n`
+      );
+    }
+  );
 
   // tags rm <doc> <tag>
-  tagsCmd
-    .command("rm <doc> <tag>")
-    .description("Remove a tag from a document")
-    .option("--json", "JSON output")
-    .action(
-      async (doc: string, tag: string, cmdOpts: Record<string, unknown>) => {
-        const format = getFormat(cmdOpts);
-        const globals = getGlobals();
+  addWriteLeaseFlags(
+    tagsCmd
+      .command("rm <doc> <tag>")
+      .description("Remove a tag from a document")
+      .option("--json", "JSON output")
+  ).action(
+    async (doc: string, tag: string, cmdOpts: Record<string, unknown>) => {
+      const format = getFormat(cmdOpts);
+      const globals = getGlobals();
 
-        const { tagsRm, formatTagsRm } = await import("./commands/tags");
-        const result = await tagsRm(doc, tag, {
-          configPath: globals.config,
-          json: format === "json",
-        });
+      const { tagsRm, formatTagsRm } = await import("./commands/tags");
+      const lease = parseWriteLeaseFlags(cmdOpts);
+      const result = await withCliWriteLease(
+        {
+          indexName: globals.index,
+          lockWaitMs: lease.lockWaitMs,
+          noWait: lease.noWait,
+        },
+        () =>
+          tagsRm(doc, tag, {
+            configPath: globals.config,
+            indexName: globals.index,
+            json: format === "json",
+          })
+      );
+      throwIfWriteLeaseBusy(result, format === "json");
 
-        if (!result.success) {
-          throw new CliError(
-            result.isValidation ? "VALIDATION" : "RUNTIME",
-            result.error
-          );
-        }
-
-        process.stdout.write(
-          `${formatTagsRm(result, { json: format === "json" })}\n`
+      if (!result.success) {
+        throw new CliError(
+          result.isValidation ? "VALIDATION" : "RUNTIME",
+          result.error
         );
       }
-    );
+
+      process.stdout.write(
+        `${formatTagsRm(result, { json: format === "json" })}\n`
+      );
+    }
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
