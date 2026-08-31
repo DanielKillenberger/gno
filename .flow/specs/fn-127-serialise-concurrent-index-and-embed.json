@@ -7,7 +7,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-127-serialise-concurrent-index-and-embed.md",
-  "status": "open",
+  "status": "done",
   "title": "Serialise concurrent index and embed writes instead of failing on SQLITE_BUSY",
   "tracker": {
     "baseHashFlow": null,
@@ -20,5 +20,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-08-31T12:13:14.990710Z"
+  "updated_at": "2026-08-31T15:58:56.136093Z"
 }
