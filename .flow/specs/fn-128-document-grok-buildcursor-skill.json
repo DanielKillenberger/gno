@@ -1,0 +1,24 @@
+{
+  "branch_name": "fn-128-document-grok-buildcursor-skill",
+  "created_at": "2026-08-31T23:34:54.501427Z",
+  "depends_on_epics": [],
+  "id": "fn-128-document-grok-buildcursor-skill",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-128-document-grok-buildcursor-skill.md",
+  "status": "open",
+  "title": "Document Grok Build/Cursor skill-directory compat; decide on explicit installer targets",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-08-31T23:34:54.503187Z"
+}
