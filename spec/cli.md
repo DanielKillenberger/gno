@@ -2582,6 +2582,8 @@ gno skill install [--scope <project|user>] [--target <claude|codex|opencode|open
 3. Atomically installs skill directory (temp + rename)
 4. Copies SKILL.md, reference files, and nested recipe files
 
+**Compatibility:** As of their current releases, Grok Build (the xAI grok CLI) automatically reads Claude skill directories (`.claude/skills/` and `~/.claude/skills/`) with no extra configuration, and Cursor loads agent skills from `.claude/skills/` and `.codex/skills/` (project and user scope) in addition to its own `.cursor/skills/`. `--target claude` therefore covers Grok Build and Cursor; `--target codex` is also read by Cursor. Other skill-capable clients can copy the installed files; `gno skill paths` prints their locations. Dedicated `grok` and `cursor` installer targets are not shipped: they would duplicate the claude/codex paths those tools already read. Revisit only if users keep `~/.grok/skills` or `~/.cursor/skills` separate and ask for first-class targets.
+
 **Output (JSON):**
 
 ```json

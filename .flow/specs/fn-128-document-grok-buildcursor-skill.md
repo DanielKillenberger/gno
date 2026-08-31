@@ -11,3 +11,7 @@ The gno.sh site now states (verified against Cursor docs and x.ai Grok Build doc
 
 - R1: docs/CLI.md and spec/cli.md name the Grok Build / Cursor compatibility with the claude target, with the manual-copy fallback (`gno skill paths`).
 - R2: A written decision (in the spec or docs) on whether explicit grok/cursor targets ship, with rationale.
+
+## Decision (R2)
+
+**2026-09-01:** Do not ship dedicated `grok` or `cursor` installer targets. As of their current releases, Grok Build already reads `.claude/skills/` and `~/.claude/skills/` with no configuration, and Cursor already loads skills from `.claude/skills/` and `.codex/skills/` (project and user) in addition to `.cursor/skills/`. Explicit grok/cursor targets would duplicate those paths. Revisit only if users report keeping `~/.grok/skills` or `~/.cursor/skills` separate and ask for first-class installer support.

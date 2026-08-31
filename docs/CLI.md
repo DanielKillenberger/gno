@@ -1311,6 +1311,8 @@ Options:
 
 Supported targets: Claude Code, Codex, OpenCode, OpenClaw, Hermes Agent. Use `all` to install to every target.
 
+**Compatibility:** As of their current releases, Grok Build (the xAI grok CLI) automatically reads Claude skill directories (`.claude/skills/` and `~/.claude/skills/`) with no extra configuration, and Cursor loads agent skills from `.claude/skills/` and `.codex/skills/` (project and user scope) in addition to its own `.cursor/skills/`. `--target claude` therefore covers Grok Build and Cursor; `--target codex` is also read by Cursor. Other skill-capable clients can copy the installed files; `gno skill paths` prints their locations.
+
 ### gno skill uninstall
 
 Remove installed skill.
