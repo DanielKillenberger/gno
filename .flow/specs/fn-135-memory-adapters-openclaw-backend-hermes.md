@@ -25,7 +25,7 @@ Put GNO's memory into the slots harnesses actually call, now that the contracts 
 
 ## QA environment
 
-Hermes lives on ivan (actively used; reachable over SSH) — that is the real-dogfood verification target. OpenClaw: the operator's heimdall install is dormant and NOT a meaningful QA target; verify the OpenClaw backend in a scratch local OpenClaw workspace created for the test (their install supports it), seeded with memory files and a protocol canary. When a live target is not autonomously feasible, the QA stage reports NEEDS_HUMAN with the prepared verification script attached — never a source-read PASS.
+Hermes lives on ivan (actively used; reachable over SSH) — that is the real-dogfood verification target. OpenClaw: the operator's heimdall install is dormant and NOT a meaningful QA target; a fully isolated scratch OpenClaw is ALREADY PROVISIONED at `~/work/sandbox/openclaw-dogfood/` (launcher `./openclaw-sandboxed` pins OPENCLAW_HOME/STATE_DIR/CONFIG_PATH/WORKSPACE_DIR and HOME itself — OPENCLAW_HOME alone leaks state, observed 2026-09-01; leak-check verified clean). Workspace is seeded with MEMORY.md + memory/2026-09-01.md canaries ("amber-falcon-72", "teal-heron-19"). OpenClaw 2026.8.1. Full agent turns need model credentials configured in the sandbox; memory_search-level verification may not. When a live target is not autonomously feasible, the QA stage reports NEEDS_HUMAN with the prepared verification script attached — never a source-read PASS.
 
 ## Boundaries
 
