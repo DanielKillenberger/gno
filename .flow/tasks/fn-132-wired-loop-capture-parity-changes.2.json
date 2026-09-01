@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-09-01T12:43:10.329103Z",
+  "depends_on": [
+    "fn-132-wired-loop-capture-parity-changes.1"
+  ],
+  "id": "fn-132-wired-loop-capture-parity-changes.2",
+  "priority": 2,
+  "spec": "fn-132-wired-loop-capture-parity-changes",
+  "spec_path": ".flow/tasks/fn-132-wired-loop-capture-parity-changes.2.md",
+  "status": "todo",
+  "title": "Capture parity: MCP/REST capture syncs before success",
+  "updated_at": "2026-09-01T12:43:10.329103Z"
+}

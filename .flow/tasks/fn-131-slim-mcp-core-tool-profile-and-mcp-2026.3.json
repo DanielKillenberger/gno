@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-09-01T12:42:54.309959Z",
+  "depends_on": [
+    "fn-131-slim-mcp-core-tool-profile-and-mcp-2026.1",
+    "fn-131-slim-mcp-core-tool-profile-and-mcp-2026.2"
+  ],
+  "id": "fn-131-slim-mcp-core-tool-profile-and-mcp-2026.3",
+  "priority": 2,
+  "spec": "fn-131-slim-mcp-core-tool-profile-and-mcp-2026",
+  "spec_path": ".flow/tasks/fn-131-slim-mcp-core-tool-profile-and-mcp-2026.3.md",
+  "status": "todo",
+  "title": "Core tool descriptions as micro-instructions + docs",
+  "updated_at": "2026-09-01T12:42:54.309959Z"
+}

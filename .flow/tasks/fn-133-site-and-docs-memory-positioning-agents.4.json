@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-09-01T12:43:36.563517Z",
+  "depends_on": [
+    "fn-133-site-and-docs-memory-positioning-agents.1",
+    "fn-133-site-and-docs-memory-positioning-agents.2",
+    "fn-133-site-and-docs-memory-positioning-agents.3"
+  ],
+  "id": "fn-133-site-and-docs-memory-positioning-agents.4",
+  "priority": 2,
+  "spec": "fn-133-site-and-docs-memory-positioning-agents",
+  "spec_path": ".flow/tasks/fn-133-site-and-docs-memory-positioning-agents.4.md",
+  "status": "todo",
+  "title": "Copy-rule pass, gates, deploy, prod QA",
+  "updated_at": "2026-09-01T12:43:36.563517Z"
+}

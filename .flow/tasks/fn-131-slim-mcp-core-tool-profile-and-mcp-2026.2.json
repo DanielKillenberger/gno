@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-09-01T12:42:54.017936Z",
+  "depends_on": [
+    "fn-131-slim-mcp-core-tool-profile-and-mcp-2026.4",
+    "fn-131-slim-mcp-core-tool-profile-and-mcp-2026.1"
+  ],
+  "id": "fn-131-slim-mcp-core-tool-profile-and-mcp-2026.2",
+  "priority": 1,
+  "spec": "fn-131-slim-mcp-core-tool-profile-and-mcp-2026",
+  "spec_path": ".flow/tasks/fn-131-slim-mcp-core-tool-profile-and-mcp-2026.2.md",
+  "status": "todo",
+  "title": "MCP 2026-07-28 dual-speak",
+  "updated_at": "2026-09-01T12:42:54.017936Z"
+}

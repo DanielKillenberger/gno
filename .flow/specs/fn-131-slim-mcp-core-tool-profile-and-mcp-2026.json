@@ -6,14 +6,150 @@
   "default_impl": null,
   "default_review": null,
   "default_sync": null,
-  "depends_on_epics": [],
+  "depends_on_epics": [
+    "fn-130-memory-slice-rememberrecall-contracts"
+  ],
   "id": "fn-131-slim-mcp-core-tool-profile-and-mcp-2026",
   "impl_review_rounds": {},
   "next_task": 1,
   "plan_review_rounds": 0,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-09-01T13:45:57.996648Z",
   "ready": true,
+  "review_attempts": [
+    {
+      "artifact_sha256": "0ef8a43a45ac86b98bf3fd761aced68401c9e40430c79feaca8b932e165da722",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 310245,
+      "output_sha256": "f5d49c89c58457ae5a065e55eec03c6f34c1852aa593347e94dbf89df4d47246",
+      "reservation_id": "d0115b63df8f4553b9e9e76fc8f543ef",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:06:10.340905Z",
+      "tool_calls": 17,
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "b16833c1a0d6c6c169b7cf8e6fe49f9fa21fff035b12af2a75df709bc1a91c8d",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 3466,
+      "output_sha256": "848f598dfe5917fc8affc6f8d76f03e4a3ab022742eaa3c8c5a6f2df8b8c21ce",
+      "reservation_id": "f19f25ba6f4248039edae91257c37c8a",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:33:15.186491Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "dbfbe7114aa1b6ce300525eda8b04f8f3d859aefea8c47e3751caf025a74a694",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 1438,
+      "output_sha256": "9ebd1e0b436b36d53c68b406da1eaabbdac51f00e5747884fb5352cafe067d74",
+      "reservation_id": "ca787197ad9047dc8f308b045a28df50",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:42:40.759099Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "26feb5f82489074354a8b033cdddbbc066c3c6edc47459b554cea6f7446c0891",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [],
+        "reviewKind": "plan"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 83,
+      "output_sha256": "40d2d19134681e086a006dfc0c8bb45ef809e3140d67088c1eab2d9a33648691",
+      "reservation_id": "0c71a27a58ed40cd8efe87e9b6d0dc0c",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:45:57.994889Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_hash_epoch": {
+    "plan": 1,
+    "plan#completion": 0
+  },
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "plan": 0
+  },
   "spec_path": ".flow/specs/fn-131-slim-mcp-core-tool-profile-and-mcp-2026.md",
   "status": "open",
   "title": "Slim MCP core tool profile and MCP 2026-07-28 dual-speak",
@@ -28,5 +164,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T12:05:44.513425Z"
+  "updated_at": "2026-09-01T13:45:57.997033Z"
 }

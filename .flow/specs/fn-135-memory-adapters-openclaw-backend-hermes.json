@@ -13,9 +13,361 @@
   "impl_review_rounds": {},
   "next_task": 1,
   "plan_review_rounds": 0,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-09-01T13:44:46.075168Z",
   "ready": true,
+  "review_attempts": [
+    {
+      "artifact_sha256": "030fd379b0c278de944930d7e7cb1164de10727a3a3a531359470ce0ad663a0b",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-6904088d8de6197f4c35b0326ff56b61",
+            "classification": "introduced",
+            "findingId": "finding-6904088d8de6197f4c35b0326ff56b61",
+            "firstSeenThisRound": true,
+            "severity": "P0",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-573898205221620460648205f35bada3",
+            "classification": "introduced",
+            "findingId": "finding-573898205221620460648205f35bada3",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-b6d7f09ee6b48c5dd5f9c6b52f668589",
+            "classification": "introduced",
+            "findingId": "finding-b6d7f09ee6b48c5dd5f9c6b52f668589",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-45592224a7a1811acd0d599454964907",
+            "classification": "introduced",
+            "findingId": "finding-45592224a7a1811acd0d599454964907",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-ca4fdaef64ce7bf34c998e58710a51fc",
+            "classification": "introduced",
+            "findingId": "finding-ca4fdaef64ce7bf34c998e58710a51fc",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-3c70095eba99f07fc4265706ebf0eb1c",
+            "classification": "introduced",
+            "findingId": "finding-3c70095eba99f07fc4265706ebf0eb1c",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-b2b464234289273157404acc28e5a6e7",
+            "classification": "introduced",
+            "findingId": "finding-b2b464234289273157404acc28e5a6e7",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "plan"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 1523498,
+      "output_sha256": "db58b03e4cd4e6830a45a9504adb32fe772d9d2212135f8d4abdfa8f22ea5cab",
+      "reservation_id": "fef6fcc2372242128596ac595111c8f6",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:19:12.926291Z",
+      "tool_calls": 18,
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "a219dde2c87550d9d8dcf6b7a2b92f28137795802093b30572b4ab1874f2ed03",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-6904088d8de6197f4c35b0326ff56b61",
+            "classification": "introduced",
+            "findingId": "finding-6904088d8de6197f4c35b0326ff56b61",
+            "firstSeenThisRound": false,
+            "severity": "P0",
+            "status": "not_fixed"
+          },
+          {
+            "chainRoot": "finding-06ccfedb2f554de356e6db080ee81313",
+            "classification": "introduced",
+            "findingId": "finding-06ccfedb2f554de356e6db080ee81313",
+            "firstSeenThisRound": true,
+            "severity": "P0",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-573898205221620460648205f35bada3",
+            "classification": "introduced",
+            "findingId": "finding-573898205221620460648205f35bada3",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-b6d7f09ee6b48c5dd5f9c6b52f668589",
+            "classification": "introduced",
+            "findingId": "finding-b6d7f09ee6b48c5dd5f9c6b52f668589",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-45592224a7a1811acd0d599454964907",
+            "classification": "introduced",
+            "findingId": "finding-45592224a7a1811acd0d599454964907",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-ca4fdaef64ce7bf34c998e58710a51fc",
+            "classification": "introduced",
+            "findingId": "finding-ca4fdaef64ce7bf34c998e58710a51fc",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "not_fixed"
+          },
+          {
+            "chainRoot": "finding-3c70095eba99f07fc4265706ebf0eb1c",
+            "classification": "introduced",
+            "findingId": "finding-3c70095eba99f07fc4265706ebf0eb1c",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "not_fixed"
+          },
+          {
+            "chainRoot": "finding-b2b464234289273157404acc28e5a6e7",
+            "classification": "introduced",
+            "findingId": "finding-b2b464234289273157404acc28e5a6e7",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "not_fixed"
+          },
+          {
+            "chainRoot": "finding-25dcfb9dec60a1670a54bcb255f6cae6",
+            "classification": "introduced",
+            "findingId": "finding-25dcfb9dec60a1670a54bcb255f6cae6",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-ae897996165231800c093001be19e602",
+            "classification": "introduced",
+            "findingId": "finding-ae897996165231800c093001be19e602",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-60ccaeea4d6b92ba8ee0e51b4d74be35",
+            "classification": "introduced",
+            "findingId": "finding-60ccaeea4d6b92ba8ee0e51b4d74be35",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "plan"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 3494,
+      "output_sha256": "92aa0fa9b5f68c129220ad6fc6bfcbff1de5ab21d4095b5a33011dc5d1580089",
+      "reservation_id": "d2197e63d15a458280c2c9d1d8c94f98",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:37:23.737244Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "c993ffae62734639f721264016ec5283e96fec9ce17dcac73ac96984db9f3da3",
+      "backend": "codex",
+      "base_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "counter_kind": "plan",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-6904088d8de6197f4c35b0326ff56b61",
+            "classification": "introduced",
+            "findingId": "finding-6904088d8de6197f4c35b0326ff56b61",
+            "firstSeenThisRound": false,
+            "severity": "P0",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-06ccfedb2f554de356e6db080ee81313",
+            "classification": "introduced",
+            "findingId": "finding-06ccfedb2f554de356e6db080ee81313",
+            "firstSeenThisRound": false,
+            "severity": "P0",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-573898205221620460648205f35bada3",
+            "classification": "introduced",
+            "findingId": "finding-573898205221620460648205f35bada3",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-b6d7f09ee6b48c5dd5f9c6b52f668589",
+            "classification": "introduced",
+            "findingId": "finding-b6d7f09ee6b48c5dd5f9c6b52f668589",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-45592224a7a1811acd0d599454964907",
+            "classification": "introduced",
+            "findingId": "finding-45592224a7a1811acd0d599454964907",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-ca4fdaef64ce7bf34c998e58710a51fc",
+            "classification": "introduced",
+            "findingId": "finding-ca4fdaef64ce7bf34c998e58710a51fc",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-3c70095eba99f07fc4265706ebf0eb1c",
+            "classification": "introduced",
+            "findingId": "finding-3c70095eba99f07fc4265706ebf0eb1c",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-b2b464234289273157404acc28e5a6e7",
+            "classification": "introduced",
+            "findingId": "finding-b2b464234289273157404acc28e5a6e7",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-25dcfb9dec60a1670a54bcb255f6cae6",
+            "classification": "introduced",
+            "findingId": "finding-25dcfb9dec60a1670a54bcb255f6cae6",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-ae897996165231800c093001be19e602",
+            "classification": "introduced",
+            "findingId": "finding-ae897996165231800c093001be19e602",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-60ccaeea4d6b92ba8ee0e51b4d74be35",
+            "classification": "introduced",
+            "findingId": "finding-60ccaeea4d6b92ba8ee0e51b4d74be35",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          }
+        ],
+        "reviewKind": "plan"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "23ea76664487f6a28be6836962b083d183267b49",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol",
+      "outcome": "verdict",
+      "output_bytes": 141,
+      "output_sha256": "6205edcc1e11392c65d244c09fdd1c82d1fa0040da4c77a1907a8788b0f14fa0",
+      "reservation_id": "cbf2c2242b394fbc9df1877b18d5fb5a",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-01T13:44:46.071516Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_hash_epoch": {
+    "plan": 1,
+    "plan#completion": 0
+  },
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "plan": 0
+  },
   "spec_path": ".flow/specs/fn-135-memory-adapters-openclaw-backend-hermes.md",
   "status": "open",
   "title": "Memory adapters: OpenClaw backend, Hermes provider, block memory rungs",
@@ -30,5 +382,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T12:05:45.322761Z"
+  "updated_at": "2026-09-01T13:44:46.076557Z"
 }
