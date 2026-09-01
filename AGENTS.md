@@ -624,9 +624,9 @@ Default orchestration:
 
 - The active harness owns capture, interviews, research synthesis, planning, task decomposition, review verdicts, acceptance checks, git, releases, and final user-facing judgment.
 - Planning and review stay in-harness. Use native agents or subagents where useful. Never shell out to `codex`, `cursor-agent`, `grok`, Copilot, or RepoPrompt for planning or review.
-- Implementation defaults to Grok 4.5 through exactly one editing bridge:
-  - Cursor quota available: `cursor-agent -p --force --model cursor-grok-4.5-high "<self-contained implementation brief>"`
-  - Grok quota available: `grok --always-approve --no-plan -m grok-4.5 --reasoning-effort high -p "<self-contained implementation brief>"`
+- Implementation defaults to Grok 4.6 through exactly one editing bridge:
+  - Cursor quota available: `cursor-agent -p --force --model cursor-grok-4.6-high "<self-contained implementation brief>"`
+  - Grok quota available: `grok --always-approve --no-plan -m grok-4.6 --reasoning-effort high -p "<self-contained implementation brief>"`
 - Do not use Grok `acceptEdits` for shell-using implementation tasks; it can skip Bash and silently truncate the work.
 - Pick the bridge with usable quota. If it returns an authentication, rate-limit, credit, or quota error, try the other bridge once. Do not run both speculatively.
 - Run implementation bridges in the foreground from the verified repository root. Give them a self-contained task brief: scope, relevant paths, requirements, acceptance criteria, tests, and explicit prohibitions.
@@ -641,7 +641,7 @@ Persisted role pins:
 - Fast triage: `models.roles.fastJudge.codex = gpt-5.6-luna:low`
 - Fast scouting: `models.roles.scoutFast.codex = gpt-5.6-luna:low`
 - Judgment-heavy scouting: `models.roles.scoutIntelligent.codex = gpt-5.6-sol:medium`
-- Cursor implementation: `models.roles.delegate.cursor = cursor-grok-4.5-high`
+- Cursor implementation: `models.roles.delegate.cursor = cursor-grok-4.6-high`
 - No external-review role pin.
 - No Codex implementation-delegate pin.
 
