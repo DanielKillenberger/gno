@@ -28,7 +28,7 @@ This design is validated by a real cross-machine deployment (2026-09-01 referenc
 **Block content v1 — the ladder + the writing contract (compact; detailed workflows stay in the skill; target well under 1,500 characters):**
 - Retrieval ladder (validated in the reference deployment): scope to a collection first; exact terms/identifiers → `gno search`; entity/document lookup → fast `gno query`; multi-document evidence for a goal → `gno context build` (Capsule); change/dependency questions → `gno changes` / `gno diff` / `gno impact`; generated factual answers → `gno ask --verify` (abstains); diagnose an expected retrieval miss (reformulate, check collection scope) before falling back to grep.
 - Writing contract: retrieve before writing; a question is read-only; an existing canonical note is edited directly in the source file; `gno capture` is the creation primitive for genuinely new notes (collection, title/path, source kind, provenance) — never an update API; a capture receipt proves only the mechanical write; reindex the affected collection after writes and verify retrieval.
-- Citation discipline (gno:// URIs) and a pointer to `gno skill install` for the detailed workflows.
+- Citation discipline (gno:// URIs) and a state-aware pointer to the deeper retrieval layer: when the GNO skill is detected as installed, the block names `/gno` for advanced retrieval (structured query syntax, tag/date/author filters, backlinks, similar, intent modes, capture recipes); otherwise it names `gno skill install`. The installer checks skill presence at install/update time and renders the matching pointer.
 - Memory-loop rungs (remember/recall) are added by a block-version bump when fn-130 ships — the installer is the delivery vehicle.
 
 ## Edge Cases & Constraints
