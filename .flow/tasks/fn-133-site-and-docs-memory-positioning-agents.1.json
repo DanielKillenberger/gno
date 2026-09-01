@@ -6,6 +6,7 @@
   "depends_on": [],
   "id": "fn-133-site-and-docs-memory-positioning-agents.1",
   "priority": 1,
+  "review": "host",
   "spec": "fn-133-site-and-docs-memory-positioning-agents",
   "spec_path": ".flow/tasks/fn-133-site-and-docs-memory-positioning-agents.1.md",
   "status": "todo",

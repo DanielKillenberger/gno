@@ -3,8 +3,8 @@
   "completion_review_status": "unknown",
   "completion_reviewed_at": null,
   "created_at": "2026-09-01T11:15:16.267130Z",
-  "default_impl": null,
-  "default_review": null,
+  "default_impl": "cursor:cursor-grok-4.6-high",
+  "default_review": "codex:gpt-5.6-sol:high",
   "default_sync": null,
   "depends_on_epics": [
     "fn-130-memory-slice-rememberrecall-contracts"
@@ -164,5 +164,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T13:45:57.997033Z"
+  "updated_at": "2026-09-01T14:55:29.962760Z"
 }

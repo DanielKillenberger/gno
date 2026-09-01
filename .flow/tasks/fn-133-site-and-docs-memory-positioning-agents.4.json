@@ -10,6 +10,7 @@
   ],
   "id": "fn-133-site-and-docs-memory-positioning-agents.4",
   "priority": 2,
+  "review": "host",
   "spec": "fn-133-site-and-docs-memory-positioning-agents",
   "spec_path": ".flow/tasks/fn-133-site-and-docs-memory-positioning-agents.4.md",
   "status": "todo",

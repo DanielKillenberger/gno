@@ -10,6 +10,7 @@
   ],
   "id": "fn-130-memory-slice-rememberrecall-contracts.5",
   "priority": 3,
+  "review": "host",
   "spec": "fn-130-memory-slice-rememberrecall-contracts",
   "spec_path": ".flow/tasks/fn-130-memory-slice-rememberrecall-contracts.5.md",
   "status": "todo",

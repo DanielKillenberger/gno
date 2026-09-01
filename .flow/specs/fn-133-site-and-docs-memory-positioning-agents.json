@@ -3,8 +3,8 @@
   "completion_review_status": "unknown",
   "completion_reviewed_at": null,
   "created_at": "2026-09-01T11:15:16.852022Z",
-  "default_impl": null,
-  "default_review": null,
+  "default_impl": "cursor:cursor-grok-4.6-high",
+  "default_review": "codex:gpt-5.6-sol:high",
   "default_sync": null,
   "depends_on_epics": [
     "fn-129-gno-agents-install-global-instruction",
@@ -306,5 +306,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T13:45:01.369087Z"
+  "updated_at": "2026-09-01T14:55:30.515608Z"
 }

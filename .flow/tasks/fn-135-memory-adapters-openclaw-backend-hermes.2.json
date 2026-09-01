@@ -8,6 +8,7 @@
   ],
   "id": "fn-135-memory-adapters-openclaw-backend-hermes.2",
   "priority": 1,
+  "review": "host",
   "spec": "fn-135-memory-adapters-openclaw-backend-hermes",
   "spec_path": ".flow/tasks/fn-135-memory-adapters-openclaw-backend-hermes.2.md",
   "status": "todo",

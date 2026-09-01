@@ -6,6 +6,7 @@
   "depends_on": [],
   "id": "fn-132-wired-loop-capture-parity-changes.4",
   "priority": 2,
+  "review": "host",
   "spec": "fn-132-wired-loop-capture-parity-changes",
   "spec_path": ".flow/tasks/fn-132-wired-loop-capture-parity-changes.4.md",
   "status": "todo",
