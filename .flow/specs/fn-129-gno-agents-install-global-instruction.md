@@ -1,24 +1,56 @@
-## Why
+## Goal & Context
 
-Agents only use GNO well when the operator hand-authors usage instructions into harness files, and those hand-pasted blocks rot (same failure mode as the hand-submitted OpenClaw plugin). The strategy decision (vault: GNO Competitive Gap Analysis 2026-09) picked global instruction files as the primary discovery channel: user-scope CLAUDE.md reaches Claude Code, Grok Build, and Cursor; user-scope AGENTS.md reaches Codex, OpenClaw, and other AGENTS.md-reading harnesses. Per-turn hook recall was explicitly rejected (chat-assistant pattern, noise on coding turns); instructions leverage model judgment about WHEN to retrieve.
+Agents only use GNO well when the operator hand-authors usage instructions into harness files, and hand-pasted blocks rot. Ship `gno agents install`: a first-class, marker-managed installer for a compact GNO protocol block in the GLOBAL (user-scope) instruction files of every supported harness. Strategy: vault note "GNO Competitive Gap Analysis (2026-09)" — global instructions are the decided primary discovery channel; per-prompt hook recall was explicitly rejected.
 
-## What
+This design is validated by a real cross-machine deployment (2026-09-01 reference setup, three hosts, seven harnesses, protocol-canary verified). That deployment's installer lessons are requirements here, generalized: **this ships a user-configurable knowledge protocol, not a vault convention.**
 
-`gno agents install` — a first-class installer for a marker-bounded GNO instruction block in harness instruction files.
+## Architecture & Data Models
 
-- Targets: `claude` (user-scope CLAUDE.md), `agents` (user-scope AGENTS.md), `all`, plus dedicated targets for any harness whose global instruction file is NOT one of those two. Task includes building a verified per-harness coverage matrix before finalizing the target list: confirm whether Grok Build reads the user-global CLAUDE.md (it verifiably reads project CLAUDE.md and .claude/ dirs), what Cursor's user-level instruction surface is (rules system vs its AGENTS.md support), and Codex/OpenClaw/Hermes global file locations. Add `grok` / `cursor` targets only where the two default files demonstrably do not reach them. Project scope via `--scope project` writes to ./CLAUDE.md / ./AGENTS.md. Default `--scope user` — the whole point is fleet-wide leverage.
-- Block: BEGIN/END markers with a version stamp, idempotent install, `gno agents update` refreshes in place, `gno agents uninstall` removes cleanly, never touches content outside the markers. `--dry-run` prints the diff.
-- Block content v1 — the LADDER plus the write path (memory rungs added when the memory slice ships): what GNO is (one local index); ladder-based retrieval — `gno search` for exact terms/identifiers, `gno query` for hybrid/conceptual, escalate to `gno context build` when a goal needs compiled evidence, `gno ask --verify` when an answer must be checked, and reformulate-and-retry on a miss instead of giving up; writing/storing TODAY via `gno capture` with provenance (`--source-kind`) and presets; citation discipline (gno:// URIs); collections/tags filters exist; pointer to `gno skill install` for slash-command clients. Tight — the block competes for context in every session; target well under 1,500 characters.
-- JSON output for scripting; respects the repo's plain-text/markdown conventions of each target file.
-- Follow the write pattern of `gno skill install` (atomic temp+rename where applicable, receipts in output).
+**Harness coverage matrix — verified by deployment, to be re-confirmed in-task and shipped in docs:**
+- Claude Code: user-global CLAUDE.md, INCLUDING instance/profile directories (multi-instance setups are real; discover them, not just the primary directory).
+- Codex: user-global AGENTS.md, including instance directories.
+- Cursor Agent: its native user-level instruction surface (deployment confirmed a working adapter; capture the exact file in the matrix).
+- OpenCode: native surface per deployment.
+- Grok Build: reads the Claude global import — NO separate install; the installer must DETECT this import chain and skip, reporting "covered via claude", never double-installing.
+- Hermes: marker-managed block in SOUL.md.
+- OpenClaw: marker-managed block in AGENTS.md (existing workspaces).
+- `--target all` = every harness detected on the machine; harness discovery (which harnesses are installed) precedes writing.
 
-Design input, non-blocking: Gordon's personal tailored instruction setup (separate effort, in progress; notes incoming as reference — it goes further than the product version, e.g. tailored ladders) will be mined for ideas post-landing; this spec ships the general-audience version and must not wait for it.
+**Installer contract (each item is deployment-tested):**
+- One compact, versioned protocol block bounded by stable BEGIN/END markers; install/update touches ONLY the owned block; content outside markers stays byte-identical.
+- Backup-first: the touched file is backed up before any write.
+- Idempotent: re-running is a no-op when current.
+- Fail-closed marker validation: malformed or duplicate markers → error with guidance, never guess or "repair".
+- Verification built in: `gno agents verify` checks per target — exactly one marker block, block hash matches the installed version, links inside the block resolve. Deterministic checks only (fresh-session behavioral canaries are an operator/dogfood practice, documented but not automated in v1).
+- `gno agents update` refreshes the block in place across versions; `gno agents uninstall` removes block + markers cleanly; `--dry-run` prints a unified diff and writes nothing; `--json` everywhere.
+- Symlink-aware: where a harness supports pointing at one canonical file, write once and respect the link; never break an operator's existing symlink scheme.
 
-## Acceptance
+**Block content v1 — the ladder + the writing contract (compact; detailed workflows stay in the skill; target well under 1,500 characters):**
+- Retrieval ladder (validated in the reference deployment): scope to a collection first; exact terms/identifiers → `gno search`; entity/document lookup → fast `gno query`; multi-document evidence for a goal → `gno context build` (Capsule); change/dependency questions → `gno changes` / `gno diff` / `gno impact`; generated factual answers → `gno ask --verify` (abstains); diagnose an expected retrieval miss (reformulate, check collection scope) before falling back to grep.
+- Writing contract: retrieve before writing; a question is read-only; an existing canonical note is edited directly in the source file; `gno capture` is the creation primitive for genuinely new notes (collection, title/path, source kind, provenance) — never an update API; a capture receipt proves only the mechanical write; reindex the affected collection after writes and verify retrieval.
+- Citation discipline (gno:// URIs) and a pointer to `gno skill install` for the detailed workflows.
+- Memory-loop rungs (remember/recall) are added by a block-version bump when fn-130 ships — the installer is the delivery vehicle.
 
-- R1: `gno agents install --target all` creates or updates the marker block in every location the verified harness matrix requires; a second run is a no-op (idempotent); content outside markers is byte-identical before/after. The matrix itself (which harness reads which file, with evidence) lands in docs.
-- R2: `gno agents update` replaces only the block; `gno agents uninstall` removes block and markers; both exit non-zero with a clear message if markers are missing/corrupted.
-- R3: `--scope project` writes ./CLAUDE.md / ./AGENTS.md with the same semantics.
-- R4: `--dry-run` prints a unified diff and writes nothing.
-- R5: Block content is versioned; `update` from an older block version succeeds; block length stays under the documented budget.
-- R6: Docs updated in the same change (docs/CLI.md, spec/cli.md; site follows post-merge per downstream rules); all four-surface rule does not apply (this is a CLI-only operator command by nature — recorded as a deliberate exception).
+## Edge Cases & Constraints
+
+- Never write outside markers; never create a harness's instruction file tree structure that does not exist unless the target harness is detected as installed (creating the FILE is fine; fabricating harness dirs is not).
+- Instance-directory enumeration must be conservative: documented discovery rules per harness, skip-and-report on ambiguity.
+- Import-chain dedupe (Grok→Claude today) is data-driven so future chains can be added without code shape changes.
+- Multi-machine reality: the installer is per-machine; the matrix docs state that (index/DB state is machine-local; instruction files may be synced or repo-managed by operators — respect either).
+- CLI-only surface is a recorded deliberate exception to the four-surface rule (operator command by nature).
+
+## Acceptance Criteria
+
+- R1: `gno agents install --target all` on a machine with N detected harnesses writes the block to every matrix location including instance directories; a second run is a no-op; content outside markers is byte-identical (hash-verified in tests). Verified live on at least Claude Code + Codex + one AGENTS.md harness.
+- R2: Grok-style import chains are detected and skipped with an explicit "covered via <target>" report; no double block. Verified live.
+- R3: Malformed/duplicate markers cause a clean failure with guidance; `--dry-run` prints the exact diff and writes nothing; every touched file has a backup. Verified live.
+- R4: `gno agents verify` reports per-target: exactly-one-block, version/hash match, resolvable block links; `update` migrates an older block version in place; `uninstall` leaves the file without block or markers. Verified live.
+- R5: Block content teaches the full ladder + writing contract within the size budget, passes the copy rules, and carries a version stamp.
+- R6: Harness matrix (who reads what, with evidence) lands in docs; docs/CLI.md + spec/cli.md updated in the same change; site reference follows in fn-133.
+
+## Boundaries
+
+- Out: behavioral canary automation (documented as operator practice only).
+- Out: per-prompt hooks of any kind; the only hook-shaped follow-up (PreCompact nudge) is explicitly deferred and not part of this spec.
+- Out: memory-loop block content (arrives with fn-130 via a block version bump).
+- Out: managing operator-owned content outside the marker block, including symlink schemes themselves.

@@ -1,0 +1,29 @@
+{
+  "branch_name": "fn-133-site-and-docs-memory-positioning-agents",
+  "created_at": "2026-09-01T11:15:16.852022Z",
+  "depends_on_epics": [
+    "fn-129-gno-agents-install-global-instruction",
+    "fn-130-memory-slice-rememberrecall-contracts",
+    "fn-131-slim-mcp-core-tool-profile-and-mcp-2026",
+    "fn-132-wired-loop-capture-parity-changes"
+  ],
+  "id": "fn-133-site-and-docs-memory-positioning-agents",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-133-site-and-docs-memory-positioning-agents.md",
+  "status": "open",
+  "title": "Site and docs: memory positioning, agents-install reference, comparison refresh under copy rules",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-09-01T11:15:25.349147Z"
+}
