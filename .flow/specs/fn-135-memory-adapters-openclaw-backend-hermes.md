@@ -1,6 +1,6 @@
 ## Goal & Context
 
-Put GNO's memory into the slots harnesses actually call, now that the contracts exist (fn-130) and pass the eval gate (fn-134). Three deliverables: the OpenClaw search-backend, a Hermes memory provider, and the fn-129 block version bump that adds the memory rungs to the ladder. Strategy note gap 1 / build 3b.
+Put GNO's memory into the slots harnesses actually call, now that the contracts exist (fn-130) and pass the eval gate (fn-134). Three deliverables, in priority order: a Hermes memory provider (the operator's actively used hook harness, on ivan — real dogfood), the fn-129 block version bump adding the memory rungs, and the OpenClaw search-backend (market-driven: OpenClaw is the qmd slot and its user base is the audience; the operator's own OpenClaw is dormant, so it earns no fleet dogfood). Strategy note gap 1 / build 3b.
 
 ## What
 
@@ -17,15 +17,15 @@ Put GNO's memory into the slots harnesses actually call, now that the contracts 
 
 ## Acceptance Criteria
 
-- R1: OpenClaw with `memory.backend = "gno"` performs memory_search over its own memory files through GNO retrieval; a fresh-session protocol canary retrieves a seeded memory fact. Verified live in a real OpenClaw workspace.
-- R2: Hermes with the GNO provider prefetches recall results into a turn and can store an explicit fact through remember with scopes; verified live via a scripted Hermes session; no ambient store occurs with default config.
+- R1: Hermes with the GNO provider prefetches recall results into a turn and can store an explicit fact through remember with scopes; verified live via a scripted Hermes session on ivan; no ambient store occurs with default config.
+- R2: OpenClaw with `memory.backend = "gno"` performs memory_search over its own memory files through GNO retrieval; a fresh-session protocol canary retrieves a seeded memory fact. Verified live in a scratch OpenClaw workspace.
 - R3: `gno agents update` migrates an installed v1 block to the memory-rung version; block still passes size budget and copy rules; ladder ordering per the decided shape.
 - R4: Skill memory recipes ship; docs updated (MEMORY.md adapters section, integrations pages deferred to site follow-up).
 - R5: Both adapters gated on fn-134 green at documented thresholds (recorded in the spec on start).
 
 ## QA environment
 
-OpenClaw and Hermes are not guaranteed on the build machine. Live verification runs wherever the harness actually exists (the operator's fleet exposes an OpenClaw workspace on heimdall and Hermes on ivan, reachable over SSH) or via a scratch local install when the harness supports one. When neither is autonomously feasible, the QA stage reports NEEDS_HUMAN with the prepared verification script attached — never a source-read PASS.
+Hermes lives on ivan (actively used; reachable over SSH) — that is the real-dogfood verification target. OpenClaw: the operator's heimdall install is dormant and NOT a meaningful QA target; verify the OpenClaw backend in a scratch local OpenClaw workspace created for the test (their install supports it), seeded with memory files and a protocol canary. When a live target is not autonomously feasible, the QA stage reports NEEDS_HUMAN with the prepared verification script attached — never a source-read PASS.
 
 ## Boundaries
 
