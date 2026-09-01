@@ -44,7 +44,7 @@ This design is validated by a real cross-machine deployment (2026-09-01 referenc
 - R1: `gno agents install --target all` on a machine with N detected harnesses writes the block to every standard matrix location (plus any `--extra-dir` paths given); a second run is a no-op; content outside markers is byte-identical (hash-verified in tests). Verified live on at least Claude Code + Codex + one AGENTS.md harness, including one `--extra-dir` case.
 - R2: Grok-style import chains are detected and skipped with an explicit "covered via <target>" report; no double block. Verified live.
 - R3: Malformed/duplicate markers cause a clean failure with guidance; `--dry-run` prints the exact diff and writes nothing; every touched file has a backup. Verified live.
-- R4: `gno agents verify` reports per-target: exactly-one-block, version/hash match, resolvable block links; `update` migrates an older block version in place; `uninstall` leaves the file without block or markers. Verified live.
+- R4: `gno agents verify` reports per-target: exactly-one-block, block version and hash match the installed release; any file references the block contains resolve (vacuous when it has none); `update` migrates an older block version in place; `uninstall` leaves the file without block or markers. Verified live.
 - R5: Block content teaches the full ladder + writing contract within the size budget, passes the copy rules, and carries a version stamp.
 - R6: Harness matrix (who reads what, with evidence) lands in docs; docs/CLI.md + spec/cli.md updated in the same change; site reference follows in fn-133.
 
@@ -54,3 +54,7 @@ This design is validated by a real cross-machine deployment (2026-09-01 referenc
 - Out: per-prompt hooks of any kind; the only hook-shaped follow-up (PreCompact nudge) is explicitly deferred and not part of this spec.
 - Out: memory-loop block content (arrives with fn-130 via a block version bump).
 - Out: managing operator-owned content outside the marker block, including symlink schemes themselves.
+
+## Pilot routing
+
+no-plan (single cohesive command family; dispatch work with --no-plan).

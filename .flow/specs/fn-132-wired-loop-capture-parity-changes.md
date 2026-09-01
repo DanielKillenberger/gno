@@ -31,3 +31,7 @@ Ship the operator-wired loop as product, and harden the indexing pipeline that l
 - Out: any auto-repair in the findings pass.
 - Out: new scheduler infrastructure beyond the daemon's existing task loop.
 - Out: webhooks/external event sinks.
+
+## Pilot routing
+
+plan (four independent deliverables incl. crash-hardening investigation).

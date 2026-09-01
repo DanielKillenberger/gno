@@ -1,13 +1,21 @@
 {
   "branch_name": "fn-135-memory-adapters-openclaw-backend-hermes",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-09-01T12:02:58.028524Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-134-memory-eval-suite-as-the-adapter-gate"
   ],
   "id": "fn-135-memory-adapters-openclaw-backend-hermes",
+  "impl_review_rounds": {},
   "next_task": 1,
+  "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
+  "ready": true,
   "spec_path": ".flow/specs/fn-135-memory-adapters-openclaw-backend-hermes.md",
   "status": "open",
   "title": "Memory adapters: OpenClaw backend, Hermes provider, block memory rungs",
@@ -22,5 +30,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T12:02:58.569133Z"
+  "updated_at": "2026-09-01T12:05:45.322761Z"
 }

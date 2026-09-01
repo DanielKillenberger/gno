@@ -1,13 +1,21 @@
 {
   "branch_name": "fn-130-memory-slice-rememberrecall-contracts",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-09-01T11:15:15.969277Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-129-gno-agents-install-global-instruction"
   ],
   "id": "fn-130-memory-slice-rememberrecall-contracts",
+  "impl_review_rounds": {},
   "next_task": 1,
+  "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
+  "ready": true,
   "spec_path": ".flow/specs/fn-130-memory-slice-rememberrecall-contracts.md",
   "status": "open",
   "title": "Memory slice: remember/recall contracts on all four surfaces",
@@ -22,5 +30,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T11:15:24.208186Z"
+  "updated_at": "2026-09-01T12:05:44.231213Z"
 }

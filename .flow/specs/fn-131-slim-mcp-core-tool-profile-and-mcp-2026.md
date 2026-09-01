@@ -30,3 +30,7 @@ Cut the MCP surface cost and close the protocol gap. Today GNO advertises 25 rea
 - Out: changing which tools exist, or any tool's behavior.
 - Out: flipping the default profile in this spec (explicit follow-up decision with dogfood evidence).
 - Out: MCP subscriptions/change-events (`resources.subscribe`) — that is fn-132's `changes --follow` territory and a possible later MCP mapping.
+
+## Pilot routing
+
+plan (profile and protocol negotiation are separable, protocol work is finicky).

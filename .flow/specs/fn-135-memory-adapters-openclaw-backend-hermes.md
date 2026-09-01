@@ -23,9 +23,17 @@ Put GNO's memory into the slots harnesses actually call, now that the contracts 
 - R4: Skill memory recipes ship; docs updated (MEMORY.md adapters section, integrations pages deferred to site follow-up).
 - R5: Both adapters gated on fn-134 green at documented thresholds (recorded in the spec on start).
 
+## QA environment
+
+OpenClaw and Hermes are not guaranteed on the build machine. Live verification runs wherever the harness actually exists (the operator's fleet exposes an OpenClaw workspace on heimdall and Hermes on ivan, reachable over SSH) or via a scratch local install when the harness supports one. When neither is autonomously feasible, the QA stage reports NEEDS_HUMAN with the prepared verification script attached — never a source-read PASS.
+
 ## Boundaries
 
 - Out: Claude Code/Cursor adapters (instructions + tool descriptions already cover them; no hook adapters per the decided direction).
 - Out: PreCompact nudge (still deferred).
 - Out: consolidation, entities, temporal (unchanged roadmap).
 - Out: marketplace listings/announcements (fn-133 and later).
+
+## Pilot routing
+
+plan (three deliverables across two external ecosystems plus the block bump).

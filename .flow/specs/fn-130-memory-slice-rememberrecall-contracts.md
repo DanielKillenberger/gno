@@ -47,3 +47,7 @@ The write-path taxonomy this slice must keep coherent (validated in the referenc
 - Out: entity extraction, temporal queries beyond supersession filtering.
 - Out: consolidation/dedup jobs (later, operator-gated, findings-only).
 - Out: any change to capture semantics (capture stays the creation primitive; this spec must not blur the taxonomy).
+
+## Pilot routing
+
+plan (four surfaces, shared schema, contract tests, docs — multi-task by nature).

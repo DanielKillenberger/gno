@@ -1,13 +1,21 @@
 {
   "branch_name": "fn-134-memory-eval-suite-as-the-adapter-gate",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-09-01T12:02:57.735217Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-130-memory-slice-rememberrecall-contracts"
   ],
   "id": "fn-134-memory-eval-suite-as-the-adapter-gate",
+  "impl_review_rounds": {},
   "next_task": 1,
+  "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
+  "ready": true,
   "spec_path": ".flow/specs/fn-134-memory-eval-suite-as-the-adapter-gate.md",
   "status": "open",
   "title": "Memory eval suite as the adapter gate (dogfood-in-a-box)",
@@ -22,5 +30,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T12:02:58.301273Z"
+  "updated_at": "2026-09-01T12:05:45.065923Z"
 }

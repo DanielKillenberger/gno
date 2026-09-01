@@ -32,3 +32,7 @@ Depends on fn-129, fn-130, fn-131, fn-132 having landed; scope flexes to exactly
 - Out: homepage repositioning (done 2026-08/09; only truth-updates allowed here).
 - Out: new comparison pages beyond updating existing ones.
 - Out: launch/announcement content (posts, changelogs beyond the repo's standard CHANGELOG discipline).
+
+## Pilot routing
+
+plan (multiple site surfaces + docs audit; scope flexes to what shipped).

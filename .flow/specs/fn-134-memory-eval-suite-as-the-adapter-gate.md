@@ -36,3 +36,7 @@ Thresholds live in the eval file as the **adapter gate**: fn-135 starts when the
 - Out: LLM-as-judge anywhere.
 - Out: benchmarking against external suites (LongMemEval-class run is a separate credibility item).
 - Out: evaluating harness adapters themselves (fn-135 carries its own verification).
+
+## Pilot routing
+
+no-plan (one eval suite plus fixtures; dispatch work with --no-plan).
