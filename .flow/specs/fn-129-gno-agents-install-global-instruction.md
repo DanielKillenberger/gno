@@ -7,8 +7,8 @@ This design is validated by a real cross-machine deployment (2026-09-01 referenc
 ## Architecture & Data Models
 
 **Harness coverage matrix — verified by deployment, to be re-confirmed in-task and shipped in docs:**
-- Claude Code: user-global CLAUDE.md, INCLUDING instance/profile directories (multi-instance setups are real; discover them, not just the primary directory).
-- Codex: user-global AGENTS.md, including instance directories.
+- Claude Code: user-global CLAUDE.md at the standard location, honoring documented overrides (e.g. a config-dir environment variable) when set.
+- Codex: user-global AGENTS.md, same standard-location + documented-override rule.
 - Cursor Agent: its native user-level instruction surface (deployment confirmed a working adapter; capture the exact file in the matrix).
 - OpenCode: native surface per deployment.
 - Grok Build: reads the Claude global import — NO separate install; the installer must DETECT this import chain and skip, reporting "covered via claude", never double-installing.
@@ -34,14 +34,14 @@ This design is validated by a real cross-machine deployment (2026-09-01 referenc
 ## Edge Cases & Constraints
 
 - Never write outside markers; never create a harness's instruction file tree structure that does not exist unless the target harness is detected as installed (creating the FILE is fine; fabricating harness dirs is not).
-- Instance-directory enumeration must be conservative: documented discovery rules per harness, skip-and-report on ambiguity.
+- Nonstandard/multi-instance layouts (several harness config dirs on one machine) are served by an explicit repeatable `--extra-dir <path>` flag, never by guessed discovery — the default targets only each harness's standard documented locations. Multi-instance operators script the flag.
 - Import-chain dedupe (Grok→Claude today) is data-driven so future chains can be added without code shape changes.
 - Multi-machine reality: the installer is per-machine; the matrix docs state that (index/DB state is machine-local; instruction files may be synced or repo-managed by operators — respect either).
 - CLI-only surface is a recorded deliberate exception to the four-surface rule (operator command by nature).
 
 ## Acceptance Criteria
 
-- R1: `gno agents install --target all` on a machine with N detected harnesses writes the block to every matrix location including instance directories; a second run is a no-op; content outside markers is byte-identical (hash-verified in tests). Verified live on at least Claude Code + Codex + one AGENTS.md harness.
+- R1: `gno agents install --target all` on a machine with N detected harnesses writes the block to every standard matrix location (plus any `--extra-dir` paths given); a second run is a no-op; content outside markers is byte-identical (hash-verified in tests). Verified live on at least Claude Code + Codex + one AGENTS.md harness, including one `--extra-dir` case.
 - R2: Grok-style import chains are detected and skipped with an explicit "covered via <target>" report; no double block. Verified live.
 - R3: Malformed/duplicate markers cause a clean failure with guidance; `--dry-run` prints the exact diff and writes nothing; every touched file has a backup. Verified live.
 - R4: `gno agents verify` reports per-target: exactly-one-block, version/hash match, resolvable block links; `update` migrates an older block version in place; `uninstall` leaves the file without block or markers. Verified live.
