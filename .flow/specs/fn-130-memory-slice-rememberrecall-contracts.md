@@ -50,4 +50,4 @@ The write-path taxonomy this slice must keep coherent (validated in the referenc
 
 ## Pilot routing
 
-plan (four surfaces, shared schema, contract tests, docs — multi-task by nature).
+plan (pre-planned, SHIP) — dispatch the work stage via `/flow-next:work-rolling <this-id> mode:autonomous` (task graph fans out after .1; rolling per-task admission).

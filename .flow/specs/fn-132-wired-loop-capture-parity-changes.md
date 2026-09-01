@@ -34,4 +34,4 @@ Ship the operator-wired loop as product, and harden the indexing pipeline that l
 
 ## Pilot routing
 
-plan (four independent deliverables incl. crash-hardening investigation).
+plan (pre-planned, SHIP) — dispatch the work stage via `/flow-next:work-rolling <this-id> mode:autonomous` (tasks mostly parallel).

@@ -36,4 +36,4 @@ Hermes lives on ivan (actively used; reachable over SSH) — that is the real-do
 
 ## Pilot routing
 
-plan (three deliverables across two external ecosystems plus the block bump).
+plan (pre-planned, SHIP) — standard pilot work dispatch (serialized .1→.2→.3).

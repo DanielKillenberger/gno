@@ -33,4 +33,4 @@ Cut the MCP surface cost and close the protocol gap. Today GNO advertises 25 rea
 
 ## Pilot routing
 
-plan (profile and protocol negotiation are separable, protocol work is finicky).
+plan (pre-planned, SHIP) — standard pilot work dispatch (chain is serial: .4→.1→.2→.3).

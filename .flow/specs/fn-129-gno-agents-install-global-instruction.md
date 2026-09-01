@@ -57,4 +57,4 @@ This design is validated by a real cross-machine deployment (2026-09-01 referenc
 
 ## Pilot routing
 
-no-plan (single cohesive command family; dispatch work with --no-plan).
+no-plan — dispatch work with `--spec <this-id> --no-plan`.

@@ -39,4 +39,4 @@ Thresholds live in the eval file as the **adapter gate**: fn-135 starts when the
 
 ## Pilot routing
 
-no-plan (one eval suite plus fixtures; dispatch work with --no-plan).
+no-plan — dispatch work with `--spec <this-id> --no-plan`.

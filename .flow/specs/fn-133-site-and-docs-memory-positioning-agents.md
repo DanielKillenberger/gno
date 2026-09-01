@@ -35,4 +35,4 @@ Depends on fn-129, fn-130, fn-131, fn-132 having landed; scope flexes to exactly
 
 ## Pilot routing
 
-plan (multiple site surfaces + docs audit; scope flexes to what shipped).
+plan (pre-planned, SHIP) — standard pilot work dispatch (serialized .1→.2→.3→.4).
