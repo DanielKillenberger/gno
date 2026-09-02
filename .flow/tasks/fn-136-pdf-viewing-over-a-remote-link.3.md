@@ -40,10 +40,20 @@ Implement R1 and prove the transport approach over the real link. Probe the asse
 - [ ] Relay measurement recorded in the task done summary: request count, bytes, time to first painted page, and current round trip, against the pre-change numbers or an explicit note that no pre-change capture exists; or BLOCKED with the reason when the remote host is unreachable
 - [ ] `bun test` and `bun run lint:check` pass
 ## Done summary
-TBD
+Implemented R1: the PDF facade takes a transport hint (`whole-file` → `disableRange`, streamed single GET; `ranged` → 1 MB chunks with background fetch) with `PDF_WHOLE_FILE_MAX_BYTES` (8 MB) and `PDF_RANGE_CHUNK_BYTES` housed in a dependency-free `pdf-transport` module and re-exported from the facade. `usePdfDocument` issues one same-origin HEAD per document load to pick the tier and falls back to ranged on network failure, non-2xx, or a missing or invalid Content-Length without a document error; a load torn down during the probe never creates a loading task; a synchronous `getDocument` throw now reaches the error state through the shared `failLoad` path. The fn-112 Playwright smoke gate was aligned with the tier: constants derived from the facade, the ranged fixture grown to 11.4 MB with page 2 spilling past the first 1 MB chunk, HEAD passed through the range controller without consuming the first-pass slot, and a new whole-file oracle asserting exactly one HEAD plus one Range-less GET on a sub-bound fixture. `bun run test:e2e:pdf` passed after the fixes.
 
+R6 proof measurement (pre-change build, over the relayed VPN link at about 203 ms round trip, headless Chromium 1380x880 at DPR 2, largest PDF indexed on the remote host at 3.07 MB; no 5 MB / 50-page fixture exists there):
+- before: first painted page 37.2 s after navigation start (cold, SPA JS uncached); doc view 79 requests and about 8.8 MB by Content-Length; 41 JS chunks / 1.24 MB; asset endpoint 26 requests = 1 full GET cancelled by pdf.js plus 25 Range requests of 64 KB, no HEAD; cold SPA root load 48 requests
+- after: BLOCKED. The remote host has no shell access from this machine, so the new build could not be deployed there. Local unit and e2e coverage prove the tier selection and request pattern (HEAD then one GET under 8 MB; 1 MB ranges with background fetch at or above); the relay timing is left to task .5 once the remote install is updated.
+- exposure mechanism confirmed: a same-host HTTPS reverse proxy (the reverse-proxy case in R4), not an SSH tunnel.
+- gate: the measurement is blocked, not failed, so per the Early proof point it does not gate task .4.
+
+Review: round 1 NEEDS_WORK (smoke gate invalidated, no explicit fetch double in the PdfViewer integration tests, unguarded probe continuation, inventory order, comment); all fixed through the Grok bridge in the review-fix commit. Round 2: SHIP, with one P3 (the whole-file oracle used a 1.3 KB fixture that pdf.js would never range) closed after the verdict by a conductor commit that points the oracle at a 4.2 MB range-eligible sub-bound fixture; `bun run test:e2e:pdf` re-run green (large fixture 11,384,001 B, medium fixture 4,238,157 B).
+
+stage: wave-join - ran (cherry-pick of the worker commit and the review-fix commit onto the target; the generated SPA snapshot conflicted with task .2's refresh and was regenerated, not merged)
+stage: impl-review - ran [round 1 NEEDS_WORK -> fixes -> round 2 SHIP] (model: claude-opus-5 via harness subagent, host backend; fixes: cursor-grok-4.6-high via cursor-agent bridge)
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 98c5b6e4, 094de121, 91a69d47, 6271946dd799045e30e6e96cf0e74e8746fac4af
+- Tests: bun test test/serve/public/hooks test/serve/public/lib test/serve/public/components/pdf/PdfViewer.dom.test.tsx test/egress/enforcement.test.ts test/serve/spa-snapshot-freshness.test.ts -> 123 pass, 0 fail (integrated target), bun run lint:check -> clean, bun run test:e2e:pdf -> PASSED (large 11,384,001 B / 200 pages ranged tier; medium 4,238,157 B / 60 pages whole-file tier: one HEAD + one Range-less GET), worker: bun test (full) -> 4436 pass, 3 fail outside Touches, all fixed by the conductor (inventory entry, PdfViewer await, snapshot rebuild)
 - PRs:
-
