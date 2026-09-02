@@ -7,6 +7,7 @@
  */
 
 import type { HttpGatewayOverrides } from "../mcp/http-security";
+import type { RequestPeerServer } from "./request-locality";
 import type { ResidentRuntime } from "./resident-runtime";
 import type { ContextHolder } from "./routes/api";
 
@@ -975,7 +976,7 @@ export async function startServer(
           },
         },
         "/api/docs/:id/reveal": {
-          POST: async (req: Request) => {
+          POST: async (req: Request, server: RequestPeerServer) => {
             if (!isRequestAllowed(req, port)) {
               return withSecurityHeaders(forbiddenResponse(), isDev);
             }
@@ -983,7 +984,7 @@ export async function startServer(
             const parts = url.pathname.split("/");
             const id = decodeURIComponent(parts[3] || "");
             return withSecurityHeaders(
-              await handleRevealDoc(ctxHolder, store, id, req),
+              await handleRevealDoc(ctxHolder, store, id, req, { server }),
               isDev
             );
           },
@@ -1166,8 +1167,11 @@ export async function startServer(
           },
         },
         "/api/capabilities": {
-          GET: () =>
-            withSecurityHeaders(handleCapabilities(ctxHolder.current), isDev),
+          GET: (req: Request, server: RequestPeerServer) =>
+            withSecurityHeaders(
+              handleCapabilities(ctxHolder.current, req, server),
+              isDev
+            ),
         },
         "/api/presets": {
           GET: () =>

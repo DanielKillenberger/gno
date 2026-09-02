@@ -44,6 +44,10 @@ import {
   type QueryModeType,
   type TagMode,
 } from "../lib/retrieval-filters";
+import {
+  fetchServerCapabilities,
+  type ServerCapabilities,
+} from "../lib/server-capabilities";
 import { cn } from "../lib/utils";
 import { AIModelSelector, TagFacets } from "./search-page-widgets";
 
@@ -121,13 +125,6 @@ interface SearchResponse {
   };
 }
 
-interface Capabilities {
-  bm25: boolean;
-  vector: boolean;
-  hybrid: boolean;
-  answer: boolean;
-}
-
 interface Collection {
   name: string;
 }
@@ -157,7 +154,9 @@ export default function Search({ navigate }: PageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
-  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [capabilities, setCapabilities] = useState<ServerCapabilities | null>(
+    null
+  );
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activePreset, setActivePreset] = useState("slim-tuned");
 
@@ -257,7 +256,7 @@ export default function Search({ navigate }: PageProps) {
     async function bootstrap(): Promise<void> {
       const [capabilitiesResult, collectionsResult, presetsResult] =
         await Promise.all([
-          apiFetch<Capabilities>("/api/capabilities"),
+          fetchServerCapabilities(),
           apiFetch<Collection[]>("/api/collections"),
           apiFetch<PresetsResponse>("/api/presets"),
         ]);

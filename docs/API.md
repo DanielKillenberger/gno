@@ -102,6 +102,7 @@ CLI.
 | `/api/docs/:id/move`          | POST   | Apply an exact confirmed move plan     |
 | `/api/docs/:id/duplicate`     | POST   | Duplicate editable document            |
 | `/api/docs/:id/deactivate`    | POST   | Unindex document                       |
+| `/api/docs/:id/reveal`        | POST   | Reveal source file (local client only) |
 | `/api/folders`                | POST   | Create folder in collection            |
 | `/api/jobs/active`            | GET    | Get active job                         |
 | `/api/jobs/:id`               | GET    | Poll job status                        |
@@ -665,7 +666,8 @@ curl http://127.0.0.1:3000/api/resident/status | jq
 GET /api/capabilities
 ```
 
-Returns available features based on loaded models.
+Returns available features based on loaded models, plus whether the caller is
+a same-host client.
 
 **Response**:
 
@@ -674,16 +676,33 @@ Returns available features based on loaded models.
   "bm25": true,
   "vector": true,
   "hybrid": true,
-  "answer": true
+  "answer": true,
+  "localClient": true
 }
 ```
 
-| Field    | Description                    |
-| :------- | :----------------------------- |
-| `bm25`   | BM25 search (always true)      |
-| `vector` | Vector search available        |
-| `hybrid` | Hybrid search available        |
-| `answer` | AI answer generation available |
+| Field         | Description                                   |
+| :------------ | :-------------------------------------------- |
+| `bm25`        | BM25 search (always true)                     |
+| `vector`      | Vector search available                       |
+| `hybrid`      | Hybrid search available                       |
+| `answer`      | AI answer generation available                |
+| `localClient` | Request judged to come from the server's host |
+
+`localClient` is `true` only when all three hold: the socket peer address is
+loopback (`127.0.0.0/8`, `::1`, or an IPv4-mapped form of either), the `Host`
+header names a loopback host (`localhost`, `127.x.x.x`, or `[::1]`, with or
+without a port), and the request carries no `Forwarded`, `X-Forwarded-For`,
+`X-Forwarded-Host`, or `X-Forwarded-Proto` header. Any other combination
+yields `false`. Forwarding headers only ever make a client remote, never
+local. A reverse proxy on the host (forwarding headers), a plain port
+forwarder (non-loopback `Host`), and a kernel-level redirect (non-loopback
+peer) all report `false`. An SSH tunnel to `localhost` is indistinguishable
+from a local client and reports `true`; that is an accepted limit.
+
+The web UI uses this field to decide whether host-local actions (Reveal,
+`file://` Open original) are offered. The
+[reveal endpoint](#reveal-document) enforces the same rule server-side.
 
 ---
 
@@ -2453,6 +2472,48 @@ curl -X POST "http://localhost:3000/api/docs/%23abc123/deactivate"
 ```
 
 > **Note**: The document will be re-indexed on next sync unless you add it to the collection's exclude pattern.
+
+---
+
+### Reveal Document
+
+```http
+POST /api/docs/:id/reveal
+```
+
+Open the document's source file in the host's file manager. Because this
+opens a window on the server host, it is only available to a local client:
+the request must satisfy the [`localClient`](#capabilities) rule. A request
+judged remote is refused before the document is resolved.
+
+**URL Parameters**:
+
+| Param | Description                                                          |
+| :---- | :------------------------------------------------------------------- |
+| `:id` | Document ID (the `#hexhash` from docid, URL-encoded as `%23hexhash`) |
+
+**Query Parameters**:
+
+| Param | Description                                            |
+| :---- | :----------------------------------------------------- |
+| `uri` | Optional exact document URI to disambiguate duplicates |
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "path": "/path/to/notes/doc.md"
+}
+```
+
+**Errors**:
+
+| Code        | Status | Description                                   |
+| :---------- | :----- | :-------------------------------------------- |
+| `FORBIDDEN` | 403    | Request is not from a local client            |
+| `NOT_FOUND` | 404    | Document or its collection not found          |
+| `RUNTIME`   | 500    | The host's file manager could not be launched |
 
 ---
 

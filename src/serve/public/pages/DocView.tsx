@@ -94,6 +94,10 @@ import {
   stripSectionTargetLinkParam,
   type SectionLinkNoticeKind,
 } from "../lib/section-links";
+import {
+  fetchServerCapabilities,
+  type ServerCapabilities,
+} from "../lib/server-capabilities";
 import { subscribeWorkspaceActionRequest } from "../lib/workspace-events";
 import {
   FrontmatterDisplay,
@@ -361,6 +365,8 @@ function getParentPath(relPath: string): string {
 
 export default function DocView({ navigate }: PageProps) {
   const [doc, setDoc] = useState<DocData | null>(null);
+  const [serverCapabilities, setServerCapabilities] =
+    useState<ServerCapabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -483,6 +489,20 @@ export default function DocView({ navigate }: PageProps) {
     });
   }, [currentUri]);
 
+  // Server capabilities decide which host-local actions may render. A failed
+  // fetch leaves them null, which the view reads as a remote client.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchServerCapabilities().then(({ data }) => {
+      if (!cancelled) {
+        setServerCapabilities(data);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Fetch document when URI changes
   useEffect(() => {
     loadDocument();
@@ -541,6 +561,8 @@ export default function DocView({ navigate }: PageProps) {
     ].includes(doc.source.ext.toLowerCase());
 
   const isPdf = Boolean(doc && isPdfDocument(doc.source));
+
+  const localClient = serverCapabilities?.localClient ?? false;
 
   // Spec predicate — evaluated per render, never from mime/ext.
   const extractedTextAvailable = Boolean(doc && isExtractedTextAvailable(doc));
@@ -1817,10 +1839,11 @@ export default function DocView({ navigate }: PageProps) {
                       )}
                       Export for gno.sh
                     </Button>
-                    {doc.source.absPath && (
+                    {localClient && doc.source.absPath && (
                       <>
                         <Button
                           className="gap-1.5"
+                          data-testid="doc-reveal"
                           onClick={() => {
                             void handleReveal();
                           }}
@@ -1832,6 +1855,7 @@ export default function DocView({ navigate }: PageProps) {
                         </Button>
                         <Button asChild size="sm" variant="outline">
                           <a
+                            data-testid="doc-open-original"
                             href={`file://${doc.source.absPath}`}
                             rel="noopener noreferrer"
                             target="_blank"
@@ -1842,21 +1866,37 @@ export default function DocView({ navigate }: PageProps) {
                         </Button>
                       </>
                     )}
+                    {!localClient && pdfAssetUrl && (
+                      <Button asChild size="sm" variant="outline">
+                        <a
+                          data-testid="doc-open-original"
+                          href={pdfAssetUrl}
+                          rel="noopener"
+                          target="_blank"
+                        >
+                          <SquareArrowOutUpRightIcon className="mr-1.5 size-4" />
+                          Open original
+                        </a>
+                      </Button>
+                    )}
                   </>
                 )}
-                {doc.capabilities.editable && doc.source.absPath && (
-                  <Button
-                    className="gap-1.5"
-                    onClick={() => {
-                      void handleReveal();
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <FolderOpen className="size-4" />
-                    Reveal
-                  </Button>
-                )}
+                {localClient &&
+                  doc.capabilities.editable &&
+                  doc.source.absPath && (
+                    <Button
+                      className="gap-1.5"
+                      data-testid="doc-reveal"
+                      onClick={() => {
+                        void handleReveal();
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <FolderOpen className="size-4" />
+                      Reveal
+                    </Button>
+                  )}
                 {isPdf && pdfAssetUrl ? (
                   <Button
                     asChild

@@ -351,6 +351,13 @@ From document view, the file lifecycle actions now depend on the document type:
 - **Editable markdown/plaintext files**: you can rename them, reveal them in Finder, or move them to Trash
 - **Converted read-only source files**: you can reveal/open the original source, but destructive actions stay index-only unless you handle the file outside GNO
 
+**Reveal** and the `file://` form of **Open original** act on the server's
+host, so they render only when the server reports the browser as a local
+client (see [Security](#security)). Over a proxy or tunnel, **Open original**
+for a PDF instead opens the file inline in a new tab through the asset
+endpoint, and **Download original** keeps working. If the capabilities call
+fails, the view treats the client as remote and hides the host-local actions.
+
 For read-only source material, **Remove from index**:
 
 - Removes the document from the search index
@@ -939,6 +946,14 @@ The Web UI is designed for local use only:
 | **CORS protection**       | Cross-origin requests blocked                     |
 | **No external resources** | No CDN fonts, scripts, or tracking                |
 | **Path traversal guard**  | Write operations validate paths stay within root  |
+| **Locality gate**         | Reveal refuses non-local clients (403)            |
+
+The server judges a request local only when the socket peer is loopback, the
+`Host` header names a loopback host, and no `Forwarded` / `X-Forwarded-*`
+header is present; forwarding headers only ever make a client remote. A
+reverse proxy, a plain port forwarder, or a kernel-level redirect on the host
+all report remote. An SSH tunnel to `localhost` is indistinguishable from a
+local client and is an accepted limit: host-local actions still show there.
 
 The Content-Security-Policy is `'self'`-only for every fetch directive:
 

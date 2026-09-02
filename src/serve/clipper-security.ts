@@ -4,11 +4,13 @@ import type { HttpMcpPeerServer } from "../mcp/http-security";
 
 import { readClipperBoundedJson } from "./clipper-body";
 import { clipperSecurityErrorResponse } from "./clipper-security-errors";
+import { isLoopbackAddress } from "./request-locality";
 import { ReaderGate } from "./resident-admission";
 
 export { readClipperBoundedJson } from "./clipper-body";
 export { ReaderGate as ClipperRequestGate } from "./resident-admission";
 export { clipperSecurityErrorResponse } from "./clipper-security-errors";
+export { isLoopbackAddress as isClipperLoopbackAddress } from "./request-locality";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_REQUESTS_PER_MINUTE = 60;
@@ -126,7 +128,7 @@ function validateSameOriginEntry(origin: string): boolean {
 
 function isLoopbackHostname(hostname: string): boolean {
   if (hostname === "localhost") return true;
-  return isClipperLoopbackAddress(hostname.replace(/^\[|\]$/g, ""));
+  return isLoopbackAddress(hostname.replace(/^\[|\]$/g, ""));
 }
 
 function normalizedHeaderNames(headers: readonly string[]): string[] {
@@ -142,21 +144,6 @@ function normalizedHeaderNames(headers: readonly string[]): string[] {
     throw new Error("Clipper allowed headers must contain exact header names");
   }
   return [...new Set(normalized)];
-}
-
-export function isClipperLoopbackAddress(address: string): boolean {
-  const normalized = address.toLowerCase();
-  if (normalized === "::1") return true;
-  const mapped = normalized.startsWith("::ffff:")
-    ? normalized.slice("::ffff:".length)
-    : normalized;
-  const octets = mapped.split(".");
-  return (
-    octets.length === 4 &&
-    octets.every((octet) => /^\d{1,3}$/.test(octet)) &&
-    Number(octets[0]) === 127 &&
-    octets.every((octet) => Number(octet) <= 255)
-  );
 }
 
 export function parseClipperExtensionOrigin(
@@ -370,7 +357,7 @@ export class ClipperSecurityBoundary {
       }
     | ClipperSecurityFailure {
     const peer = server.requestIP(request);
-    if (!peer || !isClipperLoopbackAddress(peer.address)) {
+    if (!peer || !isLoopbackAddress(peer.address)) {
       return {
         ok: false,
         response: clipperSecurityErrorResponse("CLIPPER_FORBIDDEN"),

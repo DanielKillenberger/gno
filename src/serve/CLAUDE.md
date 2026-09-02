@@ -71,12 +71,13 @@ Answer generation uses shared module to stay in sync with CLI:
 | --------------------- | ------ | ------------------------------------------ |
 | `/api/health`         | GET    | Health check                               |
 | `/api/status`         | GET    | Index stats, onboarding, health, bootstrap |
-| `/api/capabilities`   | GET    | Available features                         |
+| `/api/capabilities`   | GET    | Available features + `localClient`         |
 | `/api/collections`    | GET    | List collections                           |
 | `/api/publish/export` | POST   | Export gno.sh publish artifact JSON        |
 | `/api/docs`           | GET    | List documents                             |
 | `/api/doc`            | GET    | Get document content                       |
 | `/api/doc-asset`      | GET    | Original source file bytes (Range, HEAD)   |
+| `/api/docs/:id/reveal`| POST   | Reveal source on host (local client only)  |
 | `/vendor/pdfjs/*`     | GET    | Same-origin pdfjs worker/cmaps/fonts       |
 | `/api/search`         | POST   | BM25 search                                |
 | `/api/query`          | POST   | Hybrid search                              |
@@ -110,6 +111,9 @@ gno serve --port 3000
 - Binds to `127.0.0.1` only (no LAN exposure)
 - CSP headers on all responses
 - CORS protection on POST endpoints
+- Request locality (`request-locality.ts`): `localClient` is true only for a
+  loopback peer, a loopback `Host`, and no forwarding headers; the reveal
+  route refuses non-local clients with 403
 - No external font/script loading — the PDF.js worker, cMaps, and standard fonts
   are served same-origin from the installed `pdfjs-dist` package via
   `/vendor/pdfjs/*`, so the CSP keeps `worker-src 'self'` and `font-src 'self'`

@@ -178,6 +178,10 @@ import {
 import { analyzeImportPath } from "../import-preview";
 import { getActiveJob, getJobStatus, startJob } from "../jobs";
 import {
+  isLocalClientRequest,
+  type RequestPeerServer,
+} from "../request-locality";
+import {
   requestRetrievalTraceId,
   withRetrievalTraceHeader,
 } from "../retrieval-trace";
@@ -3174,6 +3178,12 @@ export async function handleCreateFolder(
   }
 }
 
+/**
+ * POST /api/docs/:id/reveal
+ * Opens the source file in the host's file manager. Only a local client may
+ * open windows on the server host: a request judged remote by the locality
+ * rule is refused before the document is resolved.
+ */
 export async function handleRevealDoc(
   ctxHolder: ContextHolder,
   store: SqliteAdapter,
@@ -3181,8 +3191,16 @@ export async function handleRevealDoc(
   req?: Request,
   deps?: {
     revealFilePath?: typeof revealFilePath;
+    server?: RequestPeerServer;
   }
 ): Promise<Response> {
+  if (req && !isLocalClientRequest(req, deps?.server)) {
+    return errorResponse(
+      "FORBIDDEN",
+      "Reveal is only available to a local client",
+      403
+    );
+  }
   const docResult = await resolveDocumentReference(
     store,
     docId,
@@ -4938,14 +4956,20 @@ export async function handleAsk(
 
 /**
  * GET /api/capabilities
- * Returns server capabilities (what features are available).
+ * Returns server capabilities (what features are available) plus whether the
+ * caller is a same-host client (see request-locality).
  */
-export function handleCapabilities(ctx: ServerContext): Response {
+export function handleCapabilities(
+  ctx: ServerContext,
+  req: Request,
+  server: RequestPeerServer | undefined
+): Response {
   return jsonResponse({
     bm25: ctx.capabilities.bm25,
     vector: ctx.capabilities.vector,
     hybrid: ctx.capabilities.hybrid,
     answer: ctx.capabilities.answer,
+    localClient: isLocalClientRequest(req, server),
   });
 }
 
