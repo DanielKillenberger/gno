@@ -2,13 +2,14 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { StrictMode, type ReactNode } from "react";
 
-import type {
-  GnoDocumentLoadingTask,
-  GnoGetDocumentParams,
-  PdfFallbackReason,
-} from "../../../../src/serve/public/lib/pdf";
-
 import { usePdfDocument } from "../../../../src/serve/public/hooks/use-pdf-document";
+import {
+  PDF_WHOLE_FILE_MAX_BYTES,
+  type GnoDocumentLoadingTask,
+  type GnoGetDocumentParams,
+  type PdfFallbackReason,
+  type PdfTransportHint,
+} from "../../../../src/serve/public/lib/pdf";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -32,6 +33,7 @@ type FakeDoc = {
 
 type FakeTask = {
   url: string;
+  transport: PdfTransportHint | undefined;
   gnoDocId: string;
   destroyed: boolean;
   deferred: Deferred<FakeDoc>;
@@ -42,6 +44,39 @@ type FakeTask = {
 const getDocumentCalls: FakeTask[] = [];
 let docIdCounter = 0;
 const destroyEvents: string[] = [];
+
+// ── HEAD probe double ───────────────────────────────────────────────────────
+type HeadResult = { status: number; contentLength?: string } | Error;
+const DEFAULT_HEAD: HeadResult = { status: 200, contentLength: "1024" };
+let headResult: HeadResult = DEFAULT_HEAD;
+/** When set, the probe response waits on this gate (unmount-during-probe). */
+let headGate: Deferred<void> | null = null;
+const headCalls: { url: string; method: string | undefined }[] = [];
+
+const fakeFetch = mock(
+  async (url: string, init?: RequestInit): Promise<Response> => {
+    headCalls.push({ url, method: init?.method });
+    if (headGate) {
+      await headGate.promise;
+    }
+    const result = headResult;
+    if (result instanceof Error) {
+      throw result;
+    }
+    const headers = new Headers();
+    if (result.contentLength !== undefined) {
+      headers.set("content-length", result.contentLength);
+    }
+    return new Response(null, { status: result.status, headers });
+  }
+);
+
+/** The load starts only after the HEAD probe settles. */
+async function loadStarted(count = 1): Promise<void> {
+  await waitFor(() =>
+    expect(getDocumentCalls.length).toBeGreaterThanOrEqual(count)
+  );
+}
 
 const classifyPdfError = mock((err: unknown): PdfFallbackReason => {
   const msg = err instanceof Error ? err.message : String(err);
@@ -78,6 +113,7 @@ function fakeGetDocument(params: GnoGetDocumentParams): GnoDocumentLoadingTask {
   const gnoDocId = metrics.mintDocId();
   const task: FakeTask = {
     url: params.url,
+    transport: params.transport,
     gnoDocId,
     destroyed: false,
     deferred: d,
@@ -107,6 +143,7 @@ const deps = {
   classifyPdfError:
     classifyPdfError as typeof import("../../../../src/serve/public/lib/pdf").classifyPdfError,
   getPdfMetrics: () => metrics as never,
+  fetch: fakeFetch,
 };
 
 describe("use-pdf-document", () => {
@@ -114,6 +151,10 @@ describe("use-pdf-document", () => {
     getDocumentCalls.length = 0;
     destroyEvents.length = 0;
     docIdCounter = 0;
+    headResult = DEFAULT_HEAD;
+    headGate = null;
+    headCalls.length = 0;
+    fakeFetch.mockClear();
     classifyPdfError.mockClear();
     metrics.recordDocumentDestroy.mockClear();
   });
@@ -128,10 +169,7 @@ describe("use-pdf-document", () => {
       { wrapper: StrictWrapper }
     );
 
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await loadStarted();
 
     expect(getDocumentCalls.length).toBeGreaterThanOrEqual(1);
 
@@ -145,6 +183,7 @@ describe("use-pdf-document", () => {
       const secondHook = renderHook(() =>
         usePdfDocument("/api/doc-asset?path=a.pdf", deps)
       );
+      await loadStarted(2);
       const second = getDocumentCalls[1]!;
       expect(undestroyedTasks().length).toBe(1);
 
@@ -187,6 +226,7 @@ describe("use-pdf-document", () => {
     const { result, unmount } = renderHook(() =>
       usePdfDocument("/ok.pdf", deps)
     );
+    await loadStarted();
     const task = getDocumentCalls[0]!;
     const pdf = makeDoc(2);
     await act(async () => {
@@ -204,6 +244,7 @@ describe("use-pdf-document", () => {
     const { result, unmount } = renderHook(() =>
       usePdfDocument("/err.pdf", deps)
     );
+    await loadStarted();
     const task = getDocumentCalls[0]!;
     await act(async () => {
       task.deferred.reject(new Error("invalid pdf"));
@@ -220,11 +261,10 @@ describe("use-pdf-document", () => {
       ({ url }: { url: string }) => usePdfDocument(url, deps),
       { initialProps: { url: "/a.pdf" } }
     );
+    await loadStarted();
     const first = getDocumentCalls[0]!;
     rerender({ url: "/b.pdf" });
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await loadStarted(2);
     const second = getDocumentCalls.at(-1)!;
     expect(first.destroyed).toBe(true);
     // first never loaded → no documentDestroy for first
@@ -254,13 +294,12 @@ describe("use-pdf-document", () => {
     const { result, unmount } = renderHook(() =>
       usePdfDocument("/c.pdf", deps)
     );
+    await loadStarted();
     const first = getDocumentCalls[0]!;
     act(() => {
       result.current.retry();
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await loadStarted(2);
     const second = getDocumentCalls.at(-1)!;
     expect(first.destroyed).toBe(true);
 
@@ -281,6 +320,7 @@ describe("use-pdf-document", () => {
 
   test("stale late resolution after unmount: task remains singly destroyed, no documentDestroy", async () => {
     const { unmount } = renderHook(() => usePdfDocument("/late.pdf", deps));
+    await loadStarted();
     const task = getDocumentCalls[0]!;
     unmount();
     expect(task.destroy).toHaveBeenCalledTimes(1);
@@ -306,6 +346,7 @@ describe("use-pdf-document", () => {
       const { result, unmount } = renderHook(() =>
         usePdfDocument(`/err-${reason}.pdf`, deps)
       );
+      await loadStarted(getDocumentCalls.length + 1);
       const task = getDocumentCalls.at(-1)!;
       await act(async () => {
         task.deferred.reject(new Error(msg));
@@ -319,6 +360,7 @@ describe("use-pdf-document", () => {
 
   test("per-load opaque distinct docId including same URL", async () => {
     const firstHook = renderHook(() => usePdfDocument("/same.pdf", deps));
+    await loadStarted();
     const id1 = getDocumentCalls[0]!.gnoDocId;
     await act(async () => {
       getDocumentCalls[0]!.deferred.resolve(makeDoc(1));
@@ -327,6 +369,7 @@ describe("use-pdf-document", () => {
     firstHook.unmount();
 
     const secondHook = renderHook(() => usePdfDocument("/same.pdf", deps));
+    await loadStarted(2);
     const id2 = getDocumentCalls.at(-1)!.gnoDocId;
     expect(id2).not.toBe(id1);
     await act(async () => {
@@ -341,6 +384,7 @@ describe("use-pdf-document", () => {
     const { result, unmount } = renderHook(() =>
       usePdfDocument("/once.pdf", deps)
     );
+    await loadStarted();
     const task = getDocumentCalls[0]!;
     const pdf = makeDoc(1);
     await act(async () => {
@@ -351,5 +395,107 @@ describe("use-pdf-document", () => {
     unmount();
     expect(destroyEvents).toEqual([task.gnoDocId]);
     expect(task.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Transport tier by size (fn-136 R1) ────────────────────────────────────
+
+  test("HEAD probe once per load: whole-file under the bound, ranged at or above it", async () => {
+    const cases: { contentLength: string; expected: PdfTransportHint }[] = [
+      { contentLength: "1024", expected: "whole-file" },
+      {
+        contentLength: String(PDF_WHOLE_FILE_MAX_BYTES - 1),
+        expected: "whole-file",
+      },
+      { contentLength: String(PDF_WHOLE_FILE_MAX_BYTES), expected: "ranged" },
+      {
+        contentLength: String(PDF_WHOLE_FILE_MAX_BYTES * 4),
+        expected: "ranged",
+      },
+    ];
+    for (const { contentLength, expected } of cases) {
+      headCalls.length = 0;
+      headResult = { status: 200, contentLength };
+      const url = `/api/doc-asset?path=size-${contentLength}.pdf`;
+      const { result, unmount } = renderHook(() => usePdfDocument(url, deps));
+      await loadStarted(getDocumentCalls.length + 1);
+      const task = getDocumentCalls.at(-1)!;
+      expect(task.transport).toBe(expected);
+      expect(task.url).toBe(url);
+      // Exactly one same-origin HEAD against the asset URL per document load.
+      expect(headCalls).toEqual([{ url, method: "HEAD" }]);
+      await act(async () => {
+        task.deferred.resolve(makeDoc(1));
+      });
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      expect(headCalls.length).toBe(1);
+      unmount();
+    }
+  });
+
+  test("HEAD failure, non-2xx, or missing/invalid Content-Length falls back to ranged without a document error", async () => {
+    const cases: { name: string; head: HeadResult }[] = [
+      { name: "network", head: new Error("network down") },
+      { name: "500", head: { status: 500, contentLength: "1024" } },
+      { name: "404", head: { status: 404 } },
+      { name: "no-length", head: { status: 200 } },
+      { name: "bad-length", head: { status: 200, contentLength: "abc" } },
+    ];
+    for (const { name, head } of cases) {
+      headResult = head;
+      const { result, unmount } = renderHook(() =>
+        usePdfDocument(`/api/doc-asset?path=${name}.pdf`, deps)
+      );
+      await loadStarted(getDocumentCalls.length + 1);
+      const task = getDocumentCalls.at(-1)!;
+      expect(task.transport).toBe("ranged");
+      // The probe outcome never surfaces as a viewer error.
+      expect(result.current.status).toBe("loading");
+      expect(result.current.error).toBeNull();
+      await act(async () => {
+        task.deferred.resolve(makeDoc(2));
+      });
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      expect(result.current.error).toBeNull();
+      expect(classifyPdfError).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  test("synchronous getDocument throw after the probe surfaces as a document error, not an unhandled rejection", async () => {
+    const throwingGetDocument = (): never => {
+      throw new Error("corrupt bootstrap");
+    };
+    const { result, unmount } = renderHook(() =>
+      usePdfDocument("/api/doc-asset?path=throws.pdf", {
+        ...deps,
+        getDocument: throwingGetDocument,
+      })
+    );
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.error).toBe("bootstrap");
+    expect(result.current.errorMessage).toBe("corrupt bootstrap");
+    expect(classifyPdfError).toHaveBeenCalledTimes(1);
+    expect(getDocumentCalls.length).toBe(0);
+    expect(destroyEvents.length).toBe(0);
+    expect(headCalls.length).toBe(1);
+    unmount();
+  });
+
+  test("unmount during the HEAD probe never creates a loading task", async () => {
+    headGate = deferred<void>();
+    const { unmount } = renderHook(() =>
+      usePdfDocument("/api/doc-asset?path=probe.pdf", deps)
+    );
+    expect(headCalls.length).toBe(1);
+    unmount();
+    await act(async () => {
+      headGate!.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(getDocumentCalls.length).toBe(0);
+    expect(destroyEvents.length).toBe(0);
+    expect(metrics.recordDocumentDestroy).not.toHaveBeenCalled();
   });
 });

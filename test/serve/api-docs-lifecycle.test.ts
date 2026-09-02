@@ -533,15 +533,21 @@ describe("document lifecycle API", () => {
     const store = createMockStore(doc);
 
     let revealedPath = "";
+    // The reveal gate fails closed: a request from a loopback peer with a
+    // loopback Host and no forwarding headers is the only shape it accepts.
     const res = await handleRevealDoc(
       ctxHolder,
       store as never,
       "#abc123",
-      undefined,
+      new Request("http://localhost:3000/api/docs/%23abc123/reveal", {
+        method: "POST",
+        headers: { host: "localhost:3000" },
+      }),
       {
         revealFilePath: async (path) => {
           revealedPath = path;
         },
+        server: { requestIP: () => ({ address: "127.0.0.1", port: 49_152 }) },
       }
     );
 

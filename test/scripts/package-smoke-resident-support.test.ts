@@ -4,12 +4,25 @@ import {
   isExpectedResidentShutdownExit,
   isValidPackedWarmModelReuse,
   type ResidentStatus,
+  STOP_KILL_WAIT_MS,
   STOP_TIMEOUT_MS,
   stopResident,
   waitForStatus,
 } from "../../scripts/package-smoke-resident-support";
 
 type ModelStatus = ResidentStatus["models"];
+
+function isResidentProcessGone(pid: number | undefined): boolean {
+  if (typeof pid !== "number") {
+    return true;
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 function models(overrides: Partial<ModelStatus> = {}): ModelStatus {
   return {
@@ -70,6 +83,8 @@ describe("packed resident shutdown exits", () => {
   test("keeps shutdown headroom beyond both admission-drain windows", () => {
     expect(STOP_TIMEOUT_MS).toBe(30_000);
     expect(STOP_TIMEOUT_MS).toBeGreaterThan(10_000);
+    expect(STOP_KILL_WAIT_MS).toBe(5_000);
+    expect(STOP_KILL_WAIT_MS).toBeLessThan(STOP_TIMEOUT_MS);
   });
 
   test("allows graceful shutdown before a supplied deadline", async () => {
@@ -100,6 +115,36 @@ describe("packed resident shutdown exits", () => {
     await ready;
     await stopResident(running, "delayed resident", 500);
     expect(child.exitCode).toBe(0);
+  });
+
+  test("treats SIGKILL fallback as a successful stop", async () => {
+    let markReady: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      markReady = resolve;
+    });
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        "process.on('SIGTERM', () => {}); process.send?.('ready'); setInterval(() => {}, 1000)",
+      ],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        ipc(message) {
+          if (message === "ready") markReady?.();
+        },
+      }
+    );
+    const running = {
+      child,
+      stdout: new Response(child.stdout).text(),
+      stderr: new Response(child.stderr).text(),
+    };
+
+    await ready;
+    await stopResident(running, "sigterm-deaf resident", 150, 1000);
+    expect(isResidentProcessGone(child.pid)).toBe(true);
   });
 });
 

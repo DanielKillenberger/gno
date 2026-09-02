@@ -23,9 +23,13 @@ import {
   MAX_CANVAS_PIXELS,
   MAX_ZOOM,
   MIN_ZOOM,
+  PDF_RANGE_CHUNK_BYTES,
+  PDF_WHOLE_FILE_MAX_BYTES,
   sanitizeAnnotationUrl,
   stepZoom,
   TextLayer,
+  transportHintForContentLength,
+  transportOptionsFor,
   type PdfFallbackReason,
 } from "../../../../src/serve/public/lib/pdf";
 
@@ -102,18 +106,51 @@ describe("lib/pdf single-import rule", () => {
     expect(src).not.toMatch(/enableScripting\s*:\s*true/);
   });
 
-  test("range-mode loading policy: disableStream + disableAutoFetch, no fetch-bridge workarounds", () => {
+  test("transport policy comes from transportOptionsFor; no fetch-bridge workarounds", () => {
     const src = readFileSync(join(SRC_ROOT, "serve/public/lib/pdf.ts"), "utf8");
-    // Product range-mode policy (windowed viewer + holdable Range fetches).
-    expect(src).toMatch(/disableStream\s*:\s*true/);
-    expect(src).toMatch(/disableAutoFetch\s*:\s*true/);
-    expect(src).not.toMatch(/disableStream\s*:\s*false/);
-    expect(src).not.toMatch(/disableAutoFetch\s*:\s*false/);
+    // fn-136 R1: getDocument takes its transport options from the tier map,
+    // defaulting to the bounded ranged tier; no hard-coded per-chunk policy.
+    expect(src).toMatch(
+      /\.\.\.transportOptionsFor\(params\.transport \?\? "ranged"\)/
+    );
+    expect(src).not.toMatch(/disableAutoFetch\s*:\s*true/);
     // Superseded workarounds must not reappear in the product facade.
     expect(src).not.toContain("installPdfjsRangeLengthBridge");
     expect(src).not.toContain("rewrites Content-Length from Content-Range");
     expect(src).not.toContain("synthetic first-chunk");
     expect(src).not.toMatch(/getDocument\s*\(\s*\{[^}]*\blength\s*:/s);
+  });
+
+  test("transportOptionsFor maps each tier to its pdf.js options", () => {
+    expect(transportOptionsFor("whole-file")).toEqual({
+      disableRange: true,
+      disableStream: false,
+      disableAutoFetch: false,
+    });
+    expect(transportOptionsFor("ranged")).toEqual({
+      rangeChunkSize: PDF_RANGE_CHUNK_BYTES,
+      disableStream: true,
+      disableAutoFetch: false,
+    });
+    expect(PDF_RANGE_CHUNK_BYTES).toBe(1024 * 1024);
+    expect(PDF_WHOLE_FILE_MAX_BYTES).toBe(8 * 1024 * 1024);
+  });
+
+  test("transportHintForContentLength tiers by the 8 MB bound; unknown sizes are ranged", () => {
+    const cases: [number | null, "whole-file" | "ranged"][] = [
+      [0, "whole-file"],
+      [1024, "whole-file"],
+      [PDF_WHOLE_FILE_MAX_BYTES - 1, "whole-file"],
+      [PDF_WHOLE_FILE_MAX_BYTES, "ranged"],
+      [PDF_WHOLE_FILE_MAX_BYTES + 1, "ranged"],
+      [null, "ranged"],
+      [Number.NaN, "ranged"],
+      [Number.POSITIVE_INFINITY, "ranged"],
+      [-1, "ranged"],
+    ];
+    for (const [length, expected] of cases) {
+      expect(transportHintForContentLength(length)).toBe(expected);
+    }
   });
 
   test("exports TextLayer, getDocument, classifiers, PdfFallbackReason surface", () => {

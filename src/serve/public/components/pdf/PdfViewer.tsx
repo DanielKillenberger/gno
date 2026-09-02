@@ -99,6 +99,69 @@ function StatePanel({
   );
 }
 
+const ERROR_EYEBROW: Record<PdfFallbackReason, string> = {
+  corrupt: "CANNOT RENDER",
+  password: "PASSWORD PROTECTED",
+  network: "COULD NOT LOAD",
+  bootstrap: "VIEWER UNAVAILABLE",
+};
+
+const PAGE_ERROR_BODY: Record<PdfFallbackReason, string> = {
+  corrupt: "This page could not be rendered.",
+  password: "This page is password protected.",
+  network: "This page could not be loaded from this session.",
+  bootstrap: "The PDF viewer could not render this page.",
+};
+
+type PdfPageErrorSlotProps = {
+  pageNumber: number;
+  width: number;
+  height: number;
+  error: PdfFallbackReason;
+  onMount: (pageNumber: number, el: HTMLElement | null) => void;
+};
+
+/**
+ * A later page whose geometry failed (R2): the page error state rendered in
+ * place of the page, at the slot's placeholder size so the scroll model and
+ * the visibility window keep their shape. Never fires the text fallback.
+ */
+function PdfPageErrorSlot({
+  pageNumber,
+  width,
+  height,
+  error,
+  onMount,
+}: PdfPageErrorSlotProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    onMount(pageNumber, rootRef.current);
+    return () => {
+      onMount(pageNumber, null);
+    };
+  }, [pageNumber, onMount]);
+
+  return (
+    <div
+      className="gno-pdf-page flex flex-col items-center justify-center gap-2 px-4 text-center"
+      data-page-error={error}
+      data-page-number={pageNumber}
+      data-testid={`pdf-page-${pageNumber}`}
+      ref={rootRef}
+      role="status"
+      style={{ width: width || undefined, height: height || undefined }}
+    >
+      <p className="font-mono text-[10px] text-muted-foreground/60 uppercase tracking-[0.15em]">
+        {ERROR_EYEBROW[error]}
+      </p>
+      <p className="text-[13px] text-foreground/90 leading-relaxed">
+        Page {pageNumber}: {PAGE_ERROR_BODY[error]}
+      </p>
+    </div>
+  );
+}
+
 function prefersReducedMotion(): boolean {
   if (
     typeof window === "undefined" ||
@@ -184,7 +247,11 @@ export function PdfViewer({
     containerWidth,
     containerHeight,
     genId,
+    scrollContainerRef: columnRef,
   });
+  // Fatal only: a document load failure or the hook's fatal error (page 1
+  // geometry, render-path acquisition). A later page's geometry failure rides
+  // on its slot and never reaches this path.
   const viewerError = status === "error" ? error : pages.error;
 
   // Fallback: exactly once per failed load/page attempt when extracted text exists.
@@ -400,7 +467,7 @@ export function PdfViewer({
           <StatePanel
             body="This PDF could not be rendered. Download the original to read it."
             downloadUrl={downloadUrl}
-            eyebrow="CANNOT RENDER"
+            eyebrow={ERROR_EYEBROW.corrupt}
             onRetry={handleRetry}
             role="alert"
             testId="pdf-state-corrupt"
@@ -411,7 +478,7 @@ export function PdfViewer({
           <StatePanel
             body="This PDF is password protected. Download the original to open it in a PDF reader."
             downloadUrl={downloadUrl}
-            eyebrow="PASSWORD PROTECTED"
+            eyebrow={ERROR_EYEBROW.password}
             role="alert"
             testId="pdf-state-password"
           />
@@ -421,7 +488,7 @@ export function PdfViewer({
           <StatePanel
             body="The document could not be loaded from this session. Try again, or download the original."
             downloadUrl={downloadUrl}
-            eyebrow="COULD NOT LOAD"
+            eyebrow={ERROR_EYEBROW.network}
             onRetry={handleRetry}
             role="alert"
             testId="pdf-state-network"
@@ -432,7 +499,7 @@ export function PdfViewer({
           <StatePanel
             body="The PDF viewer could not start in this window. Download the original to read it."
             downloadUrl={downloadUrl}
-            eyebrow="VIEWER UNAVAILABLE"
+            eyebrow={ERROR_EYEBROW.bootstrap}
             onRetry={handleRetry}
             role="alert"
             testId="pdf-state-bootstrap"
@@ -512,21 +579,32 @@ export function PdfViewer({
 
         {showProgressive ? (
           <div className="mx-auto flex w-fit flex-col items-center gap-6">
-            {pages.slots.map((slot) => (
-              <PdfPageView
-                key={slot.pageNumber}
-                active={slot.active}
-                doc={doc}
-                height={slot.height}
-                onMount={pages.observePage}
-                onInternalNavigate={goToPage}
-                onRender={pages.ensureRendered}
-                pageNumber={slot.pageNumber}
-                rendered={slot.rendered}
-                scale={pages.scale}
-                width={slot.width}
-              />
-            ))}
+            {pages.slots.map((slot) =>
+              slot.error ? (
+                <PdfPageErrorSlot
+                  key={slot.pageNumber}
+                  error={slot.error}
+                  height={slot.height}
+                  onMount={pages.observePage}
+                  pageNumber={slot.pageNumber}
+                  width={slot.width}
+                />
+              ) : (
+                <PdfPageView
+                  key={slot.pageNumber}
+                  active={slot.active}
+                  doc={doc}
+                  height={slot.height}
+                  onMount={pages.observePage}
+                  onInternalNavigate={goToPage}
+                  onRender={pages.ensureRendered}
+                  pageNumber={slot.pageNumber}
+                  rendered={slot.rendered}
+                  scale={pages.scale}
+                  width={slot.width}
+                />
+              )
+            )}
           </div>
         ) : null}
       </div>

@@ -20,6 +20,7 @@ import {
 } from "../../src/serve/fn112-routes";
 import { PDFJS_ASSET_CACHE_CONTROL } from "../../src/serve/pdfjs-assets";
 import { ReaderGate } from "../../src/serve/resident-admission";
+import { DOC_ASSET_CACHE_CONTROL } from "../../src/serve/routes/api";
 import { withSecurityHeaders } from "../../src/serve/server";
 import { safeRm } from "../helpers/cleanup";
 
@@ -159,7 +160,7 @@ function assertDocAssetEnvelope(
 ): void {
   expect(res.status).toBe(opts.status);
   expect(res.headers.get("accept-ranges")).toBe("bytes");
-  expect(res.headers.get("cache-control")).toBe("no-store");
+  expect(res.headers.get("cache-control")).toBe(DOC_ASSET_CACHE_CONTROL);
   expect(res.headers.get("content-disposition")).toContain("inline;");
   expect(res.headers.get("content-type")).toBeTruthy();
   if (opts.contentRange !== undefined) {

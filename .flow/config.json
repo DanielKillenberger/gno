@@ -12,7 +12,7 @@
   "land": {
     "automatedReviewers": "",
     "ciFixBudget": 3,
-    "cleanReviewCommentPattern": "(Didn'?t find any( major)? issues|No( major)? issues found).*Reviewed commit",
+    "cleanReviewCommentPattern": "(Didn'?t find any( major)? issues|No( major)? issues found).*Reviewed commit|\\*\\*Code Review\\*\\*.*\\*\\*Completed\\*\\*",
     "mergeVerdictCommand": "",
     "patienceMinutes": 30,
     "release": true,
@@ -27,7 +27,7 @@
     "roles": {
       "delegate": {
         "codex": "gpt-5.6-terra:medium",
-        "cursor": "cursor-grok-4.5-high"
+        "cursor": "cursor-grok-4.6-high"
       },
       "fastJudge": {
         "codex": "gpt-5.6-luna:low"

@@ -270,9 +270,26 @@ A **Pages / Text** toggle sits at the top of every PDF document view:
   near the viewport are rendered, so long documents stay responsive.
 - **Text** — the extracted text that search and the rest of GNO already index.
 
-The viewer loads the original file bytes over
-[`GET /api/doc-asset`](API.md#get-document-asset), which supports HTTP `Range`
-requests so PDF.js can fetch a document progressively.
+**Transport.** The viewer loads the original file bytes over
+[`GET /api/doc-asset`](API.md#get-document-asset). It first sends one `HEAD`
+request to learn the file size, then picks a transport tier: a PDF under 8 MB
+is fetched whole in a single GET, while a PDF at or above that bound is fetched
+in 1 MB HTTP `Range` requests with background fetching, so PDF.js keeps pulling
+the rest of the file without waiting for the parser to ask for each piece. If
+the size probe fails or reports no length, the viewer uses the ranged tier.
+Over a high-latency link (a VPN or a tunnel to the host) this keeps the first
+page a few round trips away instead of one round trip per 64 KB. The asset
+carries an `ETag` and a `private, max-age=0, must-revalidate` cache policy, so
+reopening an unchanged PDF revalidates once and reuses the browser's cached
+bytes; the Web UI's own hashed JavaScript is cached for a year, so a second
+visit to a document page transfers no script at all.
+
+**First paint.** Page 1 renders as soon as its own size is known. The remaining
+pages get placeholder slots sized like page 1 and are corrected in one step
+when their real sizes arrive, with the scroll position adjusted so the page in
+view stays where it was. If a later page cannot be loaded, that page shows its
+own error slot and the pages already drawn stay on screen; only a failure on
+page 1 or on the document itself triggers the fallback below.
 
 **Fallback.** When a PDF cannot be rendered **and extracted text is available**,
 GNO switches to the Text view and shows a notice explaining why, alongside a
@@ -350,6 +367,13 @@ From document view, the file lifecycle actions now depend on the document type:
 
 - **Editable markdown/plaintext files**: you can rename them, reveal them in Finder, or move them to Trash
 - **Converted read-only source files**: you can reveal/open the original source, but destructive actions stay index-only unless you handle the file outside GNO
+
+**Reveal** and the `file://` form of **Open original** act on the server's
+host, so they render only when the server reports the browser as a local
+client (see [Security](#security)). Over a proxy or tunnel, **Open original**
+for any document with a source file instead opens it inline in a new tab through the asset
+endpoint, and **Download original** keeps working. If the capabilities call
+fails, the view treats the client as remote and hides the host-local actions.
 
 For read-only source material, **Remove from index**:
 
@@ -932,13 +956,25 @@ combinations.
 
 The Web UI is designed for local use only:
 
-| Protection                | Description                                       |
-| :------------------------ | :------------------------------------------------ |
-| **Loopback only**         | Binds to `127.0.0.1`, not accessible from network |
-| **CSP headers**           | Strict Content-Security-Policy on all responses   |
-| **CORS protection**       | Cross-origin requests blocked                     |
-| **No external resources** | No CDN fonts, scripts, or tracking                |
-| **Path traversal guard**  | Write operations validate paths stay within root  |
+| Protection                | Description                                                                                                                                                                                 |
+| :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Loopback only**         | Binds to `127.0.0.1`; another machine reaches it only through a proxy or tunnel you run on the host; a proxy is treated as a remote client, an SSH tunnel to `localhost` is not (see below) |
+| **CSP headers**           | Strict Content-Security-Policy on all responses                                                                                                                                             |
+| **CORS protection**       | Cross-origin requests blocked                                                                                                                                                               |
+| **No external resources** | No CDN fonts, scripts, or tracking                                                                                                                                                          |
+| **Path traversal guard**  | Write operations validate paths stay within root                                                                                                                                            |
+| **Locality gate**         | Reveal and `file://` Open original are offered only to a local client; the reveal endpoint refuses non-local clients (403)                                                                  |
+
+The server judges a request local only when the socket peer is loopback, the
+`Host` header names a loopback host, and no `Forwarded` / `Via` /
+`X-Forwarded-*` header is present; forwarding headers only ever make a client
+remote. A reverse proxy that adds forwarding headers (Caddy, Apache, Tailscale
+`serve`), a plain port forwarder, or a kernel-level redirect on the host all
+report remote. Two setups are indistinguishable from a local client and are an
+accepted limit (host-local actions still show there): an SSH tunnel to
+`localhost`, and a reverse proxy that rewrites `Host` to loopback without
+adding forwarding headers, which is what nginx's default `proxy_pass` does;
+add `proxy_set_header X-Forwarded-For $remote_addr;` to make it read remote.
 
 The Content-Security-Policy is `'self'`-only for every fetch directive:
 

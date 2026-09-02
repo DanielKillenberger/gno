@@ -7,6 +7,7 @@
  */
 
 import type { HttpGatewayOverrides } from "../mcp/http-security";
+import type { RequestPeerServer } from "./request-locality";
 import type { ResidentRuntime } from "./resident-runtime";
 import type { ContextHolder } from "./routes/api";
 
@@ -22,6 +23,7 @@ import {
   handlePdfjsVendorRequest,
   isPdfjsVendorPath,
 } from "./fn112-routes";
+import { PDFJS_ASSET_CACHE_CONTROL } from "./pdfjs-assets";
 // HTML import - Bun handles bundling TSX/CSS automatically via routes
 import homepage from "./public/index.html";
 import { handleResidentRead } from "./resident-request";
@@ -207,6 +209,156 @@ export function withSecurityHeaders(
       headers,
     });
   }
+}
+
+/**
+ * Hashed SPA chunk paths emitted by the production split build
+ * (`/chunk-<hash>.js|css`). The entry HTML never matches, so it keeps its
+ * existing headers and ETag pass-through.
+ */
+const SPA_HASHED_CHUNK_RE = /^\/chunk-[A-Za-z0-9]+\.(?:js|css)$/u;
+
+/** One-year immutable policy shared with the version-pinned pdfjs assets. */
+export const SPA_CHUNK_CACHE_CONTROL = PDFJS_ASSET_CACHE_CONTROL;
+
+export const isHashedSpaChunkPath = (pathname: string): boolean =>
+  SPA_HASHED_CHUNK_RE.test(pathname);
+
+const GZIP_CODINGS = new Set(["gzip", "x-gzip"]);
+
+/**
+ * True when an Accept-Encoding value accepts gzip: gzip (or x-gzip) listed
+ * with a non-zero q-value, or a bare `*` with a non-zero q-value while gzip
+ * is not explicitly refused (RFC 9110 §12.5.3: `*` matches any coding not
+ * otherwise listed). Absent header → identity only.
+ */
+export function acceptsGzip(acceptEncoding: string | null): boolean {
+  if (!acceptEncoding) {
+    return false;
+  }
+  let gzipQ: number | undefined;
+  let wildcardQ: number | undefined;
+  for (const member of acceptEncoding.split(",")) {
+    const [rawCoding, ...params] = member.trim().toLowerCase().split(";");
+    const coding = rawCoding?.trim();
+    if (!coding) {
+      continue;
+    }
+    const q = params
+      .map((param) => param.trim())
+      .find((param) => param.startsWith("q="))
+      ?.slice(2);
+    const weight = q === undefined ? 1 : Number.parseFloat(q);
+    if (GZIP_CODINGS.has(coding)) {
+      gzipQ = Math.max(gzipQ ?? 0, Number.isNaN(weight) ? 0 : weight);
+    } else if (coding === "*") {
+      wildcardQ = Math.max(wildcardQ ?? 0, Number.isNaN(weight) ? 0 : weight);
+    }
+  }
+  if (gzipQ !== undefined) {
+    return gzipQ > 0;
+  }
+  return (wildcardQ ?? 0) > 0;
+}
+
+export type PublicFetchFallbackOptions = {
+  isDev: boolean;
+  spaBundleSource: SpaBundleSource | null;
+};
+
+/**
+ * Production catch-all `fetch` for the public listener: the pdfjs vendor
+ * prefix, then the private SPA source. Encoding negotiation lives here, not in
+ * the source, because `hostPrivateSource` re-issues internal requests with
+ * only the method, so `Accept-Encoding` never reaches it. Hashed chunks gain
+ * an immutable cache policy and a gzip body computed once per pathname;
+ * identity clients get the same cache headers on the original bytes. Tests
+ * mount this same factory on a real listener (fn-112 I1-04 discipline).
+ */
+export function createPublicFetchFallback(
+  options: PublicFetchFallbackOptions
+): (req: Request) => Promise<Response> {
+  const { isDev, spaBundleSource } = options;
+  const gzipBodies = new Map<string, Uint8Array<ArrayBuffer>>();
+
+  const gzipBodyFor = async (
+    req: Request,
+    pathname: string,
+    asset: Response
+  ): Promise<Uint8Array<ArrayBuffer>> => {
+    const cached = gzipBodies.get(pathname);
+    if (cached) {
+      await asset.body?.cancel();
+      return cached;
+    }
+    // HEAD reaches the source as HEAD, so its body is empty; fetch the bytes.
+    const identity =
+      req.method === "HEAD" && spaBundleSource
+        ? await spaBundleSource.fetch(new Request(req.url, { method: "GET" }))
+        : asset;
+    // Copy into an ArrayBuffer-backed view so the cached bytes are a BodyInit.
+    const encoded = new Uint8Array(
+      Bun.gzipSync(new Uint8Array(await identity.arrayBuffer()))
+    );
+    gzipBodies.set(pathname, encoded);
+    return encoded;
+  };
+
+  const serveHashedChunk = async (
+    req: Request,
+    pathname: string,
+    asset: Response
+  ): Promise<Response> => {
+    const headers = new Headers(asset.headers);
+    headers.set("Cache-Control", SPA_CHUNK_CACHE_CONTROL);
+    headers.set("Vary", "Accept-Encoding");
+    if (!acceptsGzip(req.headers.get("accept-encoding"))) {
+      if (req.method === "HEAD") {
+        // HEAD reaches the source as HEAD: its body is empty but its headers
+        // (Content-Length included) already describe the GET body. Keep them.
+        await asset.body?.cancel();
+        return new Response(null, { status: asset.status, headers });
+      }
+      // Buffer the identity bytes: re-wrapping the proxied stream would drop
+      // Content-Length and fall back to chunked transfer.
+      const identity = await asset.arrayBuffer();
+      headers.set("Content-Length", String(identity.byteLength));
+      return new Response(identity, { status: asset.status, headers });
+    }
+    const encoded = await gzipBodyFor(req, pathname, asset);
+    headers.set("Content-Encoding", "gzip");
+    headers.set("Content-Length", String(encoded.byteLength));
+    return new Response(req.method === "HEAD" ? null : encoded, {
+      status: asset.status,
+      headers,
+    });
+  };
+
+  return async (req: Request): Promise<Response> => {
+    const pathname = new URL(req.url).pathname;
+    if (isPdfjsVendorPath(pathname)) {
+      return handlePdfjsVendorRequest(req, {
+        isDev,
+        withSecurityHeaders,
+      });
+    }
+    if (spaBundleSource && (req.method === "GET" || req.method === "HEAD")) {
+      const asset = await spaBundleSource.fetch(req);
+      if (asset.status === 200 && !isDev && isHashedSpaChunkPath(pathname)) {
+        return withSecurityHeaders(
+          await serveHashedChunk(req, pathname, asset),
+          isDev
+        );
+      }
+      if (asset.status !== 404) {
+        return withSecurityHeaders(asset, isDev);
+      }
+    }
+    return withSecurityHeaders(
+      new Response("Not Found", { status: 404 }),
+      isDev
+    );
+  };
 }
 
 /** Build a loopback origin with correct IPv6 authority formatting. */
@@ -824,7 +976,7 @@ export async function startServer(
           },
         },
         "/api/docs/:id/reveal": {
-          POST: async (req: Request) => {
+          POST: async (req: Request, server: RequestPeerServer) => {
             if (!isRequestAllowed(req, port)) {
               return withSecurityHeaders(forbiddenResponse(), isDev);
             }
@@ -832,7 +984,7 @@ export async function startServer(
             const parts = url.pathname.split("/");
             const id = decodeURIComponent(parts[3] || "");
             return withSecurityHeaders(
-              await handleRevealDoc(ctxHolder, store, id, req),
+              await handleRevealDoc(ctxHolder, store, id, req, { server }),
               isDev
             );
           },
@@ -1015,8 +1167,11 @@ export async function startServer(
           },
         },
         "/api/capabilities": {
-          GET: () =>
-            withSecurityHeaders(handleCapabilities(ctxHolder.current), isDev),
+          GET: (req: Request, server: RequestPeerServer) =>
+            withSecurityHeaders(
+              handleCapabilities(ctxHolder.current, req, server),
+              isDev
+            ),
         },
         "/api/presets": {
           GET: () =>
@@ -1292,31 +1447,10 @@ export async function startServer(
           },
         },
       },
-      // Production vendor dispatcher for the entire /vendor/pdfjs prefix.
-      // Covers valid worker/cMap/font AND malformed/unknown/POST — same function
-      // that tests invoke (no test-only fallback path).
-      fetch: async (req: Request): Promise<Response> => {
-        const pathname = new URL(req.url).pathname;
-        if (isPdfjsVendorPath(pathname)) {
-          return handlePdfjsVendorRequest(req, {
-            isDev,
-            withSecurityHeaders,
-          });
-        }
-        if (
-          spaBundleSource &&
-          (req.method === "GET" || req.method === "HEAD")
-        ) {
-          const asset = await spaBundleSource.fetch(req);
-          if (asset.status !== 404) {
-            return withSecurityHeaders(asset, isDev);
-          }
-        }
-        return withSecurityHeaders(
-          new Response("Not Found", { status: 404 }),
-          isDev
-        );
-      },
+      // Production catch-all: /vendor/pdfjs prefix, then hashed SPA chunks
+      // (gzip + immutable) and the private SPA source — the same factory the
+      // tests mount (no test-only fallback path).
+      fetch: createPublicFetchFallback({ isDev, spaBundleSource }),
     });
   } catch (e) {
     removeShutdownHandlers();

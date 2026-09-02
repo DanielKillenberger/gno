@@ -38,11 +38,15 @@ jobs:
         with:
           category: "/language:javascript-typescript"
 
-  # Dependency review on PRs - blocks PRs with vulnerable deps
+  # Dependency review on PRs - blocks PRs with vulnerable deps.
+  # Skip on forks: actions/dependency-review-action requires the host
+  # repository's Dependency graph, which is not enabled (and cannot be
+  # enabled by the workflow token) on personal forks. Upstream PRs still
+  # run this job because github.event.repository is the base repo.
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !github.event.repository.fork
 
     steps:
       - name: Checkout

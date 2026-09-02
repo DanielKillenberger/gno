@@ -94,6 +94,7 @@ function makeSlots(numPages: number, rendered: Set<number>): PageSlotState[] {
       rendered: rendered.has(i),
       visible: i <= 2,
       active: i <= 2,
+      error: null,
     });
   }
   return slots;
@@ -221,7 +222,7 @@ describe("PdfViewer", () => {
   test("production PdfViewerProps expose only the four contract keys", () => {
     // Compile-time contract is the type; runtime: no injection attrs on element
     const onFallback = mock(() => undefined);
-    render(
+    const view = render(
       <PdfViewer
         assetUrl="/a.pdf"
         downloadUrl="/d.pdf"
@@ -242,6 +243,8 @@ describe("PdfViewer", () => {
     expect(Object.keys(props).sort()).toEqual(
       ["assetUrl", "downloadUrl", "extractedTextAvailable", "onFallback"].sort()
     );
+    // Unmount before the async HEAD probe settles so its stale generation performs no state update.
+    view.unmount();
   });
 
   test("loading state exact copy, role=status, no Card chrome", () => {
@@ -658,6 +661,78 @@ describe("PdfViewer", () => {
     expect(screen.queryByTestId("pdf-state-password")).toBeNull();
   });
 
+  test("R2: a later-page geometry failure keeps drawn pages mounted and shows the page error on the failed slot", () => {
+    const observePage = mock(() => undefined);
+    const onFallback = mock(() => undefined);
+    renderViewer({
+      doc: makeDocStub({ numPages: 3 }),
+      extractedTextAvailable: true,
+      onFallback,
+      pagesFactory: (options) => {
+        const result = makePagesResult(options, new Set([1]));
+        result.observePage = observePage;
+        result.slots[1]!.error = "corrupt";
+        return result;
+      },
+    });
+
+    // Drawn page stays mounted and drawn; the page after the failure stays too.
+    expect(screen.getByTestId("pdf-page-1").getAttribute("data-rendered")).toBe(
+      "true"
+    );
+    expect(screen.getByTestId("pdf-page-3").getAttribute("data-rendered")).toBe(
+      "false"
+    );
+    // The failed slot shows the page error state in place, at its slot size.
+    const failed = screen.getByTestId("pdf-page-2");
+    expect(failed.getAttribute("role")).toBe("status");
+    expect(failed.getAttribute("data-page-error")).toBe("corrupt");
+    expect(failed.textContent).toContain("CANNOT RENDER");
+    expect(failed.textContent).toContain("Page 2");
+    expect(failed.style.width).toBe("200px");
+    expect(failed.style.height).toBe("280px");
+    expect(failed.querySelector("canvas")).toBeNull();
+    expect(observePage).toHaveBeenCalledWith(2, failed);
+    // Nonfatal: no designed error panel, no text fallback, toolbar stays live.
+    expect(
+      document.querySelectorAll('[data-testid^="pdf-state-"]')
+    ).toHaveLength(0);
+    expect(onFallback).not.toHaveBeenCalled();
+    expect(
+      (screen.getByTestId("pdf-toolbar-next") as HTMLButtonElement).disabled
+    ).toBe(false);
+  });
+
+  test.each([
+    [
+      "document load failure",
+      makeDocStub({ status: "error", error: "network" }),
+      null,
+    ],
+    ["page 1 geometry failure", makeDocStub(), "corrupt" as const],
+  ])(
+    "R2: %s takes the fallback path even when slots are present",
+    (_label, doc, pagesError) => {
+      const onFallback = mock(() => undefined);
+      renderViewer({
+        doc,
+        extractedTextAvailable: true,
+        onFallback,
+        pagesFactory: (options) => ({
+          ...makePagesResult(options, new Set([1])),
+          error: pagesError,
+        }),
+      });
+      const expected = pagesError ?? doc.error;
+      expect(onFallback).toHaveBeenCalledWith(expected);
+      expect(
+        document.querySelectorAll(
+          '[data-testid^="pdf-page-"]:not([data-testid="pdf-page-column"])'
+        )
+      ).toHaveLength(0);
+    }
+  );
+
   test("viewer is focusable with aria-label", () => {
     renderViewer({ doc: makeDocStub() });
     const viewer = screen.getByTestId("pdf-viewer");
@@ -902,6 +977,11 @@ describe("PdfViewer", () => {
         usePdfDocument: createDocumentHookWithDeps({
           getDocument: fakeGetDocument,
           getPdfMetrics: () => metrics as never,
+          fetch: async () =>
+            new Response(null, {
+              status: 200,
+              headers: { "content-length": "1024" },
+            }),
         }),
         // Real usePdfPages default (zero pages → empty slots)
       }
@@ -916,6 +996,12 @@ describe("PdfViewer", () => {
         '[data-testid^="pdf-page-"]:not([data-testid="pdf-page-column"])'
       )
     ).toHaveLength(0);
+
+    // The real hook probes the asset size (HEAD) before creating the loading
+    // task; the double answers 1024 bytes, so the load starts on the whole-file tier.
+    await waitFor(() => {
+      expect(tasks.length).toBe(1);
+    });
 
     // Resolve real zero-page proxy: numPages 0, firstPageReady will be false
     await act(async () => {
@@ -1298,6 +1384,11 @@ describe("PdfViewer", () => {
                 mintDocId: metrics.mintDocId,
                 recordDocumentDestroy: metrics.recordDocumentDestroy,
               }) as never,
+            fetch: async () =>
+              new Response(null, {
+                status: 200,
+                headers: { "content-length": "1024" },
+              }),
           }),
           usePdfPages: createPagesHookWithDeps({
             getPdfMetrics: () => metrics as never,

@@ -1,0 +1,507 @@
+{
+  "branch_name": "fn-136-pdf-viewing-over-a-remote-link",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-09-02T18:08:43.339787Z",
+  "created_at": "2026-09-02T13:31:07.630539Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-136-pdf-viewing-over-a-remote-link",
+  "impl_review_rounds": {
+    "fn-136-pdf-viewing-over-a-remote-link.1": 0,
+    "fn-136-pdf-viewing-over-a-remote-link.2": 0,
+    "fn-136-pdf-viewing-over-a-remote-link.3": 0,
+    "fn-136-pdf-viewing-over-a-remote-link.4": 0,
+    "fn-136-pdf-viewing-over-a-remote-link.5": 0
+  },
+  "next_task": 1,
+  "plan_review_rounds": 0,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-09-02T13:59:59.143724Z",
+  "review_attempts": [
+    {
+      "artifact_sha256": "23a20030438eb2daba90e9aac6d32070d8de27de884155df53de0ee667116464",
+      "backend": "cursor",
+      "base_sha": "2ed777492c2e8cfb7eb8652764ed07e1a1321b03",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "cursor",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-5d5d6895414299479e9f7089eacaea85",
+            "classification": "introduced",
+            "findingId": "finding-5d5d6895414299479e9f7089eacaea85",
+            "firstSeenThisRound": true,
+            "severity": "P0",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-69cb5861b22c56687503368b58ce771a",
+            "classification": "introduced",
+            "findingId": "finding-69cb5861b22c56687503368b58ce771a",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-86503a39a3695229d58f55e523884ea8",
+            "classification": "introduced",
+            "findingId": "finding-86503a39a3695229d58f55e523884ea8",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-dee27c573976fe7f76a020535ca4814f",
+            "classification": "introduced",
+            "findingId": "finding-dee27c573976fe7f76a020535ca4814f",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-03ff2fa640bee9ae54c111b86fa1bcda",
+            "classification": "introduced",
+            "findingId": "finding-03ff2fa640bee9ae54c111b86fa1bcda",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-b899d6cf18d52c8a179f47a598313142",
+            "classification": "introduced",
+            "findingId": "finding-b899d6cf18d52c8a179f47a598313142",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-13407613df9d3e4ba99674217dd8b5e6",
+            "classification": "introduced",
+            "findingId": "finding-13407613df9d3e4ba99674217dd8b5e6",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-6cdaa4a9537110e6b8aad8990625ec63",
+            "classification": "introduced",
+            "findingId": "finding-6cdaa4a9537110e6b8aad8990625ec63",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "plan"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "2ed777492c2e8cfb7eb8652764ed07e1a1321b03",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol-medium",
+      "outcome": "verdict",
+      "output_bytes": 4748,
+      "output_sha256": "8a88f35c5634d95b92cb3d2a9853702cdf75e2df5349468ebd607f1b60d24509",
+      "reservation_id": "d843eafca4db4140a024973824e09e93",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-02T13:54:45.514360Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "0a241899b5d29070b40d3bd922ca851d49e2af37c6d2cefa671b983bd8f785a2",
+      "backend": "cursor",
+      "base_sha": "2ed777492c2e8cfb7eb8652764ed07e1a1321b03",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "findings_digest": {
+        "backend": "cursor",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-5d5d6895414299479e9f7089eacaea85",
+            "classification": "introduced",
+            "findingId": "finding-5d5d6895414299479e9f7089eacaea85",
+            "firstSeenThisRound": false,
+            "severity": "P0",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-69cb5861b22c56687503368b58ce771a",
+            "classification": "introduced",
+            "findingId": "finding-69cb5861b22c56687503368b58ce771a",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-86503a39a3695229d58f55e523884ea8",
+            "classification": "introduced",
+            "findingId": "finding-86503a39a3695229d58f55e523884ea8",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-dee27c573976fe7f76a020535ca4814f",
+            "classification": "introduced",
+            "findingId": "finding-dee27c573976fe7f76a020535ca4814f",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-03ff2fa640bee9ae54c111b86fa1bcda",
+            "classification": "introduced",
+            "findingId": "finding-03ff2fa640bee9ae54c111b86fa1bcda",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-b899d6cf18d52c8a179f47a598313142",
+            "classification": "introduced",
+            "findingId": "finding-b899d6cf18d52c8a179f47a598313142",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "not_fixed"
+          },
+          {
+            "chainRoot": "finding-13407613df9d3e4ba99674217dd8b5e6",
+            "classification": "introduced",
+            "findingId": "finding-13407613df9d3e4ba99674217dd8b5e6",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-6cdaa4a9537110e6b8aad8990625ec63",
+            "classification": "introduced",
+            "findingId": "finding-6cdaa4a9537110e6b8aad8990625ec63",
+            "firstSeenThisRound": false,
+            "severity": "P2",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-ec1d45121c9ab3e42bec8d04eae3f454",
+            "classification": "introduced",
+            "findingId": "finding-ec1d45121c9ab3e42bec8d04eae3f454",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-937b28a06a0ffd3eab8ff0557fe45ee9",
+            "classification": "introduced",
+            "findingId": "finding-937b28a06a0ffd3eab8ff0557fe45ee9",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "plan"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "2ed777492c2e8cfb7eb8652764ed07e1a1321b03",
+      "head_sha_observed": true,
+      "kind": "plan",
+      "model": "gpt-5.6-sol-medium",
+      "outcome": "verdict",
+      "output_bytes": 1112,
+      "output_sha256": "097e18621c95c23c53b85c0ecd0a1b65760999b66d41713f004ef8f064b76297",
+      "reservation_id": "5b5273104c3e4a17a720ccd0ace2e732",
+      "round_consumed": true,
+      "scope": "plan",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-02T13:59:59.140772Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "8066c9ee518a38a717ef707c1353689b55799d0cfaf053ca56a78ffe6279f59d",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "104311362a53d057803e6805f805bf16d7c1e40c",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 5279,
+      "output_sha256": "83352b2ccd95727668788a8781bced90bc65f51e9f1fb2b7ab01f73a04ecf0f1",
+      "reservation_id": "f13a3a4ea4334c4d93e6dea78aee77b3",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.1",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.1",
+      "timestamp": "2026-09-02T14:33:09.194010Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "fbd25a56f532c88ee12b97aea5b41b4ae76d4f80fe399b2f0fb5383e9de8db63",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "094de121990d31d02c12712f9f9e6c068782204e",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 1969,
+      "output_sha256": "361f9f338514e766c22bfa05343473ad24156feffa183de5429a5b5a5d476bbe",
+      "reservation_id": "6f0108224cdc4059b78e451d9da093b4",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.1",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.1",
+      "timestamp": "2026-09-02T14:41:38.784131Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "ea5cdfca5b4ab6452ab194005861694121a7c84d4682a5bfa5d59a54dbbcd2b3",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "9cf4bb220fe165c650398841c49ced532dffbc7e",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 4813,
+      "output_sha256": "5b1333cf0f3a0ef7563d04b7a6196f4930567e0b9bc9b40124c75a73a14dec09",
+      "reservation_id": "6d31ffb817f047d08ea0fe8cf022f49f",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.3",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.3",
+      "timestamp": "2026-09-02T14:48:08.713452Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "9e5cc74efb185131026bdaf9a9c12c0de28c9a9d1756e7896676b6de9934fd06",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "8a07db8bcea8d5313c3b4463a7e2ac8c36de9bb9",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 3552,
+      "output_sha256": "6766d6ae2c2244b2be2f7076d8e7c4c275f7a7c26dbf6e9cfdea279f413a9a67",
+      "reservation_id": "34f4c9badcd244acadcdf4d8c1603665",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.2",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.2",
+      "timestamp": "2026-09-02T15:06:03.644346Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "d5b02e2b72aefb23aa16b275259922ec01d2e1f6299a21c64ad41290123f31ca",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "91a69d476f5c02ff720078bc1c1ae9c50a880dba",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 2159,
+      "output_sha256": "a1e8883cd9dc4b5441abb22cdefe9d9dd6ef4905e77e478e9a40c15fea225508",
+      "reservation_id": "f957f9443d5247fd9a4e65306832274b",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.3",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.3",
+      "timestamp": "2026-09-02T15:22:04.202043Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "ecec270232dca82e25ef47821bf190d0a1b3a5332077c5999aa7a8fa688ba19f",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "5e69f66fb7f5d0ce087edbfade5c80f4145686a5",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 4626,
+      "output_sha256": "b0c52f039eb78c886f21441db3a0995024816b7172abba9f76c4b0605604b94a",
+      "reservation_id": "1e530ecf9dc046d2a7ae40536cd69bb6",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.4",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.4",
+      "timestamp": "2026-09-02T15:59:14.569482Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "5521cf978bc812f17af7eca9027304b6a2dcfbaa481a2d05c74304e6ab305e11",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "3eb34c891fcf7d3a6e2b66072127f438b29a87df",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 2300,
+      "output_sha256": "50f7cc65e1a6947436c561392ad3aeb860bf53d45550be9cd21bd80045aeb937",
+      "reservation_id": "282e1c9171fd43a3a9bd791c0fdeb6db",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.4",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.4",
+      "timestamp": "2026-09-02T17:36:55.500137Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "3620fc9844e342e7df67df0f1e8c213885a73bfe25ec9a2a79930cd2cb0ec5da",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "1121d06898bdbcdf42563428aade2b2fa35ead89",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 2089,
+      "output_sha256": "fa3e426bc01e738a1ca631c0f316fcbe93573be820e9586a36a930b083a9885c",
+      "reservation_id": "70ff703dc7db42989581078e0ff8f020",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.5",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.5",
+      "timestamp": "2026-09-02T18:00:41.392110Z",
+      "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "629e7ba348813dee899675c71f16bd064eefabe796b83b2d5e1ff492048074ac",
+      "backend": "host",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "e676a996934c4f421f83880290f540de35d09feb",
+      "head_sha_observed": false,
+      "kind": "completion",
+      "outcome": "verdict",
+      "output_bytes": 2398,
+      "output_sha256": "68c4712272005a261ff90ae0d982b90a9d3e4ce72058bb4a8c2d064a2ab66434",
+      "reservation_id": "654cbb4da3704473b430378327516332",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-02T18:08:42.786215Z",
+      "verdict": "SHIP"
+    }
+  ],
+  "review_hash_epoch": {
+    "impl:fn-136-pdf-viewing-over-a-remote-link.1": 1,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.2": 1,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.3": 1,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.4": 1,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.5": 1,
+    "plan": 1,
+    "plan#completion": 1
+  },
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "completion": 0,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.1": 0,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.2": 0,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.3": 0,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.4": 0,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.5": 0,
+    "plan": 0
+  },
+  "spec_path": ".flow/specs/fn-136-pdf-viewing-over-a-remote-link.md",
+  "status": "open",
+  "title": "PDF viewing over a remote link",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-09-02T18:08:43.340528Z"
+}

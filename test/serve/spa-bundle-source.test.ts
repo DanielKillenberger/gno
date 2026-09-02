@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test";
 
 import homepage from "../../src/serve/public/index.html";
+import {
+  acceptsGzip,
+  createPublicFetchFallback,
+  isHashedSpaChunkPath,
+  SPA_CHUNK_CACHE_CONTROL,
+} from "../../src/serve/server";
 import { createSpaBundleSource } from "../../src/serve/spa-bundle-source";
 import {
   getProductionSpaAssets,
@@ -131,6 +137,171 @@ test("production serve assets load the committed snapshot without Bun.build", as
     ).toBe(true);
   } finally {
     Bun.build = originalBuild;
+  }
+});
+
+test("hashed chunk path and Accept-Encoding predicates", () => {
+  const pathCases: Array<[string, boolean]> = [
+    ["/chunk-qg68dnsr.js", true],
+    ["/chunk-2874my12.css", true],
+    ["/__gno_spa_abc123", false],
+    ["/chunk-qg68dnsr.js.map", false],
+    ["/api/doc-asset", false],
+    ["/vendor/pdfjs/pdf.worker.min.mjs", false],
+  ];
+  for (const [pathname, expected] of pathCases) {
+    expect(isHashedSpaChunkPath(pathname)).toBe(expected);
+  }
+  const encodingCases: Array<[string | null, boolean]> = [
+    [null, false],
+    ["", false],
+    ["gzip", true],
+    ["GZIP, deflate", true],
+    ["deflate, br", false],
+    ["gzip;q=0", false],
+    ["gzip;q=0.5, br", true],
+    ["x-gzip", true],
+    ["*", true],
+    ["*;q=0.1", true],
+    ["*;q=0", false],
+    ["*, gzip;q=0", false],
+    ["gzip;q=0, *", false],
+    ["identity", false],
+  ];
+  for (const [header, expected] of encodingCases) {
+    expect(acceptsGzip(header)).toBe(expected);
+  }
+});
+
+test("public fallback serves hashed chunks gzip + immutable, identity on demand, HTML untouched", async () => {
+  const source = await createSpaBundleSource(homepage, false);
+  const originalGzip = Bun.gzipSync;
+  let gzipCalls = 0;
+  Bun.gzipSync = ((...args: Parameters<typeof Bun.gzipSync>) => {
+    gzipCalls += 1;
+    return originalGzip(...args);
+  }) as typeof Bun.gzipSync;
+  // Same factory server.ts mounts on the public listener; real TCP so the
+  // browser-side Accept-Encoding header actually crosses the wire.
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: createPublicFetchFallback({ isDev: false, spaBundleSource: source }),
+  });
+  const origin = `http://127.0.0.1:${server.port}`;
+  try {
+    const entry = await source.fetch(
+      new Request(`http://public.invalid${source.entryPath}`)
+    );
+    const html = await entry.text();
+    const chunkPath = html.match(/src="(\/chunk-[a-z0-9]+\.js)"/u)?.[1];
+    expect(chunkPath).toBeTruthy();
+    const identityText = await (
+      await source.fetch(new Request(`http://public.invalid${chunkPath}`))
+    ).text();
+
+    // gzip-accepting client
+    const gz = await fetch(`${origin}${chunkPath}`, {
+      decompress: false,
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    expect(gz.status).toBe(200);
+    expect(gz.headers.get("content-encoding")).toBe("gzip");
+    expect(gz.headers.get("vary")).toBe("Accept-Encoding");
+    expect(gz.headers.get("cache-control")).toBe(SPA_CHUNK_CACHE_CONTROL);
+    expect(gz.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable"
+    );
+    expect(gz.headers.get("content-type")).toContain("javascript");
+    expect(gz.headers.get("content-security-policy")).toBeTruthy();
+    const gzBytes = new Uint8Array(await gz.arrayBuffer());
+    expect(gz.headers.get("content-length")).toBe(String(gzBytes.byteLength));
+    expect(gzBytes.byteLength).toBeLessThan(identityText.length);
+    expect(new TextDecoder().decode(Bun.gunzipSync(gzBytes))).toBe(
+      identityText
+    );
+    expect(gzipCalls).toBe(1);
+
+    // computed once per pathname: GET again and HEAD reuse the cached body
+    const again = await fetch(`${origin}${chunkPath}`, {
+      decompress: false,
+      headers: { "Accept-Encoding": "gzip, deflate, br" },
+    });
+    expect(again.status).toBe(200);
+    expect(again.headers.get("content-encoding")).toBe("gzip");
+    expect((await again.arrayBuffer()).byteLength).toBe(gzBytes.byteLength);
+    const head = await fetch(`${origin}${chunkPath}`, {
+      method: "HEAD",
+      decompress: false,
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-encoding")).toBe("gzip");
+    expect(head.headers.get("content-length")).toBe(String(gzBytes.byteLength));
+    expect(head.headers.get("cache-control")).toBe(SPA_CHUNK_CACHE_CONTROL);
+    expect(await head.text()).toBe("");
+    expect(gzipCalls).toBe(1);
+
+    // identity client: original bytes, same cache headers
+    for (const acceptEncoding of [undefined, "identity", "gzip;q=0"]) {
+      const plain = await fetch(`${origin}${chunkPath}`, {
+        decompress: false,
+        headers: acceptEncoding
+          ? { "Accept-Encoding": acceptEncoding }
+          : { "Accept-Encoding": "" },
+      });
+      expect(plain.status).toBe(200);
+      expect(plain.headers.get("content-encoding")).toBeNull();
+      expect(plain.headers.get("vary")).toBe("Accept-Encoding");
+      expect(plain.headers.get("cache-control")).toBe(SPA_CHUNK_CACHE_CONTROL);
+      const plainText = await plain.text();
+      expect(plainText).toBe(identityText);
+      expect(plain.headers.get("content-length")).toBe(
+        String(new TextEncoder().encode(identityText).byteLength)
+      );
+      // HEAD mirrors GET headers on the identity path too (fn-112 discipline):
+      // the proxied Content-Length is the real byte length, never 0.
+      const plainHead = await fetch(`${origin}${chunkPath}`, {
+        method: "HEAD",
+        decompress: false,
+        headers: acceptEncoding
+          ? { "Accept-Encoding": acceptEncoding }
+          : { "Accept-Encoding": "" },
+      });
+      expect(plainHead.status).toBe(200);
+      expect(plainHead.headers.get("content-encoding")).toBeNull();
+      expect(plainHead.headers.get("cache-control")).toBe(
+        SPA_CHUNK_CACHE_CONTROL
+      );
+      expect(plainHead.headers.get("content-length")).toBe(
+        String(new TextEncoder().encode(identityText).byteLength)
+      );
+      expect(await plainHead.text()).toBe("");
+    }
+    expect(gzipCalls).toBe(1);
+
+    // entry HTML keeps its headers: no encoding, no immutable policy
+    const entryPublic = await fetch(`${origin}${source.entryPath}`, {
+      decompress: false,
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    expect(entryPublic.status).toBe(200);
+    expect(entryPublic.headers.get("content-type")).toContain("text/html");
+    expect(entryPublic.headers.get("content-encoding")).toBeNull();
+    expect(entryPublic.headers.get("cache-control")).toBeNull();
+    expect(entryPublic.headers.get("vary")).toBeNull();
+    expect(await entryPublic.text()).toBe(html);
+
+    // unknown path still 404s through the fallback
+    const missing = await fetch(`${origin}/chunk-doesnotexist.js`, {
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("content-encoding")).toBeNull();
+  } finally {
+    Bun.gzipSync = originalGzip;
+    await server.stop(true);
+    await source.close();
   }
 });
 

@@ -54,6 +54,10 @@ import {
   type QueryModeType,
   type TagMode,
 } from "../lib/retrieval-filters";
+import {
+  fetchServerCapabilities,
+  type ServerCapabilities,
+} from "../lib/server-capabilities";
 import { cn } from "../lib/utils";
 
 interface PageProps {
@@ -102,13 +106,6 @@ interface AskResponse {
     };
   };
   verification?: AskVerification;
-}
-
-interface Capabilities {
-  bm25: boolean;
-  vector: boolean;
-  hybrid: boolean;
-  answer: boolean;
 }
 
 interface ConversationEntry {
@@ -195,7 +192,9 @@ function renderAnswer(
 export default function Ask({ navigate }: PageProps) {
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
-  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [capabilities, setCapabilities] = useState<ServerCapabilities | null>(
+    null
+  );
   const [collections, setCollections] = useState<Collection[]>([]);
   const [thoroughness, setThoroughness] = useState<Thoroughness>("balanced");
   const [activePreset, setActivePreset] = useState("slim-tuned");
@@ -233,7 +232,7 @@ export default function Ask({ navigate }: PageProps) {
   useEffect(() => {
     async function bootstrap(): Promise<void> {
       const [capsResult, collectionsResult, presetsResult] = await Promise.all([
-        apiFetch<Capabilities>("/api/capabilities"),
+        fetchServerCapabilities(),
         apiFetch<Collection[]>("/api/collections"),
         apiFetch<PresetsResponse>("/api/presets"),
       ]);

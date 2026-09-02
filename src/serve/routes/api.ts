@@ -178,6 +178,10 @@ import {
 import { analyzeImportPath } from "../import-preview";
 import { getActiveJob, getJobStatus, startJob } from "../jobs";
 import {
+  isLocalClientRequest,
+  type RequestPeerServer,
+} from "../request-locality";
+import {
   requestRetrievalTraceId,
   withRetrievalTraceHeader,
 } from "../retrieval-trace";
@@ -2180,6 +2184,53 @@ function parseSingleByteRange(
 }
 
 /**
+ * Revalidate-on-every-open: the browser asks once per open and reuses the
+ * cached bytes on 304. Deliberately replaces fn-112's `no-store` (fn-136 R3).
+ */
+export const DOC_ASSET_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
+const WEAK_ETAG_PREFIX = "W/";
+
+/** Strong, quoted validator from file size and mtime (fn-136 R3). */
+export function docAssetEtag(file: {
+  size: number;
+  lastModified: number;
+}): string {
+  return `"${file.size.toString(16)}-${file.lastModified.toString(16)}"`;
+}
+
+/**
+ * RFC 9110 §13.1.2 If-None-Match: `*` or any listed validator matching under
+ * weak comparison (a `W/` prefix is ignored on the client's side).
+ *
+ * The list is split on a bare comma. Our validators (`"<size-hex>-<mtime-hex>"`)
+ * never contain one; a foreign tag that does would only produce a false
+ * negative (full body instead of 304), never a false match.
+ */
+export function etagMatches(
+  ifNoneMatch: string | null | undefined,
+  etag: string
+): boolean {
+  if (!ifNoneMatch) {
+    return false;
+  }
+  const trimmed = ifNoneMatch.trim();
+  if (trimmed === "*") {
+    return true;
+  }
+  for (const candidate of trimmed.split(",")) {
+    const value = candidate.trim();
+    const strong = value.startsWith(WEAK_ETAG_PREFIX)
+      ? value.slice(WEAK_ETAG_PREFIX.length)
+      : value;
+    if (strong === etag) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * GET|HEAD /api/doc-asset
  * Query params:
  *   - path (required): relative to current doc, or absolute filesystem path
@@ -2187,6 +2238,8 @@ function parseSingleByteRange(
  *
  * Supports single-range Range requests (206/416). Multi-range → 416 (I1-03).
  * HEAD mirrors GET status/headers with empty body (I1-02).
+ * Strong ETag from size + mtime; a matching If-None-Match answers 304 before
+ * any Range handling, so full and ranged GETs revalidate alike (fn-136 R3).
  */
 export async function handleDocAsset(
   store: SqliteAdapter,
@@ -2269,12 +2322,23 @@ export async function handleDocAsset(
 
   const isHead = (request?.method ?? "GET").toUpperCase() === "HEAD";
   const filename = resolvedPath.split(/[\\/]/u).at(-1) ?? "document";
+  const etag = docAssetEtag(file);
   const headers = new Headers({
     "Accept-Ranges": "bytes",
-    "Cache-Control": "no-store",
+    "Cache-Control": DOC_ASSET_CACHE_CONTROL,
     "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
     "Content-Type": file.type || "application/octet-stream",
+    ETag: etag,
   });
+
+  if (etagMatches(request?.headers.get("If-None-Match"), etag)) {
+    // 304 carries the revalidation headers of the 200 set (RFC 9110 §15.4.5)
+    // and nothing that describes a body.
+    const notModified = new Headers(headers);
+    notModified.delete("Content-Disposition");
+    notModified.delete("Content-Type");
+    return new Response(null, { status: 304, headers: notModified });
+  }
 
   const rangeHeader = request?.headers.get("Range");
   if (!rangeHeader) {
@@ -3114,6 +3178,12 @@ export async function handleCreateFolder(
   }
 }
 
+/**
+ * POST /api/docs/:id/reveal
+ * Opens the source file in the host's file manager. Only a local client may
+ * open windows on the server host: a request judged remote by the locality
+ * rule is refused before the document is resolved.
+ */
 export async function handleRevealDoc(
   ctxHolder: ContextHolder,
   store: SqliteAdapter,
@@ -3121,8 +3191,17 @@ export async function handleRevealDoc(
   req?: Request,
   deps?: {
     revealFilePath?: typeof revealFilePath;
+    server?: RequestPeerServer;
   }
 ): Promise<Response> {
+  // Fail closed: no request (no peer to judge) is treated as remote.
+  if (!req || !isLocalClientRequest(req, deps?.server)) {
+    return errorResponse(
+      "FORBIDDEN",
+      "Reveal is only available to a local client",
+      403
+    );
+  }
   const docResult = await resolveDocumentReference(
     store,
     docId,
@@ -4878,14 +4957,20 @@ export async function handleAsk(
 
 /**
  * GET /api/capabilities
- * Returns server capabilities (what features are available).
+ * Returns server capabilities (what features are available) plus whether the
+ * caller is a same-host client (see request-locality).
  */
-export function handleCapabilities(ctx: ServerContext): Response {
+export function handleCapabilities(
+  ctx: ServerContext,
+  req: Request,
+  server: RequestPeerServer | undefined
+): Response {
   return jsonResponse({
     bm25: ctx.capabilities.bm25,
     vector: ctx.capabilities.vector,
     hybrid: ctx.capabilities.hybrid,
     answer: ctx.capabilities.answer,
+    localClient: isLocalClientRequest(req, server),
   });
 }
 
