@@ -270,9 +270,26 @@ A **Pages / Text** toggle sits at the top of every PDF document view:
   near the viewport are rendered, so long documents stay responsive.
 - **Text** — the extracted text that search and the rest of GNO already index.
 
-The viewer loads the original file bytes over
-[`GET /api/doc-asset`](API.md#get-document-asset), which supports HTTP `Range`
-requests so PDF.js can fetch a document progressively.
+**Transport.** The viewer loads the original file bytes over
+[`GET /api/doc-asset`](API.md#get-document-asset). It first sends one `HEAD`
+request to learn the file size, then picks a transport tier: a PDF under 8 MB
+is fetched whole in a single GET, while a PDF at or above that bound is fetched
+in 1 MB HTTP `Range` requests with background fetching, so PDF.js keeps pulling
+the rest of the file without waiting for the parser to ask for each piece. If
+the size probe fails or reports no length, the viewer uses the ranged tier.
+Over a high-latency link (a VPN or a tunnel to the host) this keeps the first
+page a few round trips away instead of one round trip per 64 KB. The asset
+carries an `ETag` and a `private, max-age=0, must-revalidate` cache policy, so
+reopening an unchanged PDF revalidates once and reuses the browser's cached
+bytes; the Web UI's own hashed JavaScript is cached for a year, so a second
+visit to a document page transfers no script at all.
+
+**First paint.** Page 1 renders as soon as its own size is known. The remaining
+pages get placeholder slots sized like page 1 and are corrected in one step
+when their real sizes arrive, with the scroll position adjusted so the page in
+view stays where it was. If a later page cannot be loaded, that page shows its
+own error slot and the pages already drawn stay on screen; only a failure on
+page 1 or on the document itself triggers the fallback below.
 
 **Fallback.** When a PDF cannot be rendered **and extracted text is available**,
 GNO switches to the Text view and shows a notice explaining why, alongside a
@@ -939,14 +956,14 @@ combinations.
 
 The Web UI is designed for local use only:
 
-| Protection                | Description                                       |
-| :------------------------ | :------------------------------------------------ |
-| **Loopback only**         | Binds to `127.0.0.1`, not accessible from network |
-| **CSP headers**           | Strict Content-Security-Policy on all responses   |
-| **CORS protection**       | Cross-origin requests blocked                     |
-| **No external resources** | No CDN fonts, scripts, or tracking                |
-| **Path traversal guard**  | Write operations validate paths stay within root  |
-| **Locality gate**         | Reveal refuses non-local clients (403)            |
+| Protection                | Description                                                                                                                                     |
+| :------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Loopback only**         | Binds to `127.0.0.1`; another machine reaches it only through a proxy or tunnel you run on the host, which the server treats as a remote client |
+| **CSP headers**           | Strict Content-Security-Policy on all responses                                                                                                 |
+| **CORS protection**       | Cross-origin requests blocked                                                                                                                   |
+| **No external resources** | No CDN fonts, scripts, or tracking                                                                                                              |
+| **Path traversal guard**  | Write operations validate paths stay within root                                                                                                |
+| **Locality gate**         | Reveal and `file://` Open original are offered only to a local client; the reveal endpoint refuses non-local clients (403)                      |
 
 The server judges a request local only when the socket peer is loopback, the
 `Host` header names a loopback host, and no `Forwarded` / `X-Forwarded-*`

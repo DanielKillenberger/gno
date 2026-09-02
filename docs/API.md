@@ -1420,9 +1420,12 @@ GET /api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf
 ```
 
 Streams the **original source file bytes** for an indexed document, rather than
-its converted text. The Web UI uses it to feed the native PDF viewer and to
-serve "Download original". `HEAD` is supported and returns the identical headers
-with an empty body.
+its converted text. The Web UI uses it to feed the native PDF viewer, to serve
+"Download original", and, for a client the server judges remote (see
+[`localClient`](#capabilities)), as the inline "Open original" target. `HEAD`
+is supported and returns the identical headers with an empty body; the PDF
+viewer sends one `HEAD` per document load and uses the `Content-Length` to pick
+its transport (a single GET under 8 MB, 1 MB `Range` requests at or above).
 
 **Query Parameters**:
 

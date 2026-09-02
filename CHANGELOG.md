@@ -9,7 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `GET /api/capabilities` reports `localClient`, true only for a loopback
+  peer with a loopback `Host` header and no forwarding headers. The Web UI
+  shows **Reveal** and the `file://` **Open original** only for a local
+  client; a remote client (through a proxy or tunnel on the host) gets
+  **Open original** as an inline `/api/doc-asset` tab instead, and
+  `POST /api/docs/:id/reveal` refuses non-local clients with 403.
+
 ### Changed
+
+- `GET /api/doc-asset` sends a strong `ETag` and
+  `Cache-Control: private, max-age=0, must-revalidate` instead of `no-store`,
+  and answers a matching `If-None-Match` with 304, so reopening an unchanged
+  file revalidates once and reuses the browser cache.
+- Hashed Web UI chunks are served gzip-encoded with `Vary: Accept-Encoding`
+  and a one-year `immutable` cache policy; a warm reload of a document page
+  transfers no JavaScript.
+- The PDF viewer probes the file size with one `HEAD` and loads files under
+  8 MB in a single request; larger files use 1 MB range requests with
+  background fetching instead of one on-demand 64 KB request per chunk.
+- The PDF viewer paints page 1 before the remaining pages are measured,
+  corrects page sizes in one step when they arrive, and shows a per-page
+  error state instead of blanking the document when a later page fails to
+  load.
 
 ### Fixed
 

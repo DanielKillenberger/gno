@@ -76,7 +76,7 @@ Answer generation uses shared module to stay in sync with CLI:
 | `/api/publish/export` | POST   | Export gno.sh publish artifact JSON        |
 | `/api/docs`           | GET    | List documents                             |
 | `/api/doc`            | GET    | Get document content                       |
-| `/api/doc-asset`      | GET    | Original source file bytes (Range, HEAD)   |
+| `/api/doc-asset`      | GET    | Source file bytes (Range, HEAD, ETag/304)  |
 | `/api/docs/:id/reveal`| POST   | Reveal source on host (local client only)  |
 | `/vendor/pdfjs/*`     | GET    | Same-origin pdfjs worker/cmaps/fonts       |
 | `/api/search`         | POST   | BM25 search                                |
@@ -95,6 +95,17 @@ Answer generation uses shared module to stay in sync with CLI:
 - **AI Elements**: Conversation, Message, Sources, CodeBlock, Loader
 - **Tag Components**: TagInput, TagFacets (filter sidebar)
 - **Routing**: Simple hash-free SPA routing in App.tsx
+- **Server capabilities**: `public/lib/server-capabilities.ts` is the one
+  shared `ServerCapabilities` type (`localClient`) plus
+  `fetchServerCapabilities()`; a failed read counts as remote
+- **PDF viewer transport**: `public/lib/pdf-transport.ts` holds the tier
+  constants (`PDF_WHOLE_FILE_MAX_BYTES` = 8 MB, `PDF_RANGE_CHUNK_BYTES` =
+  1 MB) with no pdfjs import so Bun-side tooling can read them;
+  `hooks/use-pdf-document.ts` sends one same-origin `HEAD` per load to pick
+  the tier and falls back to ranged on any probe failure;
+  `hooks/use-pdf-pages.ts` publishes page slots from page 1 geometry and
+  corrects sizes and fit scales in one commit when the full pass lands
+  (fatal error = page 1 or document; later pages carry `slot.error`)
 
 ## Development
 
@@ -114,6 +125,11 @@ gno serve --port 3000
 - Request locality (`request-locality.ts`): `localClient` is true only for a
   loopback peer, a loopback `Host`, and no forwarding headers; the reveal
   route refuses non-local clients with 403
+- HTTP caching: `/api/doc-asset` sends a strong `ETag` (size + mtime) with
+  `private, max-age=0, must-revalidate` and answers `If-None-Match` with 304
+  before Range handling; hashed SPA chunks (`/chunk-*.js|css`) get a one-year
+  `immutable` policy and a gzip body via `createPublicFetchFallback` in
+  `server.ts` (production only; the entry HTML and dev/HMR are untouched)
 - No external font/script loading — the PDF.js worker, cMaps, and standard fonts
   are served same-origin from the installed `pdfjs-dist` package via
   `/vendor/pdfjs/*`, so the CSP keeps `worker-src 'self'` and `font-src 'self'`
