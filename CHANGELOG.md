@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peer with a loopback `Host` header and no forwarding headers. The Web UI
   shows **Reveal** and the `file://` **Open original** only for a local
   client; a remote client (through a proxy or tunnel on the host) gets
-  **Open original** as an inline `/api/doc-asset` tab instead, and
+  **Open original** for a PDF as an inline `/api/doc-asset` tab instead, and
   `POST /api/docs/:id/reveal` refuses non-local clients with 403.
 
 ### Changed

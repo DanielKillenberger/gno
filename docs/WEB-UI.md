@@ -956,14 +956,14 @@ combinations.
 
 The Web UI is designed for local use only:
 
-| Protection                | Description                                                                                                                                     |
-| :------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Loopback only**         | Binds to `127.0.0.1`; another machine reaches it only through a proxy or tunnel you run on the host, which the server treats as a remote client |
-| **CSP headers**           | Strict Content-Security-Policy on all responses                                                                                                 |
-| **CORS protection**       | Cross-origin requests blocked                                                                                                                   |
-| **No external resources** | No CDN fonts, scripts, or tracking                                                                                                              |
-| **Path traversal guard**  | Write operations validate paths stay within root                                                                                                |
-| **Locality gate**         | Reveal and `file://` Open original are offered only to a local client; the reveal endpoint refuses non-local clients (403)                      |
+| Protection                | Description                                                                                                                                                                                 |
+| :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Loopback only**         | Binds to `127.0.0.1`; another machine reaches it only through a proxy or tunnel you run on the host; a proxy is treated as a remote client, an SSH tunnel to `localhost` is not (see below) |
+| **CSP headers**           | Strict Content-Security-Policy on all responses                                                                                                                                             |
+| **CORS protection**       | Cross-origin requests blocked                                                                                                                                                               |
+| **No external resources** | No CDN fonts, scripts, or tracking                                                                                                                                                          |
+| **Path traversal guard**  | Write operations validate paths stay within root                                                                                                                                            |
+| **Locality gate**         | Reveal and `file://` Open original are offered only to a local client; the reveal endpoint refuses non-local clients (403)                                                                  |
 
 The server judges a request local only when the socket peer is loopback, the
 `Host` header names a loopback host, and no `Forwarded` / `X-Forwarded-*`

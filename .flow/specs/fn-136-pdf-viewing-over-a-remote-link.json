@@ -12,7 +12,8 @@
     "fn-136-pdf-viewing-over-a-remote-link.1": 0,
     "fn-136-pdf-viewing-over-a-remote-link.2": 0,
     "fn-136-pdf-viewing-over-a-remote-link.3": 0,
-    "fn-136-pdf-viewing-over-a-remote-link.4": 0
+    "fn-136-pdf-viewing-over-a-remote-link.4": 0,
+    "fn-136-pdf-viewing-over-a-remote-link.5": 1
   },
   "next_task": 1,
   "plan_review_rounds": 0,
@@ -424,8 +425,18 @@
     "plan": 1,
     "plan#completion": 0
   },
-  "review_pending_rounds": {},
-  "review_reservations": {},
+  "review_pending_rounds": {
+    "impl:fn-136-pdf-viewing-over-a-remote-link.5": 1
+  },
+  "review_reservations": {
+    "70ff703dc7db42989581078e0ff8f020": {
+      "artifact_sha256": "3620fc9844e342e7df67df0f1e8c213885a73bfe25ec9a2a79930cd2cb0ec5da",
+      "counter_scope": "impl:fn-136-pdf-viewing-over-a-remote-link.5",
+      "epoch": 0,
+      "forced": false,
+      "review_type": "impl"
+    }
+  },
   "review_transport_failures": {
     "impl:fn-136-pdf-viewing-over-a-remote-link.1": 0,
     "impl:fn-136-pdf-viewing-over-a-remote-link.2": 0,
@@ -447,5 +458,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-02T17:36:55.959068Z"
+  "updated_at": "2026-09-02T17:50:58.856401Z"
 }
