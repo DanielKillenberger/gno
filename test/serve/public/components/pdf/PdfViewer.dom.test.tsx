@@ -917,6 +917,12 @@ describe("PdfViewer", () => {
       )
     ).toHaveLength(0);
 
+    // The real hook probes the asset size (HEAD) before creating the loading
+    // task; the probe rejects on the relative URL and falls back to ranged.
+    await waitFor(() => {
+      expect(tasks.length).toBe(1);
+    });
+
     // Resolve real zero-page proxy: numPages 0, firstPageReady will be false
     await act(async () => {
       tasks.at(-1)!.deferred.resolve({

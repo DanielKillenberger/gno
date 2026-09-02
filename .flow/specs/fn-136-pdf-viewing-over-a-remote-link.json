@@ -9,7 +9,7 @@
   "depends_on_epics": [],
   "id": "fn-136-pdf-viewing-over-a-remote-link",
   "impl_review_rounds": {
-    "fn-136-pdf-viewing-over-a-remote-link.1": 1
+    "fn-136-pdf-viewing-over-a-remote-link.1": 2
   },
   "next_task": 1,
   "plan_review_rounds": 0,
@@ -261,8 +261,18 @@
     "plan": 1,
     "plan#completion": 0
   },
-  "review_pending_rounds": {},
-  "review_reservations": {},
+  "review_pending_rounds": {
+    "impl:fn-136-pdf-viewing-over-a-remote-link.1": 1
+  },
+  "review_reservations": {
+    "6f0108224cdc4059b78e451d9da093b4": {
+      "artifact_sha256": "fbd25a56f532c88ee12b97aea5b41b4ae76d4f80fe399b2f0fb5383e9de8db63",
+      "counter_scope": "impl:fn-136-pdf-viewing-over-a-remote-link.1",
+      "epoch": 0,
+      "forced": false,
+      "review_type": "impl"
+    }
+  },
   "review_transport_failures": {
     "impl:fn-136-pdf-viewing-over-a-remote-link.1": 0,
     "plan": 0
@@ -281,5 +291,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-02T14:33:09.649237Z"
+  "updated_at": "2026-09-02T14:36:54.636711Z"
 }
