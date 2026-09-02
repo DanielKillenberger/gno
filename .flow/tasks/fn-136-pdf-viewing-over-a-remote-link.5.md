@@ -42,9 +42,26 @@ External repository note: `~/work/gno.sh` is a separate git repository, so its p
 - [ ] CHANGELOG, `docs/API.md`, `docs/WEB-UI.md`, `src/serve/CLAUDE.md` updated; `~/work/gno.sh` pages updated and driven locally
 - [ ] `bun run lint:check` and `bun test` pass
 ## Done summary
-TBD
+Closed the documentation set and measured what could be measured from this machine. `docs/WEB-UI.md` documents the transport tier (one HEAD size probe; whole-file GET under 8 MB; 1 MB Range requests with background fetch at or above; ranged fallback on probe failure; ETag revalidation), the progressive first paint (page 1 before the rest is measured, one-step size correction with the scroll anchor held, per-page error slot), and the locality caveat in the Security table (a proxy is treated as remote; an SSH tunnel to `localhost` is the documented exception). `docs/API.md` names the remote inline Open original target (PDF only) and the viewer's HEAD probe. `src/serve/CLAUDE.md` records the shared capabilities type, the transport and first-paint modules, and the caching policy. CHANGELOG `[Unreleased]` carries one Added entry (`localClient`, reveal 403, locality-aware actions) and four Changed entries (doc-asset caching, SPA compression, PDF transport, first paint). The SPA snapshot was already fresh.
 
+R3 (warm reload): MET locally. Production `gno serve` on loopback, headless Chromium 151 at 1380x880 DPR 2, generated 50-page 5.85 MB PDF, CDP wire accounting: an F5 reload transfers 0 bytes of JavaScript, all 42 hashed chunks from cache with no revalidation. The remaining 172 KB on a warm open is the entry HTML, the `/api/doc` JSON (167 KB of extracted text for that fixture), and a 539-byte doc-asset revalidation. Cold load on loopback: first paint 1.03 s, 55 requests, doc-asset traffic exactly one HEAD plus one Range-less GET.
+
+R6 (cold over the relayed link): BLOCKED. Before-numbers from task .3 (pre-change build, about 203 ms round trip, largest remote PDF 3.07 MB): first painted page 37.2 s; 79 requests, about 8.8 MB; asset endpoint 26 requests (1 cancelled full GET plus 25 x 64 KB Range), no HEAD. After-measurement: the remote host has no shell access from this machine and still runs the pre-change build, so the user must update the remote install (and add a 5 MB / 50-page fixture, or revise the R6 numbers against the 3 MB file) before the final measurement. The local cold numbers are a loopback proxy only.
+
+R7 (sharpness over the remote link): UNMET, capture BLOCKED for the same reason. Local proxy at DPR 2: the page-1 canvas backs at exactly 2.0x its CSS size (1400x1811 for 700x906) and the device-pixel crop is crisp, which rules out the render math as the blur cause on this build. The remote capture (DPR, viewport, browser, page count) is still owed; the spec must not close while R7 is unmet.
+
+Exposure mechanism on the remote host (confirmed in task .3): a same-host HTTPS reverse proxy provided by the VPN, the reverse-proxy case in R4; not an SSH tunnel.
+
+Hosted site mirror: BLOCKED. The site repository is not accessible from this account (private; ssh to GitHub hangs; `~/work` absent). The pages and points to mirror are listed in the run notes.
+
+Follow-ups observed, not built: `/api/doc` answers about 167 KB of uncached extracted-text JSON on every open of a large PDF (the largest warm-path transfer on a slow link); `/api/doc/:id/similar` answers 503 without vectors on every warm reload; a measurement run wrote a stray `undefined/` config directory at the repo root (deleted by the conductor before commit; worth a guard on the env var that produced it).
+
+Review: SHIP on round 1 (Opus, host backend); its two P3 doc wording notes (PDF-only qualifier in the CHANGELOG; the tunnel case in the Security table row) were applied after the verdict in a conductor commit.
+
+stage: wave-join - ran (cherry-pick of the worker commit onto the target; no collision)
+stage: impl-review - ran [round 1 SHIP] (model: claude-opus-5 via harness subagent, host backend)
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: a0195eb5, 1121d06898bdbcdf42563428aade2b2fa35ead89
+- Tests: bun run lint:check -> clean, bun test test/serve/spa-snapshot-freshness.test.ts -> 2 pass, worker: focused Quick suites 16/16, 7/7, 85/85 pass; local R3 warm-reload measurement 0 B JavaScript, 42/42 chunks from cache (evidence in the run notes), R6 after-measurement and R7 remote capture: BLOCKED (remote host not updatable from this machine); hosted site mirror: BLOCKED (repository inaccessible)
 - PRs:
