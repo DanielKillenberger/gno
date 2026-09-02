@@ -1,0 +1,90 @@
+{
+  "branch": "fn-136-pdf-viewing-over-a-remote-link",
+  "findings": {
+    "backend": "interactive",
+    "headSha": "9ccccfc8b8bdd6b7cfebdecb50bf4a0b2eb95ec8",
+    "items": [
+      {
+        "body": "scrollWidth 1147 px at a 375 px viewport on a PDF Doc View, header actions clipped; reproduced 3 of 3 runs (S11); same symptom as the open bug entry from 2026-08-03 (surface: src/serve/public/pages/DocView.tsx)",
+        "classification": "pre_existing",
+        "confidence": 100,
+        "firstSeenReceiptId": "review-2e9900772ea63029779d9baa4cf615bc501cef9aadb44ba6e1a9162a05d27a30",
+        "id": "finding-c028172505c78d2ed808d9874c08afda",
+        "lastSeenReceiptId": "review-2e9900772ea63029779d9baa4cf615bc501cef9aadb44ba6e1a9162a05d27a30",
+        "ordinal": 1,
+        "rIds": [],
+        "severity": "P1",
+        "status": "open",
+        "title": "QA-1 mobile DocView horizontal overflow at 375px"
+      },
+      {
+        "body": "/api/doc/:id/similar answers 503 on an index without embeddings, one console error per document open (S1, S2, S4, S7, S11) (surface: src/serve/routes/api.ts)",
+        "classification": "pre_existing",
+        "confidence": 100,
+        "firstSeenReceiptId": "review-2e9900772ea63029779d9baa4cf615bc501cef9aadb44ba6e1a9162a05d27a30",
+        "id": "finding-15f1fb6f2db7dfc7e57a13d0fd67b7b7",
+        "lastSeenReceiptId": "review-2e9900772ea63029779d9baa4cf615bc501cef9aadb44ba6e1a9162a05d27a30",
+        "ordinal": 2,
+        "rIds": [],
+        "severity": "P2",
+        "status": "open",
+        "title": "QA-2 Doc View 503 console error on every open without vectors"
+      }
+    ],
+    "reviewKind": "qa",
+    "round": 1,
+    "schemaVersion": 1,
+    "sourceReceiptId": "review-2e9900772ea63029779d9baa4cf615bc501cef9aadb44ba6e1a9162a05d27a30"
+  },
+  "head_sha": "9ccccfc8b8bdd6b7cfebdecb50bf4a0b2eb95ec8",
+  "id": "fn-136-pdf-viewing-over-a-remote-link",
+  "mode": "interactive",
+  "open_p0p1": [
+    {
+      "classification": "pre_existing",
+      "confidence": 100,
+      "file": "src/serve/public/pages/DocView.tsx",
+      "id": "QA-1 mobile DocView horizontal overflow at 375px",
+      "reason": "scrollWidth 1147 px at a 375 px viewport on a PDF Doc View, header actions clipped; reproduced 3 of 3 runs (S11); same symptom as the open bug entry from 2026-08-03",
+      "severity": "P1"
+    }
+  ],
+  "qa_outcome": "NEEDS_WORK",
+  "rid_coverage": {
+    "covered": 5,
+    "rids": [
+      {
+        "coverage": "live",
+        "id": "R1"
+      },
+      {
+        "coverage": "live",
+        "id": "R2"
+      },
+      {
+        "coverage": "live",
+        "id": "R3"
+      },
+      {
+        "coverage": "live",
+        "id": "R4"
+      },
+      {
+        "coverage": "live",
+        "id": "R5"
+      },
+      {
+        "coverage": "no_live_scenario",
+        "id": "R6"
+      },
+      {
+        "coverage": "no_live_scenario",
+        "id": "R7"
+      }
+    ],
+    "total": 7
+  },
+  "timestamp": "2026-09-02T18:39:31Z",
+  "type": "qa_verdict",
+  "verdict": "NEEDS_WORK"
+}

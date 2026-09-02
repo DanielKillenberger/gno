@@ -4,11 +4,12 @@ date: "2026-08-03"
 track: bug
 category: ui
 module: src/serve/public/pages/DocView.tsx
-tags: [qa, fn-61-document-structure-navigation-and-section-addressability, web-ui, mobile]
+tags: [qa, fn-61-document-structure-navigation-and-section-addressability, web-ui, mobile, fn-136-pdf-viewing-over-a-remote-link]
 problem_type: ui
 symptoms: "DocView reports 960px scroll width at a 375px viewport, clipping header actions and forcing 585px horizontal overflow."
 root_cause: (observed via live QA — unconfirmed)
 resolution_type: fix
+last_updated: "2026-09-02"
 ---
 
 ## Problem
@@ -47,3 +48,30 @@ Both runs reported `innerWidth: 375`, `scrollWidth: 960`, and `overflow: 585`; h
 - viewport: 375x812
 - classification: pre_existing
 - severity: P2
+
+## Update 2026-09-02
+
+## Problem
+A mobile-width reader opening a PDF in the Doc View sees a desktop-width layout clipped behind horizontal scrolling: the header action row runs off the right edge at 375 px.
+
+## Steps to reproduce (cold)
+1. Start `gno serve` with an indexed PDF and open `/doc?uri=gno://notes/medium.pdf`.
+2. Set the browser viewport to 375 x 812 (fresh context, no storage).
+3. Wait for `[data-testid="pdf-page-1"][data-rendered="true"]`.
+4. Read `document.documentElement.scrollWidth`.
+
+## Expected
+No horizontal overflow at a 375 px viewport; header actions and the viewer fit the width (prior bug entry from 2026-08-03 expected the same).
+
+## Actual
+`scrollWidth` is 1147 px at a 375 px viewport (three consecutive runs); the header action row is cut off at the right edge in the screenshot.
+
+## Evidence
+- console: .flow/tmp/qa-fn-136-pdf-viewing-over-a-remote-link/S11-mobile-docview-no-overflow-console.log
+- screenshot: .flow/tmp/qa-fn-136-pdf-viewing-over-a-remote-link/S11-mobile-docview-no-overflow.png
+- network: .flow/tmp/qa-fn-136-pdf-viewing-over-a-remote-link/S11-mobile-docview-no-overflow-network.json
+- url: http://127.0.0.1:3917/doc?uri=gno%3A%2F%2Fnotes%2Fmedium.pdf
+
+## Traceability
+- R-IDs: [] (regression scenario from bug memory)   scenario: S11   driver_rung: playwright   viewport: 375x812
+- Classification: pre_existing (same symptom filed 2026-08-03 on a markdown document; reproduced on a PDF document on branch fn-136 at c089258f)
