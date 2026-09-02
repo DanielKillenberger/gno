@@ -38,9 +38,14 @@ Implement R3. Add a strong ETag and conditional 304 handling to `/api/doc-asset`
 - [ ] The gzip body for a pathname is computed once and reused across requests
 - [ ] `docs/API.md` doc-asset section updated; `bun test` and `bun run lint:check` pass
 ## Done summary
-TBD
+Implemented R3 server HTTP hygiene. `/api/doc-asset` returns a strong ETag (size + mtime), answers a matching If-None-Match with an empty 304 before Range handling (HEAD included), and sends `private, max-age=0, must-revalidate` instead of `no-store`. The public listener's catch-all fetch is now `createPublicFetchFallback`: hashed `/chunk-*.js|css` responses gain the immutable one-year policy, `Vary: Accept-Encoding`, and a gzip body computed once per pathname when the client accepts gzip (wildcard `*` honoured); identity clients get the original bytes with the same cache headers; HEAD mirrors GET headers on both paths; entry HTML and dev mode untouched. docs/API.md documents the new headers, 304, and the static-assets policy. One edit outside the declared Touches (a fourth `no-store` pin in test/serve/fn112-production-routes.test.ts) was required to keep the suite green.
 
+Review round 1 (NEEDS_WORK) found the identity HEAD Content-Length regression, the `*` Accept-Encoding gap, and four P3 notes; all fixed in the review-fix commit. Round 2: SHIP, with one non-blocking P3 (no in-flight dedupe of the gzip cache) left as a follow-up.
+
+stage: wave-join - ran (cherry-pick of the worker commit onto the target; no collision)
+stage: impl-review - ran [round 1 NEEDS_WORK -> fixes -> round 2 SHIP] (model: claude-opus-5 via harness subagent, host backend)
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 104311362a53d057803e6805f805bf16d7c1e40c, c37bc1389d79b93f67b1a183ac504f765d356cc4
+- Tests: bun test test/serve/api-doc-assets.test.ts test/serve/fn112-doc-asset-bytes.test.ts test/serve/spa-bundle-source.test.ts test/serve/spa-first-chunk.test.ts test/serve/fn112-production-routes.test.ts test/serve/security.test.ts -> 56 pass, 0 fail (integrated target), bun run lint:check -> clean, worker: bun test test/serve -> 832 pass, 0 fail (workspace)
 - PRs:
