@@ -44,9 +44,14 @@ Keep the existing outline `Button` variant and icon size for the header action r
 - [ ] One shared client capabilities type; Ask and Search compile against it; the clipper boundary behaves exactly as before (existing clipper tests pass)
 - [ ] CSP and frame headers unchanged; `docs/API.md`, `docs/WEB-UI.md`, `src/serve/CLAUDE.md` updated; `bun test` and `bun run lint:check` pass
 ## Done summary
-TBD
+Implemented R4 and R5. `/api/capabilities` reports `localClient` from a fail-closed request-locality rule (loopback peer + loopback Host + no forwarding headers), the loopback predicate moved out of the clipper security boundary into a shared module with its old name kept as an alias, and the reveal endpoint refuses non-local clients with a 403 FORBIDDEN envelope before resolving the document. DocView gates both Reveal sites and the `file://` Open original on the flag; remote clients get an inline `/api/doc-asset` link in a new tab with `rel="noopener"`; Download original is unchanged; a failed capabilities read counts as remote. One shared `ServerCapabilities` type plus `fetchServerCapabilities()` replaces the duplicated Ask/Search interfaces. docs/API.md, docs/WEB-UI.md, and src/serve/CLAUDE.md updated.
 
+Review: SHIP on round 1 (Opus, host backend). Its P2 (the reveal gate was `req && !local`, fail-open when no request is supplied) was hardened after the verdict in a conductor commit: no request now yields 403 and the lifecycle test passes a local request with a loopback peer. Remaining P3 notes left as follow-ups: strengthen the remote/failure DOM assertions, add lookalike Host rows, drop the clipper alias, and gate the ungated `file://` link in DocumentEditor (pre-existing).
+
+stage: wave-join - ran (cherry-pick of the worker commit onto the target; snapshot refreshed by the conductor; no collision)
+stage: impl-review - ran [round 1 SHIP] (model: claude-opus-5 via harness subagent, host backend)
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 050dafc0, 8a07db8b, 40750a755cc0a5e6c8d6896319153529a9288a8d
+- Tests: bun test test/serve/api-capabilities.test.ts test/serve/api-docs-lifecycle.test.ts test/serve/request-locality.test.ts test/serve/public/pages/DocView-actions.dom.test.tsx test/clipper test/serve/security.test.ts -> green (integrated target), bun run lint:check -> clean, bun test test/serve/spa-snapshot-freshness.test.ts -> 2 pass, worker: bun test (full) -> 4479 pass, 1 fail (snapshot freshness, fixed by the conductor rebuild)
 - PRs:
