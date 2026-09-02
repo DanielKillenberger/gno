@@ -355,6 +355,44 @@ function makeDoc(
   };
 }
 
+/**
+ * makeDoc whose `held` pages resolve only when released (or fail when
+ * rejected). Page 1 is never held, so geometry publishes from page 1 while the
+ * later pages are still pending — the R2 first-paint shape.
+ */
+function makeHeldDoc(
+  numPages: number,
+  held: number[],
+  opts?: { mixedGeometry?: boolean }
+) {
+  const base = makeDoc(numPages, opts);
+  const gates = new Map<number, Deferred<void>>();
+  for (const pageNumber of held) {
+    gates.set(pageNumber, deferred<void>());
+  }
+  return {
+    ...base,
+    getPage: async (pageNumber: number) => {
+      const gate = gates.get(pageNumber);
+      if (gate) {
+        await gate.promise;
+      }
+      return base.getPage(pageNumber);
+    },
+    release: (pageNumber: number) => {
+      gates.get(pageNumber)?.resolve(undefined);
+    },
+    releaseAll: () => {
+      for (const gate of gates.values()) {
+        gate.resolve(undefined);
+      }
+    },
+    fail: (pageNumber: number, error: unknown) => {
+      gates.get(pageNumber)?.reject(error);
+    },
+  };
+}
+
 function stubCanvas2d(opts?: { nullContext?: boolean }): void {
   const sample = document.createElement("canvas");
   // Mounted like PdfPageView does in production: the admission identity
@@ -1517,13 +1555,77 @@ describe("use-pdf-pages", () => {
     expect(new Set(atNewScale.map((e) => e.pageNumber)).size).toBe(3);
   }, 20_000);
 
-  test("mixed-size geometry and fit modes use every page without eager canvas renders", async () => {
-    const doc = makeDoc(2, { mixedGeometry: true });
+  test("R2: page 1 geometry publishes every slot and paints before later pages resolve", async () => {
+    const doc = makeHeldDoc(3, [2, 3], { mixedGeometry: true });
+    await act(async () => {
+      render(
+        <VirtualizedViewer
+          doc={doc as never}
+          docId="first-paint"
+          genId={1}
+          numPages={3}
+        />
+      );
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      await waitFor(() => {
+        expect(
+          document.querySelectorAll("[data-testid^=pdf-page-]").length
+        ).toBe(3);
+      });
+    });
+    await flushReact();
+
+    // Only page 1 has been measured; the others carry page 1's size.
+    expect(getPageCalls).toEqual([1]);
+    for (const pageNumber of [1, 2, 3]) {
+      const el = document.querySelector(
+        `[data-testid="pdf-page-${pageNumber}"]`
+      ) as HTMLElement;
+      expect(el.style.height).toBe("140px");
+    }
+
+    await emitWindow({ 1: true });
+    await settleAllTasks();
+    expect(
+      document
+        .querySelector('[data-testid="pdf-page-1"]')
+        ?.getAttribute("data-rendered")
+    ).toBe("true");
+    expect(renderCalls.map((call) => call.pageNumber)).toEqual([1]);
+
+    // Later geometry lands: page 2 (landscape) corrects, page 1 stays drawn
+    // at the same scale — no second render of page 1, no unmount. Pages 2 and
+    // 3 sit in page 1's overscan window and render once their pages resolve.
+    await act(async () => {
+      doc.releaseAll();
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+    await flushReact();
+    await waitFor(() => {
+      const page2 = document.querySelector(
+        '[data-testid="pdf-page-2"]'
+      ) as HTMLElement;
+      expect(page2.style.height).toBe("100px");
+    });
+    expect(
+      document
+        .querySelector('[data-testid="pdf-page-1"]')
+        ?.getAttribute("data-rendered")
+    ).toBe("true");
+    expect(renderCalls.filter((call) => call.pageNumber === 1)).toHaveLength(1);
+    expect(new Set(getPageCalls)).toEqual(new Set([1, 2, 3]));
+  });
+
+  test("R2: mixed-size documents settle per-page heights; fit modes recompute against the widest page in one commit", async () => {
+    const doc = makeHeldDoc(2, [2], { mixedGeometry: true });
     let fitMode: "width" | "page" = "width";
     let containerWidth = 200;
     let containerHeight = 140;
-    const { result, rerender } = renderHook(() =>
-      usePdfPages({
+    const renders: Array<{ scale: number; sizes: number[][] }> = [];
+    const { result, rerender } = renderHook(() => {
+      const pages = usePdfPages({
         doc: doc as never,
         docId: "mixed",
         numPages: 2,
@@ -1533,17 +1635,48 @@ describe("use-pdf-pages", () => {
         containerHeight,
         genId: 1,
         ...baseDeps,
-      })
-    );
+      });
+      renders.push({
+        scale: pages.scale,
+        sizes: pages.slots.map(({ width, height }) => [width, height]),
+      });
+      return pages;
+    });
 
+    // Placeholder publish: fit-width against page 1 alone (200 / 100).
     await waitFor(() => expect(result.current.slots.length).toBe(2));
-    expect(result.current.scale).toBe(1);
+    expect(result.current.scale).toBe(2);
+    expect(
+      result.current.slots.map(({ width, height }) => [width, height])
+    ).toEqual([
+      [200, 280],
+      [200, 280],
+    ]);
+    expect(renderCalls).toHaveLength(0);
+
+    // Full pass: the widest page (200) drives fit-width; sizes correct with it.
+    doc.releaseAll();
+    await waitFor(() => expect(result.current.scale).toBe(1));
     expect(
       result.current.slots.map(({ width, height }) => [width, height])
     ).toEqual([
       [100, 140],
       [200, 100],
     ]);
+    expect(result.current.slots.every((slot) => slot.error === null)).toBe(
+      true
+    );
+    // One commit: no render ever paired the corrected scale with placeholder
+    // sizes or the corrected sizes with the placeholder scale.
+    for (const snapshot of renders.filter((r) => r.sizes.length === 2)) {
+      const corrected =
+        snapshot.sizes[1]![0] === 200 && snapshot.sizes[1]![1] === 100;
+      expect(snapshot.scale === 1).toBe(corrected);
+      expect(snapshot.sizes[0]).toEqual([
+        100 * snapshot.scale,
+        140 * snapshot.scale,
+      ]);
+    }
     expect(renderCalls).toHaveLength(0);
 
     fitMode = "page";
@@ -1558,6 +1691,94 @@ describe("use-pdf-pages", () => {
       [100, 50],
     ]);
     expect(renderCalls).toHaveLength(0);
+  });
+
+  test("R2: the top edge of the page in view stays fixed when later heights land", async () => {
+    const doc = makeHeldDoc(4, [2, 3, 4], { mixedGeometry: true });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "anchor",
+        numPages: 4,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        scrollContainerRef: { current: container },
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots.length).toBe(4));
+    expect(result.current.slots.map((slot) => slot.height)).toEqual([
+      140, 140, 140, 140,
+    ]);
+
+    for (let pageNumber = 1; pageNumber <= 4; pageNumber += 1) {
+      const el = document.createElement("div");
+      container.appendChild(el);
+      act(() => result.current.observePage(pageNumber, el));
+    }
+    // Page 3 is the page in view; the reader has scrolled to it.
+    await act(async () => {
+      emitIntersections({ 3: true });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.slots[2]?.visible).toBe(true));
+    container.scrollTop = 500;
+
+    doc.releaseAll();
+    await waitFor(() =>
+      expect(result.current.slots.map((slot) => slot.height)).toEqual([
+        140, 100, 140, 100,
+      ])
+    );
+    // Pages above page 3 shrank by 40px in total (page 2: 140 → 100), so the
+    // scroll position moved by the same delta and page 3's top edge held.
+    expect(container.scrollTop).toBe(460);
+  });
+
+  test("R2: a later page's geometry failure rides on its slot and is not fatal", async () => {
+    const doc = makeHeldDoc(3, [2], { mixedGeometry: true });
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "partial",
+        numPages: 3,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots.length).toBe(3));
+
+    doc.fail(
+      2,
+      Object.assign(new Error("corrupted xref"), {
+        name: "InvalidPDFException",
+      })
+    );
+    await waitFor(() => expect(result.current.slots[1]?.error).toBe("corrupt"));
+    expect(result.current.error).toBeNull();
+    expect(result.current.slots).toHaveLength(3);
+    expect(result.current.slots.map((slot) => slot.error)).toEqual([
+      null,
+      "corrupt",
+      null,
+    ]);
+    // The failed slot keeps page 1's placeholder size; page 3 measured normally.
+    expect(
+      result.current.slots.map(({ width, height }) => [width, height])
+    ).toEqual([
+      [100, 140],
+      [100, 140],
+      [100, 140],
+    ]);
   });
 
   test("page metadata acquisition failures surface a classified viewer error", async () => {

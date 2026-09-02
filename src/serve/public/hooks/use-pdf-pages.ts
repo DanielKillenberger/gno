@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import {
   classifyPdfError,
@@ -41,6 +48,13 @@ export type PageSlotState = {
    * mount canvas / TextLayer. Production PdfPageView `active` prop.
    */
   active: boolean;
+  /**
+   * Nonfatal geometry failure carried on this slot (R2): a later page whose
+   * `getPage` failed while page 1 succeeded. The slot keeps its placeholder
+   * size so the scroll model holds; the viewer shows the page error state in
+   * place of the page and every other slot stays mounted.
+   */
+  error: PdfFallbackReason | null;
 };
 
 export type UsePdfPagesOptions = {
@@ -54,6 +68,12 @@ export type UsePdfPagesOptions = {
   containerHeight: number;
   /** Bumped by viewer on every zoom/fit/scale commit. */
   genId: number;
+  /**
+   * Scrolling element that holds the page column. When the full geometry pass
+   * corrects placeholder heights, its `scrollTop` is adjusted by the height
+   * delta of the pages above the page in view so that page's top edge stays put.
+   */
+  scrollContainerRef?: RefObject<HTMLElement | null>;
   devicePixelRatio?: number;
   /**
    * Optional test doubles only (not a product API). Production omits these.
@@ -67,7 +87,11 @@ export type UsePdfPagesOptions = {
 
 export type UsePdfPagesResult = {
   slots: PageSlotState[];
-  /** Geometry/page acquisition failure classified for the viewer state model. */
+  /**
+   * Fatal failure classified for the viewer state model: page 1 geometry (the
+   * document behind it) or a render-path page acquisition failure. A later
+   * page's geometry failure is not fatal — it rides on `PageSlotState.error`.
+   */
   error: PdfFallbackReason | null;
   liveCanvasCount: number;
   observePage: (pageNumber: number, el: HTMLElement | null) => void;
@@ -109,6 +133,93 @@ type PageCache = {
 };
 
 type BasePageGeometry = { width: number; height: number };
+
+type PageGeometryResult = {
+  geometry: BasePageGeometry | null;
+  /** Classified `getPage` failure for this page; `null` once measured. */
+  error: PdfFallbackReason | null;
+};
+
+/**
+ * One geometry pass over a document. Page 1 resolves alone first so the viewer
+ * can publish placeholder slots (every page at page 1's size) and paint page 1
+ * before the rest is measured; the bounded worker pass then continues from
+ * page 2 and `full` carries every page's real size or its classified failure.
+ */
+type GeometryPass = {
+  firstPage: Promise<BasePageGeometry>;
+  full: Promise<PageGeometryResult[]>;
+  /** Result of `full` once it resolved; a later effect run skips the placeholder publish. */
+  settled: PageGeometryResult[] | null;
+};
+
+const GEOMETRY_WORKERS = 4;
+
+function startGeometryPass(
+  doc: PDFDocumentProxy,
+  numPages: number
+): GeometryPass {
+  const measure = async (pageNumber: number): Promise<BasePageGeometry> => {
+    const page = await doc.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    return { width: viewport.width, height: viewport.height };
+  };
+  const firstPage = measure(1);
+  const full = (async (): Promise<PageGeometryResult[]> => {
+    const results = Array.from(
+      { length: numPages },
+      (): PageGeometryResult => ({ geometry: null, error: null })
+    );
+    // Page 1 is fatal: a rejection here rejects `full` as well.
+    results[0] = { geometry: await firstPage, error: null };
+    let nextPageNumber = 2;
+    const worker = async (): Promise<void> => {
+      while (nextPageNumber <= numPages) {
+        const pageNumber = nextPageNumber;
+        nextPageNumber += 1;
+        try {
+          results[pageNumber - 1] = {
+            geometry: await measure(pageNumber),
+            error: null,
+          };
+        } catch (error) {
+          // A later page's failure rides on its slot; the pass continues.
+          results[pageNumber - 1] = {
+            geometry: null,
+            error: classifyPdfError(error),
+          };
+        }
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(GEOMETRY_WORKERS, numPages - 1) },
+        async () => worker()
+      )
+    );
+    return results;
+  })();
+  const pass: GeometryPass = { firstPage, full, settled: null };
+  full.then(
+    (results) => {
+      pass.settled = results;
+    },
+    () => {
+      // Surfaced through `firstPage` by the effect that awaits it.
+    }
+  );
+  return pass;
+}
+
+function anchorPage(visible: ReadonlySet<number>): number | null {
+  let anchor: number | null = null;
+  for (const pageNumber of visible) {
+    if (anchor === null || pageNumber < anchor) {
+      anchor = pageNumber;
+    }
+  }
+  return anchor;
+}
 
 function setsEqual(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
   if (a.size !== b.size) {
@@ -165,6 +276,7 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
     containerWidth,
     containerHeight,
     genId,
+    scrollContainerRef,
     devicePixelRatio = typeof window !== "undefined"
       ? window.devicePixelRatio || 1
       : 1,
@@ -189,9 +301,12 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
   const canvasRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const reservationsRef = useRef<Map<number, symbol>>(new Map());
   const latestRequestRef = useRef<Map<number, symbol>>(new Map());
-  const geometryCacheRef = useRef<
-    WeakMap<PDFDocumentProxy, Promise<BasePageGeometry[]>>
-  >(new WeakMap());
+  // Holds the full pass only: the placeholder slots derived from page 1 are a
+  // transient publish, never cached geometry. `firstPage` is that pass's own
+  // page-1 prefix, so a re-run during the pass can still publish early.
+  const geometryCacheRef = useRef<WeakMap<PDFDocumentProxy, GeometryPass>>(
+    new WeakMap()
+  );
   const observerRef = useRef<IntersectionObserver | null>(null);
   const settledTaskIdsRef = useRef<Set<string>>(new Set());
   const metrics = getPdfMetrics();
@@ -260,6 +375,11 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
   scaleRef.current = scale;
   const visibleRef = useRef(visiblePages);
   visibleRef.current = visiblePages;
+  /** Slots as last rendered — the heights the DOM currently shows. */
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+  /** Scroll delta to apply once the corrected slot heights are in the DOM. */
+  const pendingScrollAdjustRef = useRef(0);
   const disposedRef = useRef(false);
   const disposePromiseRef = useRef<Promise<void> | null>(null);
 
@@ -287,9 +407,12 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
     [numPages]
   );
 
-  // Resolve rotation-aware geometry with bounded concurrency before publishing
-  // slots. Correct placeholders are part of the scroll model: copying page 1
-  // makes mixed-size documents jump and makes fit modes overflow later pages.
+  // Rotation-aware geometry drives the scroll model. Slots publish as soon as
+  // page 1 is measured (every page at page 1's size, fit scale from page 1) so
+  // the first paint does not wait for the rest of the document; the full pass
+  // then corrects sizes and the fit scale in one commit, anchored so the page
+  // in view does not jump. Copying page 1 is only ever the placeholder:
+  // mixed-size documents and fit modes settle on the real per-page sizes.
   useEffect(() => {
     let cancelled = false;
     if (!doc || numPages === 0) {
@@ -299,75 +422,14 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       return;
     }
 
-    void (async () => {
-      let geometryPromise = geometryCacheRef.current.get(doc);
-      if (!geometryPromise) {
-        geometryPromise = (async (): Promise<BasePageGeometry[]> => {
-          const geometry = Array.from<BasePageGeometry | undefined>({
-            length: numPages,
-          });
-          let nextPageNumber = 1;
-          let failure: unknown = null;
-          const worker = async (): Promise<void> => {
-            while (failure === null) {
-              const pageNumber = nextPageNumber;
-              nextPageNumber += 1;
-              if (pageNumber > numPages) {
-                return;
-              }
-              try {
-                const page = await doc.getPage(pageNumber);
-                if (failure !== null) {
-                  return;
-                }
-                const viewport = page.getViewport({ scale: 1 });
-                geometry[pageNumber - 1] = {
-                  width: viewport.width,
-                  height: viewport.height,
-                };
-              } catch (error) {
-                failure = error;
-              }
-            }
-          };
-          await Promise.all(
-            Array.from({ length: Math.min(4, numPages) }, async () => worker())
-          );
-          const resolved = geometry.filter(
-            (entry): entry is BasePageGeometry => entry !== undefined
-          );
-          if (failure !== null) {
-            throw failure;
-          }
-          if (resolved.length !== numPages) {
-            throw new Error("PDF page geometry is incomplete");
-          }
-          return resolved;
-        })();
-        geometryCacheRef.current.set(doc, geometryPromise);
-      }
-
-      let resolvedGeometry: BasePageGeometry[];
-      try {
-        resolvedGeometry = await geometryPromise;
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setSlots([]);
-        setPageError(classifyPdfError(error));
-        return;
-      }
-      if (cancelled) {
-        return;
-      }
-
-      const maxWidth = Math.max(
-        ...resolvedGeometry.map((entry) => entry.width)
-      );
-      const maxHeight = Math.max(
-        ...resolvedGeometry.map((entry) => entry.height)
-      );
+    const commit = (
+      results: PageGeometryResult[],
+      placeholder: BasePageGeometry,
+      correction: boolean
+    ): void => {
+      const sizes = results.map((entry) => entry.geometry ?? placeholder);
+      const maxWidth = Math.max(...sizes.map((entry) => entry.width));
+      const maxHeight = Math.max(...sizes.map((entry) => entry.height));
       let nextScale = zoom;
       if (fitMode === "width" && containerWidth > 0) {
         nextScale = containerWidth / maxWidth;
@@ -382,27 +444,113 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         );
       }
       nextScale = Math.max(0.25, Math.min(4, nextScale));
-      setScale(nextScale);
-      setPageError(null);
 
       const visible = visibleRef.current;
       const active = computeActiveSet(visible, numPages);
-      setSlots(
-        resolvedGeometry.map((entry, index) => ({
+      const next = sizes.map(
+        (entry, index): PageSlotState => ({
           pageNumber: index + 1,
           width: entry.width * nextScale,
           height: entry.height * nextScale,
           rendered: false,
           visible: visible.has(index + 1),
           active: active.has(index + 1),
-        }))
+          error: results[index]?.error ?? null,
+        })
       );
+
+      if (correction) {
+        // Keep the top edge of the page in view where it is: shift the scroll
+        // position by the height delta of the pages above it, applied by the
+        // layout effect below once the new heights are in the DOM.
+        const shown = slotsRef.current;
+        const anchor = anchorPage(visible);
+        if (anchor !== null && shown.length === next.length) {
+          let delta = 0;
+          for (let index = 0; index < anchor - 1; index += 1) {
+            delta += next[index]!.height - shown[index]!.height;
+          }
+          pendingScrollAdjustRef.current += delta;
+        }
+      }
+
+      setScale(nextScale);
+      setPageError(null);
+      if (!correction) {
+        setSlots(next);
+        return;
+      }
+      // Same scale: a page already drawn against the placeholder publish stays
+      // drawn. A scale change re-renders it anyway (startScale mismatch).
+      const keepRendered = nextScale === scaleRef.current;
+      setSlots((prev) =>
+        next.map((slot, index) =>
+          keepRendered && prev[index]?.pageNumber === slot.pageNumber
+            ? { ...slot, rendered: prev[index].rendered }
+            : slot
+        )
+      );
+    };
+
+    void (async () => {
+      let pass = geometryCacheRef.current.get(doc);
+      if (!pass) {
+        pass = startGeometryPass(doc, numPages);
+        geometryCacheRef.current.set(doc, pass);
+      }
+
+      let firstPage: BasePageGeometry;
+      try {
+        firstPage = await pass.firstPage;
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        // Page 1 (or the document behind it) failed: fatal, existing fallback.
+        setSlots([]);
+        setPageError(classifyPdfError(error));
+        return;
+      }
+      if (cancelled) {
+        return;
+      }
+
+      const publishedPlaceholder = pass.settled === null;
+      if (publishedPlaceholder) {
+        commit(
+          Array.from(
+            { length: numPages },
+            (): PageGeometryResult => ({ geometry: null, error: null })
+          ),
+          firstPage,
+          false
+        );
+      }
+
+      const results = await pass.full;
+      if (cancelled) {
+        return;
+      }
+      commit(results, firstPage, publishedPlaceholder);
     })();
 
     return () => {
       cancelled = true;
     };
   }, [doc, numPages, zoom, fitMode, containerWidth, containerHeight]);
+
+  // Apply the anchored scroll shift in the same frame the corrected heights land.
+  useLayoutEffect(() => {
+    const delta = pendingScrollAdjustRef.current;
+    if (delta === 0) {
+      return;
+    }
+    pendingScrollAdjustRef.current = 0;
+    const container = scrollContainerRef?.current;
+    if (container) {
+      container.scrollTop += delta;
+    }
+  }, [slots, scrollContainerRef]);
 
   // IntersectionObserver drives visibility → slot.active/visible → PdfPageView.
   useEffect(() => {
