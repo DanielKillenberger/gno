@@ -136,8 +136,10 @@ const FALLBACK_COPY = {
  */
 async function generateLargePdf(
   pages: number,
-  outPath?: string
+  outPath?: string,
+  opts: { minBytes?: number } = {}
 ): Promise<Uint8Array> {
+  const minBytes = opts.minBytes ?? RANGED_TIER_MIN_BYTES;
   const count = Math.max(1, pages);
   // Object map (ids fixed; emission order is structure-first, streams later):
   //   1 Catalog, 2 Pages, 3 Font
@@ -235,8 +237,8 @@ async function generateLargePdf(
 
   const bytes = new Uint8Array(Buffer.from(body, "utf8"));
   assert(
-    bytes.byteLength >= RANGED_TIER_MIN_BYTES,
-    `the ranged fixture must reach the whole-file bound (${RANGED_TIER_MIN_BYTES}), got ${bytes.byteLength}`
+    bytes.byteLength >= minBytes,
+    `generated fixture must reach ${minBytes} bytes, got ${bytes.byteLength}`
   );
   // Structure+page-dicts+page1 content must fit the first range chunk so page 1
   // can paint while later content Ranges remain holdable.
@@ -270,7 +272,7 @@ async function generateLargePdf(
   return bytes;
 }
 
-function verifyLetterMediaBox(bytes: Uint8Array): void {
+function verifyLetterMediaBox(bytes: Uint8Array, expectedPages = 200): void {
   const text = Buffer.from(bytes).toString("latin1");
   // Fail loudly on MediaBox oracle drift (spec progressive aspect oracle).
   const mediaBoxes = [...text.matchAll(/\/MediaBox\s*\[([^\]]+)\]/gu)];
@@ -293,8 +295,8 @@ function verifyLetterMediaBox(bytes: Uint8Array): void {
   // Count page objects roughly via /Type /Page (not /Pages).
   const pageObjs = (text.match(/\/Type\s*\/Page(?![sA-Za-z])/gu) ?? []).length;
   assert(
-    pageObjs === 200,
-    `large-200.pdf must be exactly 200 pages, found ~${pageObjs} /Type /Page objects`
+    pageObjs === expectedPages,
+    `generated fixture must be exactly ${expectedPages} pages, found ~${pageObjs} /Type /Page objects`
   );
 }
 
@@ -2042,6 +2044,25 @@ async function main(): Promise<void> {
   );
   await Bun.write(join(collectionDir, "large-200.pdf"), Bun.file(largePath));
 
+  // Whole-file tier oracle fixture: range-eligible for pdf.js (above
+  // 2 × rangeChunkSize) yet under the whole-file bound, so a regression in the
+  // transport hint would surface as Range requests instead of one plain GET.
+  const mediumPath = join(tempRoot, "medium-60.pdf");
+  log("Generating 60-page medium fixture…");
+  const mediumBytes = await generateLargePdf(60, mediumPath, {
+    minBytes: MIN_RANGE_ELIGIBLE_BYTES + 1,
+  });
+  assert(
+    mediumBytes.byteLength > MIN_RANGE_ELIGIBLE_BYTES &&
+      mediumBytes.byteLength < RANGED_TIER_MIN_BYTES,
+    `medium-60.pdf must sit in the range-eligible sub-bound window (${MIN_RANGE_ELIGIBLE_BYTES}, ${RANGED_TIER_MIN_BYTES}), got ${mediumBytes.byteLength} bytes`
+  );
+  verifyLetterMediaBox(mediumBytes, 60);
+  log(
+    `medium fixture bytes=${mediumBytes.byteLength} pages=60 (${MIN_RANGE_ELIGIBLE_BYTES} < size < ${RANGED_TIER_MIN_BYTES} = whole-file tier)`
+  );
+  await Bun.write(join(collectionDir, "medium-60.pdf"), Bun.file(mediumPath));
+
   const originalEnv = {
     GNO_CONFIG_DIR: process.env.GNO_CONFIG_DIR,
     GNO_DATA_DIR: process.env.GNO_DATA_DIR,
@@ -2479,7 +2500,7 @@ async function main(): Promise<void> {
         };
         const logStart = requestLogs.length;
         page.on("request", onAssetRequest);
-        await openPdf(page, baseUrl, "sample.pdf");
+        await openPdf(page, baseUrl, "medium-60.pdf");
         await waitForProgressive(page);
         await page
           .waitForLoadState("networkidle", { timeout: 10_000 })
@@ -2520,15 +2541,21 @@ async function main(): Promise<void> {
           `CLEAN whole-file: GET status ${String(getStatus)}`
         );
         const parsedLen = Number(getContentLength);
+        // The fixture must be range-eligible for pdf.js (above 2 × chunk) so
+        // that the "no Range" assertion above is a real gate on the hint, and
+        // below the whole-file bound so that the hint selects whole-file.
         assert(
-          Number.isFinite(parsedLen) && parsedLen < RANGED_TIER_MIN_BYTES,
-          `CLEAN whole-file: content-length ${String(getContentLength)} must be below ${RANGED_TIER_MIN_BYTES}`
+          Number.isFinite(parsedLen) &&
+            parsedLen > MIN_RANGE_ELIGIBLE_BYTES &&
+            parsedLen < RANGED_TIER_MIN_BYTES,
+          `CLEAN whole-file: content-length ${String(getContentLength)} must sit in (${MIN_RANGE_ELIGIBLE_BYTES}, ${RANGED_TIER_MIN_BYTES})`
         );
         clean.wholeFileTier = {
-          fixture: "sample.pdf",
+          fixture: "medium-60.pdf",
           requests: assetRequests,
           getStatus,
           getContentLength,
+          minRangeEligibleBytes: MIN_RANGE_ELIGIBLE_BYTES,
           wholeFileMaxBytes: RANGED_TIER_MIN_BYTES,
         };
 
