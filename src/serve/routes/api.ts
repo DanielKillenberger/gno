@@ -3194,7 +3194,8 @@ export async function handleRevealDoc(
     server?: RequestPeerServer;
   }
 ): Promise<Response> {
-  if (req && !isLocalClientRequest(req, deps?.server)) {
+  // Fail closed: no request (no peer to judge) is treated as remote.
+  if (!req || !isLocalClientRequest(req, deps?.server)) {
     return errorResponse(
       "FORBIDDEN",
       "Reveal is only available to a local client",
