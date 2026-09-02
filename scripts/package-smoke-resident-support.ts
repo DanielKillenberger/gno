@@ -71,6 +71,59 @@ const START_TIMEOUT_MS = 60_000;
 // releasing model resources. Linux CI needs headroom beyond that product
 // deadline, especially after a model-backed smoke run.
 export const STOP_TIMEOUT_MS = 30_000;
+// Match `gno serve --stop`: SIGKILL is a successful stop, not a smoke failure.
+// Wait long enough for the kernel to reap after the forced kill.
+export const STOP_KILL_WAIT_MS = 5_000;
+const STOP_POLL_MS = 100;
+const STOP_OUTPUT_DRAIN_MS = 1_000;
+
+function isResidentProcessRunning(child: RunningProcess["child"]): boolean {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return false;
+  }
+  const pid = child.pid;
+  if (typeof pid !== "number") {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForResidentExit(
+  child: RunningProcess["child"],
+  timeoutMs: number
+): Promise<number | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      return child.exitCode;
+    }
+    if (!isResidentProcessRunning(child)) {
+      return child.exitCode;
+    }
+    await Promise.race([child.exited, Bun.sleep(STOP_POLL_MS)]);
+  }
+  return child.exitCode;
+}
+
+async function collectResidentOutput(
+  residentProcess: RunningProcess,
+  stillRunning: boolean
+): Promise<{ stdout: string; stderr: string }> {
+  if (stillRunning) {
+    return { stdout: "", stderr: "" };
+  }
+  return Promise.race([
+    Promise.all([residentProcess.stdout, residentProcess.stderr]).then(
+      ([stdout, stderr]) => ({ stdout, stderr })
+    ),
+    Bun.sleep(STOP_OUTPUT_DRAIN_MS).then(() => ({ stdout: "", stderr: "" })),
+  ]);
+}
 
 export function isExpectedResidentShutdownExit(
   platform: NodeJS.Platform,
@@ -178,39 +231,57 @@ export async function waitForStatus(
 export async function stopResident(
   residentProcess: RunningProcess,
   label: string,
-  timeoutMs = STOP_TIMEOUT_MS
+  timeoutMs = STOP_TIMEOUT_MS,
+  killWaitMs = STOP_KILL_WAIT_MS
 ): Promise<void> {
-  if (residentProcess.child.exitCode === null) {
-    residentProcess.child.kill("SIGTERM");
+  const { child } = residentProcess;
+  let forcedKill = false;
+  if (isResidentProcessRunning(child)) {
+    child.kill("SIGTERM");
   }
-  const exitCode = await Promise.race([
-    residentProcess.child.exited,
-    Bun.sleep(timeoutMs).then(() => {
-      residentProcess.child.kill("SIGKILL");
-      throw new Error(`${label} did not exit within ${timeoutMs}ms`);
-    }),
-  ]);
-  const [stdout, stderr] = await Promise.all([
-    residentProcess.stdout,
-    residentProcess.stderr,
-  ]);
+
+  let exitCode = await waitForResidentExit(child, timeoutMs);
+  if (exitCode === null && isResidentProcessRunning(child)) {
+    forcedKill = true;
+    child.kill("SIGKILL");
+    exitCode = await waitForResidentExit(child, killWaitMs);
+  }
+
+  const stillRunning = exitCode === null && isResidentProcessRunning(child);
+  const { stdout, stderr } = await collectResidentOutput(
+    residentProcess,
+    stillRunning
+  );
+  if (stillRunning) {
+    throw new Error(
+      `${label} did not exit after SIGTERM (${String(timeoutMs)}ms) + SIGKILL (${String(killWaitMs)}ms)\nstdout:\n${stdout}\nstderr:\n${stderr}`
+    );
+  }
+
+  const resolvedExit = exitCode ?? child.exitCode ?? (forcedKill ? 137 : 0);
   if (stdout || stderr) {
     console.warn(
       `${label} process output\nstdout:\n${stdout}\nstderr:\n${stderr}`
     );
   }
+  if (forcedKill) {
+    console.warn(
+      `${label} required SIGKILL after ${String(timeoutMs)}ms SIGTERM (exit ${String(resolvedExit)}).`
+    );
+    return;
+  }
   const expectedSignalExit = isExpectedResidentShutdownExit(
     process.platform,
-    exitCode
+    resolvedExit
   );
-  if (exitCode !== 0 && !expectedSignalExit) {
+  if (resolvedExit !== 0 && !expectedSignalExit) {
     throw new Error(
-      `${label} exited ${exitCode}\nstdout:\n${stdout}\nstderr:\n${stderr}`
+      `${label} exited ${String(resolvedExit)}\nstdout:\n${stdout}\nstderr:\n${stderr}`
     );
   }
   if (expectedSignalExit) {
     console.warn(
-      `Packed resident shutdown completed with platform signal exit ${exitCode}.`
+      `Packed resident shutdown completed with platform signal exit ${String(resolvedExit)}.`
     );
   }
 }
