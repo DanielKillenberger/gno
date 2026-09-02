@@ -1762,7 +1762,10 @@ export default function DocView({ navigate }: PageProps) {
           )}
           {doc && (
             <>
-              <Separator className="hidden h-6 sm:block" orientation="vertical" />
+              <Separator
+                className="hidden h-6 sm:block"
+                orientation="vertical"
+              />
               <div
                 className="flex min-w-0 flex-wrap items-center gap-2"
                 data-testid="doc-header-actions"
