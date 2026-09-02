@@ -1722,10 +1722,10 @@ export default function DocView({ navigate }: PageProps) {
   );
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-w-0 overflow-x-clip">
       {/* Header */}
       <header className="glass sticky top-0 z-10 border-border/50 border-b">
-        <div className="flex items-center gap-4 px-8 py-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4 sm:px-8">
           {/* Home button - Scholarly Dusk brass accent */}
           <Button
             aria-label="Go to dashboard"
@@ -1762,8 +1762,11 @@ export default function DocView({ navigate }: PageProps) {
           )}
           {doc && (
             <>
-              <Separator className="h-6" orientation="vertical" />
-              <div className="flex items-center gap-2">
+              <Separator className="hidden h-6 sm:block" orientation="vertical" />
+              <div
+                className="flex min-w-0 flex-wrap items-center gap-2"
+                data-testid="doc-header-actions"
+              >
                 {doc.capabilities.editable ? (
                   <>
                     <Button className="gap-1.5" onClick={handleEdit} size="sm">

@@ -75,3 +75,7 @@ No horizontal overflow at a 375 px viewport; header actions and the viewer fit t
 ## Traceability
 - R-IDs: [] (regression scenario from bug memory)   scenario: S11   driver_rung: playwright   viewport: 375x812
 - Classification: pre_existing (same symptom filed 2026-08-03 on a markdown document; reproduced on a PDF document on branch fn-136 at c089258f)
+
+## Update 2026-09-02 (land tick)
+
+Doc View header actions now wrap (`flex-wrap` + `min-w-0`) so Reveal / Open original / Download stay on-screen at 375 px. That addresses the clipped-action half of QA-1. The older 960 px canvas overflow on markdown Doc View is unchanged and still owed outside fn-136.

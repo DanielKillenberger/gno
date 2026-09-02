@@ -240,4 +240,14 @@ describe("DocView locality-aware actions", () => {
     expect(screen.queryByTestId("doc-reveal")).toBeNull();
     expect(openOriginal()?.getAttribute("href")).toMatch(/^\/api\/doc-asset\?/);
   });
+
+  test("header action row wraps so a 375px viewport does not clip actions", async () => {
+    await renderDoc(readOnlyPdf, "remote");
+
+    const actions = await screen.findByTestId("doc-header-actions");
+    expect(actions.className).toContain("flex-wrap");
+    expect(actions.className).toContain("min-w-0");
+    expect(openOriginal()).not.toBeNull();
+    expect(screen.getByTestId("pdf-header-download")).toBeTruthy();
+  });
 });

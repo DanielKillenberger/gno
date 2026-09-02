@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Doc View header actions wrap at narrow viewports instead of expanding the
+  page past the window and clipping Reveal / Open original / Download.
+
 ## [1.38.0] - 2026-08-31
 
 ### Added
