@@ -221,7 +221,7 @@ describe("PdfViewer", () => {
   test("production PdfViewerProps expose only the four contract keys", () => {
     // Compile-time contract is the type; runtime: no injection attrs on element
     const onFallback = mock(() => undefined);
-    render(
+    const view = render(
       <PdfViewer
         assetUrl="/a.pdf"
         downloadUrl="/d.pdf"
@@ -242,6 +242,8 @@ describe("PdfViewer", () => {
     expect(Object.keys(props).sort()).toEqual(
       ["assetUrl", "downloadUrl", "extractedTextAvailable", "onFallback"].sort()
     );
+    // Unmount before the async HEAD probe settles so its stale generation performs no state update.
+    view.unmount();
   });
 
   test("loading state exact copy, role=status, no Card chrome", () => {
@@ -902,6 +904,11 @@ describe("PdfViewer", () => {
         usePdfDocument: createDocumentHookWithDeps({
           getDocument: fakeGetDocument,
           getPdfMetrics: () => metrics as never,
+          fetch: async () =>
+            new Response(null, {
+              status: 200,
+              headers: { "content-length": "1024" },
+            }),
         }),
         // Real usePdfPages default (zero pages → empty slots)
       }
@@ -918,7 +925,7 @@ describe("PdfViewer", () => {
     ).toHaveLength(0);
 
     // The real hook probes the asset size (HEAD) before creating the loading
-    // task; the probe rejects on the relative URL and falls back to ranged.
+    // task; the double answers 1024 bytes, so the load starts on the whole-file tier.
     await waitFor(() => {
       expect(tasks.length).toBe(1);
     });
@@ -1304,6 +1311,11 @@ describe("PdfViewer", () => {
                 mintDocId: metrics.mintDocId,
                 recordDocumentDestroy: metrics.recordDocumentDestroy,
               }) as never,
+            fetch: async () =>
+              new Response(null, {
+                status: 200,
+                headers: { "content-length": "1024" },
+              }),
           }),
           usePdfPages: createPagesHookWithDeps({
             getPdfMetrics: () => metrics as never,

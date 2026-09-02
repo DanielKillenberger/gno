@@ -184,6 +184,15 @@ export const NETWORK_BOUNDARY_INVENTORY = [
     serverBoundary: "src/serve/server.ts",
   },
   {
+    id: "browser-document-events",
+    key: "src/serve/public/hooks/use-doc-events.ts::event_source#1",
+    path: "src/serve/public/hooks/use-doc-events.ts",
+    primitive: "event_source",
+    action: "serve",
+    enforcement: "client_transport",
+    serverBoundary: "src/serve/server.ts",
+  },
+  {
     // Same-origin HEAD against /api/doc-asset to pick the PDF transport tier.
     id: "browser-pdf-transport-probe",
     key: "src/serve/public/hooks/use-pdf-document.ts::fetch#1",
@@ -192,15 +201,6 @@ export const NETWORK_BOUNDARY_INVENTORY = [
     action: "serve",
     enforcement: "client_transport",
     serverBoundary: "src/serve/routes/api.ts",
-  },
-  {
-    id: "browser-document-events",
-    key: "src/serve/public/hooks/use-doc-events.ts::event_source#1",
-    path: "src/serve/public/hooks/use-doc-events.ts",
-    primitive: "event_source",
-    action: "serve",
-    enforcement: "client_transport",
-    serverBoundary: "src/serve/server.ts",
   },
   {
     id: "clipper-pair-csrf",

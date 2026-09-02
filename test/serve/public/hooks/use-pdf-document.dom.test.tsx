@@ -461,6 +461,26 @@ describe("use-pdf-document", () => {
     }
   });
 
+  test("synchronous getDocument throw after the probe surfaces as a document error, not an unhandled rejection", async () => {
+    const throwingGetDocument = (): never => {
+      throw new Error("corrupt bootstrap");
+    };
+    const { result, unmount } = renderHook(() =>
+      usePdfDocument("/api/doc-asset?path=throws.pdf", {
+        ...deps,
+        getDocument: throwingGetDocument,
+      })
+    );
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.error).toBe("bootstrap");
+    expect(result.current.errorMessage).toBe("corrupt bootstrap");
+    expect(classifyPdfError).toHaveBeenCalledTimes(1);
+    expect(getDocumentCalls.length).toBe(0);
+    expect(destroyEvents.length).toBe(0);
+    expect(headCalls.length).toBe(1);
+    unmount();
+  });
+
   test("unmount during the HEAD probe never creates a loading task", async () => {
     headGate = deferred<void>();
     const { unmount } = renderHook(() =>

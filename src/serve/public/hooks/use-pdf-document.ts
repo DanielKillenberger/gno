@@ -192,43 +192,48 @@ export function usePdfDocument(
       }
     };
 
-    // One HEAD per document load picks the transport tier; the load itself
-    // starts only if this generation is still live once the probe settles.
-    void probeTransportHint(url, fetchImpl).then((transport) => {
+    const failLoad = (err: unknown): void => {
       if (isStale()) {
         return;
       }
-      const loadingTask = getDocument({ url, transport });
-      ownership.task = loadingTask;
-      ownership.docId = loadingTask.gnoDocId;
-      setDocId(loadingTask.gnoDocId);
+      const reason = classifyPdfError(err);
+      setStatus("error");
+      setError(reason);
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+      setDoc(null);
+      setNumPages(0);
+      setFirstPageReady(false);
+      teardown();
+    };
 
-      loadingTask.promise
-        .then(async (pdf) => {
-          if (isStale()) {
-            teardown();
-            return;
-          }
-          ownership.viewerDoc = pdf;
-          setDoc(pdf);
-          setNumPages(pdf.numPages);
-          setStatus("ready");
-          setFirstPageReady(pdf.numPages > 0);
-        })
-        .catch((err: unknown) => {
-          if (isStale()) {
-            return;
-          }
-          const reason = classifyPdfError(err);
-          setStatus("error");
-          setError(reason);
-          setErrorMessage(err instanceof Error ? err.message : String(err));
-          setDoc(null);
-          setNumPages(0);
-          setFirstPageReady(false);
-          teardown();
-        });
-    });
+    // One HEAD per document load picks the transport tier; the load itself
+    // starts only if this generation is still live once the probe settles.
+    // A synchronous getDocument failure routes through the same error path.
+    void probeTransportHint(url, fetchImpl)
+      .then((transport) => {
+        if (isStale()) {
+          return;
+        }
+        const loadingTask = getDocument({ url, transport });
+        ownership.task = loadingTask;
+        ownership.docId = loadingTask.gnoDocId;
+        setDocId(loadingTask.gnoDocId);
+
+        loadingTask.promise
+          .then(async (pdf) => {
+            if (isStale()) {
+              teardown();
+              return;
+            }
+            ownership.viewerDoc = pdf;
+            setDoc(pdf);
+            setNumPages(pdf.numPages);
+            setStatus("ready");
+            setFirstPageReady(pdf.numPages > 0);
+          })
+          .catch(failLoad);
+      })
+      .catch(failLoad);
 
     return () => {
       if (ownershipRef.current === ownership) {

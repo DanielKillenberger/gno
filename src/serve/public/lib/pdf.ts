@@ -16,6 +16,11 @@ import {
   type PageViewport,
 } from "pdfjs-dist";
 
+import {
+  PDF_RANGE_CHUNK_BYTES,
+  PDF_WHOLE_FILE_MAX_BYTES,
+} from "./pdf-transport";
+
 // ── Worker / asset bootstrap ────────────────────────────────────────────────
 //
 // Browser (and Electrobun webview) production: same-origin /vendor/pdfjs/* routes.
@@ -133,7 +138,7 @@ export type PdfTransportHint = "whole-file" | "ranged";
 
 export type GnoGetDocumentParams = {
   url: string;
-  /** Omitted → `ranged`, the bounded-memory ceiling. */
+  /** Omitted → `ranged`: chunked transport, safe for an unknown or large file. */
   transport?: PdfTransportHint;
   // Intentionally NO caller-controlled document id — every load mints a fresh
   // opaque instance id internally (I2-6 / Sol rereview).
@@ -392,11 +397,10 @@ export function isRenderingCancelled(err: unknown): boolean {
 }
 
 // ── Transport tier constants (fn-136 R1) ────────────────────────────────────
+// Defined in ./pdf-transport (no pdfjs-dist import) and re-exported here so
+// the facade stays the single import surface for app code.
 
-/** Files whose HEAD Content-Length is under this load in one GET. */
-export const PDF_WHOLE_FILE_MAX_BYTES = 8 * 1024 * 1024;
-/** Range chunk size for files at or above the whole-file bound. */
-export const PDF_RANGE_CHUNK_BYTES = 1024 * 1024;
+export { PDF_RANGE_CHUNK_BYTES, PDF_WHOLE_FILE_MAX_BYTES };
 
 // ── Zoom / fit / canvas cap math ────────────────────────────────────────────
 

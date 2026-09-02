@@ -23,11 +23,16 @@ import {
   type Browser,
   type BrowserContext,
   type Page,
+  type Request,
   type Route,
 } from "playwright";
 
 import { saveConfigToPath } from "../src/config/saver";
 import { startBackgroundRuntime } from "../src/serve/background-runtime";
+import {
+  PDF_RANGE_CHUNK_BYTES,
+  PDF_WHOLE_FILE_MAX_BYTES,
+} from "../src/serve/public/lib/pdf-transport";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -38,10 +43,12 @@ const LETTER_W = 612;
 const LETTER_H = 792;
 const LETTER_RATIO = LETTER_W / LETTER_H; // 17/22
 const RATIO_TOL = 0.01;
-/** pdfjs-dist default rangeChunkSize (64 KiB). Ranges require length > 2× this. */
-const RANGE_CHUNK_SIZE = 64 * 1024;
-/** Minimum fixture size for range mode (exclusive lower bound: 2 × rangeChunkSize). */
+/** Product ranged-tier chunk (1 MiB). pdf.js ranges require length > 2× this. */
+const RANGE_CHUNK_SIZE = PDF_RANGE_CHUNK_BYTES;
+/** Minimum fixture size for pdf.js range eligibility (exclusive lower bound: 2 × rangeChunkSize). */
 const MIN_RANGE_ELIGIBLE_BYTES = 2 * RANGE_CHUNK_SIZE;
+/** A fixture at or above this loads ranged; below it loads whole-file with zero Range requests. */
+const RANGED_TIER_MIN_BYTES = PDF_WHOLE_FILE_MAX_BYTES;
 /** Selection-vs-glyph overlap tolerance in CSS pixels. */
 const ALIGN_TOL_PX = 6;
 const MAX_CANVAS_PIXELS = 16_777_216;
@@ -175,12 +182,13 @@ async function generateLargePdf(
         `0 -20 Td (MARKER_PAGE_${i}) Tj`,
       ];
       // Page 2+ streams must NOT fit in the first range chunk remainder after
-      // the early structure (~27 KiB). Overscan renders page 2 while page 1 is
-      // painted; if page-2 content lived inside bytes 0-65535, no later Range
+      // the early structure. Overscan renders page 2 while page 1 is painted;
+      // if page-2 content lived inside the first 1 MiB chunk, no later Range
       // would ever be issued and the held-range oracle would be impossible.
-      // ~900 padded lines × ~70 chars ≈ 63 KiB/page → page 2 alone spills past
-      // 64 KiB and subsequent pages provide further holdable Ranges.
-      const padLines = i === 2 ? 900 : 40;
+      // Page 2 padding (~15,500 lines × ~70 bytes) spills past the 1 MiB
+      // range chunk; remaining padded pages bring the file over the 8 MiB
+      // whole-file bound so the product loads it on the ranged tier.
+      const padLines = i === 2 ? 15_500 : 600;
       for (let j = 0; j < padLines; j++) {
         lines.push(`0 -14 Td (pad p${i} l${j} ${"x".repeat(56)}) Tj`);
       }
@@ -227,8 +235,8 @@ async function generateLargePdf(
 
   const bytes = new Uint8Array(Buffer.from(body, "utf8"));
   assert(
-    bytes.byteLength > MIN_RANGE_ELIGIBLE_BYTES,
-    `range-friendly large PDF must exceed 2×rangeChunkSize (${MIN_RANGE_ELIGIBLE_BYTES}), got ${bytes.byteLength}`
+    bytes.byteLength >= RANGED_TIER_MIN_BYTES,
+    `the ranged fixture must reach the whole-file bound (${RANGED_TIER_MIN_BYTES}), got ${bytes.byteLength}`
   );
   // Structure+page-dicts+page1 content must fit the first range chunk so page 1
   // can paint while later content Ranges remain holdable.
@@ -247,6 +255,14 @@ async function generateLargePdf(
   assert(
     earlyBytes < RANGE_CHUNK_SIZE,
     `range-friendly early structure must fit in first range chunk (${RANGE_CHUNK_SIZE}), got ${earlyBytes}`
+  );
+  const page2ContentBytes = Buffer.byteLength(
+    byId.get(contentObj(2)) ?? "",
+    "utf8"
+  );
+  assert(
+    earlyBytes + page2ContentBytes > RANGE_CHUNK_SIZE,
+    "page 2 must spill past the first range chunk"
   );
   if (outPath) {
     await Bun.write(outPath, bytes);
@@ -1389,6 +1405,19 @@ function createRangeController(fileBytes: Uint8Array) {
       ts: Date.now(),
     });
 
+    if (req.method() === "HEAD") {
+      const response = await route.fetch();
+      controlLog.push({
+        action: "head-probe-passthrough",
+        status: response.status(),
+        contentLength: response.headers()["content-length"] ?? null,
+        expectedContentLength: String(total),
+        ts: Date.now(),
+      });
+      await route.fulfill({ response });
+      return;
+    }
+
     if (!range) {
       // Honest pass-through of the Range-less first request: real production
       // endpoint, verbatim response. No truncation, no 206-without-Range, no
@@ -1987,6 +2016,7 @@ async function main(): Promise<void> {
     "standard-font.pdf",
     "cjk-cmap.pdf",
     "zero-page.pdf",
+    "sample.pdf",
   ];
   await mkdir(collectionDir, { recursive: true });
   for (const f of fixtures) {
@@ -2003,12 +2033,12 @@ async function main(): Promise<void> {
   log("Generating 200-page large fixture…");
   const largeBytes = await generateLargePdf(200, largePath);
   assert(
-    largeBytes.byteLength > MIN_RANGE_ELIGIBLE_BYTES,
-    `large-200.pdf must exceed 2×rangeChunkSize (${MIN_RANGE_ELIGIBLE_BYTES}), got ${largeBytes.byteLength} bytes (still exactly 200 pages)`
+    largeBytes.byteLength >= RANGED_TIER_MIN_BYTES,
+    `large-200.pdf must reach the ranged tier (${RANGED_TIER_MIN_BYTES}), got ${largeBytes.byteLength} bytes (still exactly 200 pages)`
   );
   verifyLetterMediaBox(largeBytes);
   log(
-    `large fixture bytes=${largeBytes.byteLength} pages=200 (>${MIN_RANGE_ELIGIBLE_BYTES}=2×rangeChunkSize)`
+    `large fixture bytes=${largeBytes.byteLength} pages=200 (>=${RANGED_TIER_MIN_BYTES}=ranged tier)`
   );
   await Bun.write(join(collectionDir, "large-200.pdf"), Bun.file(largePath));
 
@@ -2432,6 +2462,76 @@ async function main(): Promise<void> {
           `CLEAN non-self requests: ${nonSelf.slice(0, 8).join(", ")}`
         );
 
+        log("CLEAN: whole-file tier (sub-bound fixture)");
+        const assetRequests: {
+          method: string;
+          url: string;
+          range: string | null;
+        }[] = [];
+        const onAssetRequest = (req: Request) => {
+          if (req.url().includes("/api/doc-asset")) {
+            assetRequests.push({
+              method: req.method(),
+              url: req.url(),
+              range: req.headers()["range"] ?? null,
+            });
+          }
+        };
+        const logStart = requestLogs.length;
+        page.on("request", onAssetRequest);
+        await openPdf(page, baseUrl, "sample.pdf");
+        await waitForProgressive(page);
+        await page
+          .waitForLoadState("networkidle", { timeout: 10_000 })
+          .catch(() => undefined);
+        page.off("request", onAssetRequest);
+        const headReqs = assetRequests.filter((r) => r.method === "HEAD");
+        const getReqs = assetRequests.filter((r) => r.method === "GET");
+        assert(
+          headReqs.length === 1,
+          `CLEAN whole-file: expected exactly one HEAD, got ${headReqs.length}; ${JSON.stringify(assetRequests)}`
+        );
+        assert(
+          getReqs.length === 1,
+          `CLEAN whole-file: expected exactly one GET, got ${getReqs.length}; ${JSON.stringify(assetRequests)}`
+        );
+        assert(
+          getReqs[0]!.range === null,
+          `CLEAN whole-file: GET must have no Range, got ${String(getReqs[0]!.range)}`
+        );
+        assert(
+          assetRequests.length === 2,
+          `CLEAN whole-file: expected exactly 2 asset requests, got ${assetRequests.length}; ${JSON.stringify(assetRequests)}`
+        );
+        const getLogs = requestLogs
+          .slice(logStart)
+          .filter(
+            (e) => e.url.includes("/api/doc-asset") && e.method === "GET"
+          );
+        assert(
+          getLogs.length === 1,
+          `CLEAN whole-file: expected one GET in requestLogs, got ${getLogs.length}`
+        );
+        const getStatus = getLogs[0]!.status;
+        const getContentLength =
+          getLogs[0]!.headers?.["content-length"] ?? null;
+        assert(
+          getStatus === 200,
+          `CLEAN whole-file: GET status ${String(getStatus)}`
+        );
+        const parsedLen = Number(getContentLength);
+        assert(
+          Number.isFinite(parsedLen) && parsedLen < RANGED_TIER_MIN_BYTES,
+          `CLEAN whole-file: content-length ${String(getContentLength)} must be below ${RANGED_TIER_MIN_BYTES}`
+        );
+        clean.wholeFileTier = {
+          fixture: "sample.pdf",
+          requests: assetRequests,
+          getStatus,
+          getContentLength,
+          wholeFileMaxBytes: RANGED_TIER_MIN_BYTES,
+        };
+
         // P-1 large (same content-load → first-canvas boundary)
         log("CLEAN: P-1 large first paint");
         const p1LargeResult = await measureP1FirstPaint(
@@ -2516,8 +2616,8 @@ async function main(): Promise<void> {
         // ── Progressive held-Range ─────────────────────────────────────
         log("INTERCEPTION: progressive held-Range");
         assert(
-          largeBytes.byteLength > MIN_RANGE_ELIGIBLE_BYTES,
-          `progressive: fixture must exceed 2×rangeChunkSize (${MIN_RANGE_ELIGIBLE_BYTES}), got ${largeBytes.byteLength}`
+          largeBytes.byteLength >= RANGED_TIER_MIN_BYTES,
+          `progressive: fixture must reach the ranged tier (${RANGED_TIER_MIN_BYTES}), got ${largeBytes.byteLength}`
         );
         const rangeCtl = createRangeController(largeBytes);
         try {
@@ -2582,6 +2682,32 @@ async function main(): Promise<void> {
           assert(
             firstPass.truncated === false && firstPass.headerRewrite === false,
             "progressive: first pass-through must not truncate or rewrite headers"
+          );
+          const headPassages = rangeCtl.log.filter(
+            (e) => e.action === "head-probe-passthrough"
+          );
+          assert(
+            headPassages.length === 1,
+            `progressive: expected exactly one head-probe-passthrough, got ${headPassages.length}; log=${JSON.stringify(rangeCtl.log.slice(0, 10))}`
+          );
+          const headPass = headPassages[0]!;
+          assert(
+            headPass.status === 200,
+            `progressive: head-probe-passthrough status=${String(headPass.status)}`
+          );
+          assert(
+            headPass.contentLength === String(largeBytes.byteLength),
+            `progressive: head-probe-passthrough Content-Length=${String(headPass.contentLength)} expected ${largeBytes.byteLength}`
+          );
+          const headIdx = rangeCtl.log.findIndex(
+            (e) => e.action === "head-probe-passthrough"
+          );
+          const firstIdx = rangeCtl.log.findIndex(
+            (e) => e.action === "first-no-range-passthrough"
+          );
+          assert(
+            headIdx >= 0 && headIdx < firstIdx,
+            `progressive: head-probe-passthrough must precede first-no-range-passthrough (head=${headIdx} first=${firstIdx})`
           );
 
           // Release ONE range at a time until first data-rendered="true".
@@ -2790,6 +2916,8 @@ async function main(): Promise<void> {
             mediaBoxOracle: [0, 0, LETTER_W, LETTER_H],
             largeBytes: largeBytes.byteLength,
             minRangeEligibleBytes: MIN_RANGE_ELIGIBLE_BYTES,
+            rangeChunkBytes: RANGE_CHUNK_SIZE,
+            wholeFileMaxBytes: RANGED_TIER_MIN_BYTES,
             pageCount: 200,
           };
           await Bun.write(
@@ -2806,6 +2934,8 @@ async function main(): Promise<void> {
                 snap,
                 fixtureBytes: largeBytes.byteLength,
                 minRangeEligibleBytes: MIN_RANGE_ELIGIBLE_BYTES,
+                rangeChunkBytes: RANGE_CHUNK_SIZE,
+                wholeFileMaxBytes: RANGED_TIER_MIN_BYTES,
               },
               null,
               2
