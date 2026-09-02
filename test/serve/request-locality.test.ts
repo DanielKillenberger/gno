@@ -79,6 +79,12 @@ describe("isLocalClientRequest", () => {
       expected: false,
     },
     {
+      name: "loopback peer + Via (Squid / Apache-style proxy)",
+      peer: "127.0.0.1",
+      headers: { host: "localhost:3000", via: "1.1 proxy.example" },
+      expected: false,
+    },
+    {
       name: "non-loopback peer (kernel redirect)",
       peer: "192.0.2.10",
       headers: { host: "localhost:3000" },

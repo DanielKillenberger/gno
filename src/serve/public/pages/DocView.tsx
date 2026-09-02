@@ -365,8 +365,11 @@ function getParentPath(relPath: string): string {
 
 export default function DocView({ navigate }: PageProps) {
   const [doc, setDoc] = useState<DocData | null>(null);
-  const [serverCapabilities, setServerCapabilities] =
-    useState<ServerCapabilities | null>(null);
+  // undefined = not answered yet (offer neither locality-dependent action),
+  // null = fetch failed (fail closed: treat the client as remote).
+  const [serverCapabilities, setServerCapabilities] = useState<
+    ServerCapabilities | null | undefined
+  >(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -563,6 +566,9 @@ export default function DocView({ navigate }: PageProps) {
   const isPdf = Boolean(doc && isPdfDocument(doc.source));
 
   const localClient = serverCapabilities?.localClient ?? false;
+  // Until /api/capabilities answers, a same-host user would otherwise see the
+  // remote "Open original" flash in and then swap to Reveal.
+  const localityKnown = serverCapabilities !== undefined;
 
   // Spec predicate — evaluated per render, never from mime/ext.
   const extractedTextAvailable = Boolean(doc && isExtractedTextAvailable(doc));
@@ -1882,7 +1888,7 @@ export default function DocView({ navigate }: PageProps) {
                         </Button>
                       </>
                     )}
-                    {!localClient && sourceAssetUrl && (
+                    {localityKnown && !localClient && sourceAssetUrl && (
                       <Button asChild size="sm" variant="outline">
                         <a
                           data-testid="doc-open-original"

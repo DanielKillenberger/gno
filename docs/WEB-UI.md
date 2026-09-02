@@ -966,11 +966,15 @@ The Web UI is designed for local use only:
 | **Locality gate**         | Reveal and `file://` Open original are offered only to a local client; the reveal endpoint refuses non-local clients (403)                                                                  |
 
 The server judges a request local only when the socket peer is loopback, the
-`Host` header names a loopback host, and no `Forwarded` / `X-Forwarded-*`
-header is present; forwarding headers only ever make a client remote. A
-reverse proxy, a plain port forwarder, or a kernel-level redirect on the host
-all report remote. An SSH tunnel to `localhost` is indistinguishable from a
-local client and is an accepted limit: host-local actions still show there.
+`Host` header names a loopback host, and no `Forwarded` / `Via` /
+`X-Forwarded-*` header is present; forwarding headers only ever make a client
+remote. A reverse proxy that adds forwarding headers (Caddy, Apache, Tailscale
+`serve`), a plain port forwarder, or a kernel-level redirect on the host all
+report remote. Two setups are indistinguishable from a local client and are an
+accepted limit (host-local actions still show there): an SSH tunnel to
+`localhost`, and a reverse proxy that rewrites `Host` to loopback without
+adding forwarding headers, which is what nginx's default `proxy_pass` does;
+add `proxy_set_header X-Forwarded-For $remote_addr;` to make it read remote.
 
 The Content-Security-Policy is `'self'`-only for every fetch directive:
 

@@ -13,6 +13,7 @@ export type RequestPeerServer = Pick<HttpMcpPeerServer, "requestIP">;
 
 const FORWARDING_HEADERS = [
   "forwarded",
+  "via",
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-proto",

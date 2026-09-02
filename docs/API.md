@@ -692,13 +692,18 @@ a same-host client.
 `localClient` is `true` only when all three hold: the socket peer address is
 loopback (`127.0.0.0/8`, `::1`, or an IPv4-mapped form of either), the `Host`
 header names a loopback host (`localhost`, `127.x.x.x`, or `[::1]`, with or
-without a port), and the request carries no `Forwarded`, `X-Forwarded-For`,
-`X-Forwarded-Host`, or `X-Forwarded-Proto` header. Any other combination
-yields `false`. Forwarding headers only ever make a client remote, never
-local. A reverse proxy on the host (forwarding headers), a plain port
-forwarder (non-loopback `Host`), and a kernel-level redirect (non-loopback
-peer) all report `false`. An SSH tunnel to `localhost` is indistinguishable
-from a local client and reports `true`; that is an accepted limit.
+without a port), and the request carries no `Forwarded`, `Via`,
+`X-Forwarded-For`, `X-Forwarded-Host`, or `X-Forwarded-Proto` header. Any
+other combination yields `false`. Forwarding headers only ever make a client
+remote, never local. A reverse proxy that adds forwarding headers (Caddy,
+Apache `mod_proxy`, Tailscale `serve`), a plain port forwarder (non-loopback
+`Host`), and a kernel-level redirect (non-loopback peer) all report `false`.
+Two same-host setups are indistinguishable from a local client and report
+`true`: an SSH tunnel to `localhost`, and a reverse proxy configured to
+rewrite `Host` to loopback without adding forwarding headers (nginx's default
+`proxy_pass` does exactly this; add `proxy_set_header X-Forwarded-For
+$remote_addr;` or `proxy_set_header Host $host;` to make it read remote).
+That is an accepted limit.
 
 The web UI uses this field to decide whether host-local actions (Reveal,
 `file://` Open original) are offered. The
