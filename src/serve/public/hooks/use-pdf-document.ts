@@ -4,9 +4,11 @@ import {
   classifyPdfError as defaultClassifyPdfError,
   getDocument as defaultGetDocument,
   getPdfMetrics as defaultGetPdfMetrics,
+  transportHintForContentLength,
   type GnoDocumentLoadingTask,
   type PdfFallbackReason,
   type PDFDocumentProxy,
+  type PdfTransportHint,
 } from "../lib/pdf";
 
 export type PdfDocumentStatus = "loading" | "ready" | "error";
@@ -30,12 +32,18 @@ export type UsePdfDocumentDeps = {
   getDocument?: typeof defaultGetDocument;
   classifyPdfError?: typeof defaultClassifyPdfError;
   getPdfMetrics?: typeof defaultGetPdfMetrics;
+  /** HEAD-probe transport; the JSON API helper cannot carry a HEAD. */
+  fetch?: FetchLike;
 };
 
+/** Minimal fetch shape the HEAD probe needs (same-origin string URL only). */
+export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
 type LoadOwnership = {
-  /** Minted opaque id for this load attempt. */
-  docId: string;
-  task: GnoDocumentLoadingTask;
+  /** Minted opaque id for this load attempt; null until the probe settles. */
+  docId: string | null;
+  /** Null while the HEAD probe is in flight; never created once torn down. */
+  task: GnoDocumentLoadingTask | null;
   /** Set only after promise resolves into viewer ownership. */
   viewerDoc: PDFDocumentProxy | null;
   /** True once teardown for this load has run (idempotent). */
@@ -43,6 +51,33 @@ type LoadOwnership = {
   /** True once documentDestroy was emitted (success path only). */
   destroyMetricEmitted: boolean;
 };
+
+/** Module-level so the effect dependency stays referentially stable. */
+const defaultFetch: FetchLike = (url, init) => fetch(url, init);
+
+/**
+ * Probe the asset size with one same-origin HEAD (fn-136 R1). Network failure,
+ * a non-2xx status, or a missing/invalid Content-Length all fall back to the
+ * ranged tier; the probe never rejects and never fails the document.
+ */
+async function probeTransportHint(
+  url: string,
+  fetchImpl: FetchLike
+): Promise<PdfTransportHint> {
+  try {
+    const response = await fetchImpl(url, { method: "HEAD" });
+    if (!response.ok) {
+      return "ranged";
+    }
+    const header = response.headers.get("content-length");
+    if (header === null || !/^\d+$/u.test(header.trim())) {
+      return "ranged";
+    }
+    return transportHintForContentLength(Number(header));
+  } catch {
+    return "ranged";
+  }
+}
 
 /**
  * Load a PDF document from a same-origin asset URL.
@@ -59,6 +94,7 @@ export function usePdfDocument(
   const getDocument = deps.getDocument ?? defaultGetDocument;
   const classifyPdfError = deps.classifyPdfError ?? defaultClassifyPdfError;
   const getPdfMetrics = deps.getPdfMetrics ?? defaultGetPdfMetrics;
+  const fetchImpl = deps.fetch ?? defaultFetch;
 
   const [status, setStatus] = useState<PdfDocumentStatus>("loading");
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
@@ -99,13 +135,11 @@ export function usePdfDocument(
     setError(null);
     setErrorMessage(null);
 
-    const loadingTask = getDocument({ url });
-    const instanceDocId = loadingTask.gnoDocId;
-    setDocId(instanceDocId);
+    setDocId(null);
 
     const ownership: LoadOwnership = {
-      docId: instanceDocId,
-      task: loadingTask,
+      docId: null,
+      task: null,
       viewerDoc: null,
       tornDown: false,
       destroyMetricEmitted: false,
@@ -119,12 +153,15 @@ export function usePdfDocument(
       if (ownership.tornDown) {
         return true;
       }
-      return Boolean((loadingTask as { destroyed?: boolean }).destroyed);
+      return Boolean(
+        (ownership.task as { destroyed?: boolean } | null)?.destroyed
+      );
     };
 
     /**
      * Idempotent teardown for this load.
-     * - Always destroy the loading task exactly once.
+     * - Destroy the loading task exactly once when one exists; a load torn
+     *   down during the HEAD probe never creates a task.
      * - Emit documentDestroy only for a viewer-owned success.
      * - A stale late resolution needs no separate proxy cleanup: the loading
      *   task already owns and destroys its transport.
@@ -138,45 +175,60 @@ export function usePdfDocument(
       const viewerDoc = ownership.viewerDoc;
       ownership.viewerDoc = null;
 
-      if (viewerDoc) {
+      if (viewerDoc && ownership.docId !== null) {
         if (!ownership.destroyMetricEmitted) {
           ownership.destroyMetricEmitted = true;
           metrics.recordDocumentDestroy({ docId: ownership.docId });
         }
       }
 
-      try {
-        void ownership.task.destroy().catch(() => undefined);
-      } catch {
-        // ignore
+      const task = ownership.task;
+      if (task) {
+        try {
+          void task.destroy().catch(() => undefined);
+        } catch {
+          // ignore
+        }
       }
     };
 
-    loadingTask.promise
-      .then(async (pdf) => {
-        if (isStale()) {
+    // One HEAD per document load picks the transport tier; the load itself
+    // starts only if this generation is still live once the probe settles.
+    void probeTransportHint(url, fetchImpl).then((transport) => {
+      if (isStale()) {
+        return;
+      }
+      const loadingTask = getDocument({ url, transport });
+      ownership.task = loadingTask;
+      ownership.docId = loadingTask.gnoDocId;
+      setDocId(loadingTask.gnoDocId);
+
+      loadingTask.promise
+        .then(async (pdf) => {
+          if (isStale()) {
+            teardown();
+            return;
+          }
+          ownership.viewerDoc = pdf;
+          setDoc(pdf);
+          setNumPages(pdf.numPages);
+          setStatus("ready");
+          setFirstPageReady(pdf.numPages > 0);
+        })
+        .catch((err: unknown) => {
+          if (isStale()) {
+            return;
+          }
+          const reason = classifyPdfError(err);
+          setStatus("error");
+          setError(reason);
+          setErrorMessage(err instanceof Error ? err.message : String(err));
+          setDoc(null);
+          setNumPages(0);
+          setFirstPageReady(false);
           teardown();
-          return;
-        }
-        ownership.viewerDoc = pdf;
-        setDoc(pdf);
-        setNumPages(pdf.numPages);
-        setStatus("ready");
-        setFirstPageReady(pdf.numPages > 0);
-      })
-      .catch((err: unknown) => {
-        if (isStale()) {
-          return;
-        }
-        const reason = classifyPdfError(err);
-        setStatus("error");
-        setError(reason);
-        setErrorMessage(err instanceof Error ? err.message : String(err));
-        setDoc(null);
-        setNumPages(0);
-        setFirstPageReady(false);
-        teardown();
-      });
+        });
+    });
 
     return () => {
       if (ownershipRef.current === ownership) {
@@ -184,7 +236,14 @@ export function usePdfDocument(
       }
       teardown();
     };
-  }, [url, retryToken, getDocument, classifyPdfError, getPdfMetrics]);
+  }, [
+    url,
+    retryToken,
+    getDocument,
+    classifyPdfError,
+    getPdfMetrics,
+    fetchImpl,
+  ]);
 
   return {
     status,

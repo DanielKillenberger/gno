@@ -124,11 +124,75 @@ export type PdfAnnotation = {
 
 // ── Document load wrapper ───────────────────────────────────────────────────
 
+/**
+ * Transport tier for one document load (fn-136 R1).
+ * - `whole-file`: one GET, ranges disabled, body streamed as it arrives.
+ * - `ranged`: Range requests of PDF_RANGE_CHUNK_BYTES with background fetch.
+ */
+export type PdfTransportHint = "whole-file" | "ranged";
+
 export type GnoGetDocumentParams = {
   url: string;
+  /** Omitted → `ranged`, the bounded-memory ceiling. */
+  transport?: PdfTransportHint;
   // Intentionally NO caller-controlled document id — every load mints a fresh
   // opaque instance id internally (I2-6 / Sol rereview).
 };
+
+/** pdf.js DocumentInitParameters subset that the transport tier controls. */
+export type PdfTransportOptions = {
+  disableRange?: boolean;
+  rangeChunkSize?: number;
+  disableStream: boolean;
+  disableAutoFetch: boolean;
+};
+
+/**
+ * Map a transport hint to pdf.js transport options.
+ *
+ * whole-file: with `disableStream: true` pdf.js cancels the full-body reader
+ * as soon as the server advertises byte ranges, so the single-request tier
+ * must disable ranges explicitly or its first GET is thrown away.
+ *
+ * ranged: `disableStream: true` keeps the full-body GET from competing with
+ * Range requests; `disableAutoFetch: false` lets pdf.js pull the remaining
+ * chunks in the background instead of one round trip per parser miss. Range
+ * eligibility still needs Content-Length > 2×rangeChunkSize plus
+ * Accept-Ranges: bytes (emitted by GET /api/doc-asset).
+ */
+export function transportOptionsFor(
+  hint: PdfTransportHint
+): PdfTransportOptions {
+  if (hint === "whole-file") {
+    return {
+      disableRange: true,
+      disableStream: false,
+      disableAutoFetch: false,
+    };
+  }
+  return {
+    rangeChunkSize: PDF_RANGE_CHUNK_BYTES,
+    disableStream: true,
+    disableAutoFetch: false,
+  };
+}
+
+/**
+ * Pick the transport tier from a HEAD-probed Content-Length.
+ * Unknown (null / non-finite / negative) sizes fall back to `ranged`.
+ */
+export function transportHintForContentLength(
+  contentLength: number | null
+): PdfTransportHint {
+  if (
+    contentLength === null ||
+    !Number.isFinite(contentLength) ||
+    contentLength < 0
+  ) {
+    return "ranged";
+  }
+  return contentLength < PDF_WHOLE_FILE_MAX_BYTES ? "whole-file" : "ranged";
+}
 
 /**
  * Loading task augmented with the opaque per-load document instance id.
@@ -180,16 +244,8 @@ export function getDocument(
     // hits standardFontDataUrl, breaking the offline standard-font contract.
     // Force pdfjs-dist standard_fonts/* over same-origin routes instead.
     useSystemFonts: false,
-    // Range-mode loading (product policy, not a test accommodation).
-    // With disableStream, pdfjs-dist cancels the full-body reader as soon as
-    // response headers arrive when ranges are supported, so every subsequent
-    // byte is fetched as a discrete Range request (pdf.mjs PDFFetchStreamReader).
-    // disableAutoFetch keeps pdf.js from eagerly pulling the remaining chunks —
-    // correct for a windowed/virtualized viewer that only paints a bounded page
-    // window. Range eligibility still requires Content-Length > 2×rangeChunkSize
-    // plus Accept-Ranges: bytes (already emitted by GET /api/doc-asset).
-    disableStream: true,
-    disableAutoFetch: true,
+    // Transport tier by file size (fn-136 R1); see transportOptionsFor.
+    ...transportOptionsFor(params.transport ?? "ranged"),
     // Never enable embedded PDF scripting.
     // enableScripting is intentionally omitted (defaults false).
     // pdfjs v5 removed the former eval-support flag; CSP enforces no unsafe-eval.
@@ -334,6 +390,13 @@ export function isRenderingCancelled(err: unknown): boolean {
   const msg = errorMessage(err).toLowerCase();
   return msg.includes("rendering cancelled") || msg.includes("cancelled");
 }
+
+// ── Transport tier constants (fn-136 R1) ────────────────────────────────────
+
+/** Files whose HEAD Content-Length is under this load in one GET. */
+export const PDF_WHOLE_FILE_MAX_BYTES = 8 * 1024 * 1024;
+/** Range chunk size for files at or above the whole-file bound. */
+export const PDF_RANGE_CHUNK_BYTES = 1024 * 1024;
 
 // ── Zoom / fit / canvas cap math ────────────────────────────────────────────
 
