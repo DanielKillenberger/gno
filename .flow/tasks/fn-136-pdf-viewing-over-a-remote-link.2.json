@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-09-02T13:45:23.976466Z",
+  "depends_on": [
+    "fn-136-pdf-viewing-over-a-remote-link.1"
+  ],
+  "id": "fn-136-pdf-viewing-over-a-remote-link.2",
+  "priority": null,
+  "spec": "fn-136-pdf-viewing-over-a-remote-link",
+  "spec_path": ".flow/tasks/fn-136-pdf-viewing-over-a-remote-link.2.md",
+  "status": "todo",
+  "title": "localClient capability and locality-aware document actions",
+  "updated_at": "2026-09-02T13:58:50.844395Z"
+}

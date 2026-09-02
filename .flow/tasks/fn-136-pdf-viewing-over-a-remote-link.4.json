@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-09-02T13:45:23.976556Z",
+  "depends_on": [
+    "fn-136-pdf-viewing-over-a-remote-link.3"
+  ],
+  "id": "fn-136-pdf-viewing-over-a-remote-link.4",
+  "priority": null,
+  "spec": "fn-136-pdf-viewing-over-a-remote-link",
+  "spec_path": ".flow/tasks/fn-136-pdf-viewing-over-a-remote-link.4.md",
+  "status": "todo",
+  "title": "First paint from page 1 geometry",
+  "updated_at": "2026-09-02T13:58:52.664925Z"
+}
