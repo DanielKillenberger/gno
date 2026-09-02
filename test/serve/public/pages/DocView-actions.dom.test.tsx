@@ -93,6 +93,17 @@ const editableMarkdown: DocFixture = {
   editable: true,
 };
 
+const readOnlyImage: DocFixture = {
+  uri: "gno://notes/diagram.png",
+  relPath: "diagram.png",
+  source: {
+    absPath: "/srv/notes/diagram.png",
+    mime: "image/png",
+    ext: ".png",
+  },
+  editable: false,
+};
+
 function mockApi(doc: DocFixture, capabilities: CapabilitiesMode) {
   apiFetch.mockImplementation(async (...args: unknown[]) => {
     const endpoint = typeof args[0] === "string" ? args[0] : "";
@@ -198,6 +209,22 @@ describe("DocView locality-aware actions", () => {
       link?.getAttribute("href") ?? ""
     );
     expect(download.hasAttribute("download")).toBe(true);
+  });
+
+  test("remote client: non-PDF read-only source keeps an inline Open original", async () => {
+    await renderDoc(readOnlyImage, "remote");
+
+    const link = openOriginal();
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toMatch(/^\/api\/doc-asset\?/);
+    expect(link?.getAttribute("href")).toContain(
+      encodeURIComponent("gno://notes/diagram.png")
+    );
+    expect(link?.getAttribute("target")).toBe("_blank");
+    expect(link?.getAttribute("rel")).toBe("noopener");
+    expect(screen.queryByTestId("doc-reveal")).toBeNull();
+    // Download original stays a PDF-only affordance.
+    expect(screen.queryByTestId("pdf-header-download")).toBeNull();
   });
 
   test("remote client: editable document shows no Reveal", async () => {

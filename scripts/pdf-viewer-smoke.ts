@@ -5338,10 +5338,15 @@ async function main(): Promise<void> {
         // artifact dir may not exist yet in early failures
       }
     }
-    process.env.GNO_CONFIG_DIR = originalEnv.GNO_CONFIG_DIR;
-    process.env.GNO_DATA_DIR = originalEnv.GNO_DATA_DIR;
-    process.env.GNO_CACHE_DIR = originalEnv.GNO_CACHE_DIR;
-    process.env.GNO_OFFLINE = originalEnv.GNO_OFFLINE;
+    // Assigning `undefined` to process.env stores the string "undefined", which
+    // later resolves to a literal `undefined/` config directory; delete instead.
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
     try {
       await rm(tempRoot, { recursive: true, force: true });
     } catch {

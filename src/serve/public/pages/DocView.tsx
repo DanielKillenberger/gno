@@ -574,6 +574,16 @@ export default function DocView({ navigate }: PageProps) {
     return buildDocAssetUrl(doc.uri, doc.relPath);
   }, [doc, isPdf]);
 
+  // Remote "Open original" target for any document that has a source file:
+  // /api/doc-asset serves any collection file inline, so this keeps the
+  // previous file:// scope (every read-only source) for remote clients.
+  const sourceAssetUrl = useMemo(() => {
+    if (!doc?.source.absPath) {
+      return null;
+    }
+    return buildDocAssetUrl(doc.uri, doc.relPath);
+  }, [doc]);
+
   // Parse frontmatter for markdown files
   const parsedContent = useMemo(() => {
     if (!doc?.content || !isMarkdown) {
@@ -1866,11 +1876,11 @@ export default function DocView({ navigate }: PageProps) {
                         </Button>
                       </>
                     )}
-                    {!localClient && pdfAssetUrl && (
+                    {!localClient && sourceAssetUrl && (
                       <Button asChild size="sm" variant="outline">
                         <a
                           data-testid="doc-open-original"
-                          href={pdfAssetUrl}
+                          href={sourceAssetUrl}
                           rel="noopener"
                           target="_blank"
                         >

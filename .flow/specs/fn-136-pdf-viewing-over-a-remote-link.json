@@ -1,7 +1,7 @@
 {
   "branch_name": "fn-136-pdf-viewing-over-a-remote-link",
-  "completion_review_status": "unknown",
-  "completion_reviewed_at": null,
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-09-02T18:08:43.339787Z",
   "created_at": "2026-09-02T13:31:07.630539Z",
   "default_impl": null,
   "default_review": null,
@@ -441,6 +441,32 @@
       "task": "fn-136-pdf-viewing-over-a-remote-link.5",
       "timestamp": "2026-09-02T18:00:41.392110Z",
       "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "629e7ba348813dee899675c71f16bd064eefabe796b83b2d5e1ff492048074ac",
+      "backend": "host",
+      "counter_kind": "plan",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "complete"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "e676a996934c4f421f83880290f540de35d09feb",
+      "head_sha_observed": false,
+      "kind": "completion",
+      "outcome": "verdict",
+      "output_bytes": 2398,
+      "output_sha256": "68c4712272005a261ff90ae0d982b90a9d3e4ce72058bb4a8c2d064a2ab66434",
+      "reservation_id": "654cbb4da3704473b430378327516332",
+      "round_consumed": true,
+      "scope": "completion",
+      "superseded_by": null,
+      "task": null,
+      "timestamp": "2026-09-02T18:08:42.786215Z",
+      "verdict": "SHIP"
     }
   ],
   "review_hash_epoch": {
@@ -450,11 +476,12 @@
     "impl:fn-136-pdf-viewing-over-a-remote-link.4": 1,
     "impl:fn-136-pdf-viewing-over-a-remote-link.5": 1,
     "plan": 1,
-    "plan#completion": 0
+    "plan#completion": 1
   },
   "review_pending_rounds": {},
   "review_reservations": {},
   "review_transport_failures": {
+    "completion": 0,
     "impl:fn-136-pdf-viewing-over-a-remote-link.1": 0,
     "impl:fn-136-pdf-viewing-over-a-remote-link.2": 0,
     "impl:fn-136-pdf-viewing-over-a-remote-link.3": 0,
@@ -476,5 +503,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-02T18:00:41.868186Z"
+  "updated_at": "2026-09-02T18:08:43.340528Z"
 }

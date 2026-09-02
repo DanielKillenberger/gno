@@ -5,11 +5,11 @@ import type { HttpMcpPeerServer } from "../../src/mcp/http-security";
 import {
   ClipperRequestGate,
   ClipperSecurityBoundary,
-  isClipperLoopbackAddress,
   parseClipperExtensionOrigin,
   readClipperBoundedJson,
   withClipperCors,
 } from "../../src/serve/clipper-security";
+import { isLoopbackAddress } from "../../src/serve/request-locality";
 
 const EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop";
 const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
@@ -81,7 +81,7 @@ describe("clipper loopback boundary", () => {
       "::1",
       "::ffff:127.0.0.1",
     ]) {
-      expect(isClipperLoopbackAddress(address)).toBe(true);
+      expect(isLoopbackAddress(address)).toBe(true);
     }
     for (const address of [
       "126.255.255.255",
@@ -89,7 +89,7 @@ describe("clipper loopback boundary", () => {
       "192.0.2.1",
       "::2",
     ]) {
-      expect(isClipperLoopbackAddress(address)).toBe(false);
+      expect(isLoopbackAddress(address)).toBe(false);
     }
 
     const security = boundary();

@@ -10,7 +10,6 @@ import { ReaderGate } from "./resident-admission";
 export { readClipperBoundedJson } from "./clipper-body";
 export { ReaderGate as ClipperRequestGate } from "./resident-admission";
 export { clipperSecurityErrorResponse } from "./clipper-security-errors";
-export { isLoopbackAddress as isClipperLoopbackAddress } from "./request-locality";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_REQUESTS_PER_MINUTE = 60;

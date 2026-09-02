@@ -371,7 +371,7 @@ From document view, the file lifecycle actions now depend on the document type:
 **Reveal** and the `file://` form of **Open original** act on the server's
 host, so they render only when the server reports the browser as a local
 client (see [Security](#security)). Over a proxy or tunnel, **Open original**
-for a PDF instead opens the file inline in a new tab through the asset
+for any document with a source file instead opens it inline in a new tab through the asset
 endpoint, and **Download original** keeps working. If the capabilities call
 fails, the view treats the client as remote and hides the host-local actions.
 
