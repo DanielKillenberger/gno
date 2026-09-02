@@ -7,7 +7,7 @@ import Ajv from "ajv";
 // oxlint-disable-next-line import/no-namespace -- ajv-formats requires namespace for .default
 import * as addFormatsModule from "ajv-formats";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -65,8 +65,9 @@ function restoreOutput() {
 const TEST_ROOT = join(tmpdir(), "gno-search-smoke");
 let testCounter = 0;
 
-function getTestDir(): string {
-  const dir = join(TEST_ROOT, `test-${Date.now()}-${testCounter}`);
+async function getTestDir(): Promise<string> {
+  await mkdir(TEST_ROOT, { recursive: true });
+  const dir = await mkdtemp(join(TEST_ROOT, `test-${testCounter}-`));
   testCounter += 1;
   return dir;
 }
@@ -98,7 +99,7 @@ async function cli(
 }
 
 async function setupTestWithContent(): Promise<string> {
-  const testDir = getTestDir();
+  const testDir = await getTestDir();
   await setupTestEnv(testDir);
 
   const docsDir = join(testDir, "docs");
@@ -142,6 +143,103 @@ describe("gno search smoke tests", () => {
     expect(code).toBe(0);
     expect(stdout).toContain("test.md");
     expect(stdout).toContain("result(s)");
+  });
+
+  test("search --query-file reads the query from a file", async () => {
+    const queryPath = join(testDir, "query.txt");
+    await writeFile(queryPath, "markdown\n", { flag: "wx", mode: 0o600 });
+    const { code, stdout } = await cli(
+      "search",
+      "--query-file",
+      queryPath,
+      "--json"
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(
+      parsed.results[0]?.uri || parsed.results[0]?.source?.relPath
+    ).toBeDefined();
+  });
+
+  test("search rejects a positional query together with --query-file", async () => {
+    const queryPath = join(testDir, "query.txt");
+    await writeFile(queryPath, "markdown\n", { flag: "wx", mode: 0o600 });
+    const { code, stderr } = await cli(
+      "search",
+      "markdown",
+      "--query-file",
+      queryPath
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain("Pass a query or --query-file, not both");
+  });
+
+  test("search --query-file missing file exits 1", async () => {
+    const { code, stderr } = await cli(
+      "search",
+      "--query-file",
+      join(testDir, "missing-query.txt")
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain("Failed to read --query-file");
+  });
+
+  test("search --query-file empty file exits 1", async () => {
+    const queryPath = join(testDir, "empty-query.txt");
+    await writeFile(queryPath, "", { flag: "wx", mode: 0o600 });
+    const { code, stderr } = await cli("search", "--query-file", queryPath);
+    expect(code).toBe(1);
+    expect(stderr).toContain("Query cannot be empty");
+  });
+
+  test("query diagnose rejects --query-file", async () => {
+    const queryPath = join(testDir, "diag-query.txt");
+    await writeFile(queryPath, "markdown\n", { flag: "wx", mode: 0o600 });
+    const { code, stderr } = await cli(
+      "query",
+      "diagnose",
+      "--target",
+      "gno://docs/test.md",
+      "--query-file",
+      queryPath
+    );
+    expect(code).toBe(1);
+    expect(stderr).toContain("query diagnose does not accept --query-file");
+  });
+
+  test("search --query-file - reads stdin", async () => {
+    const repoRoot = join(import.meta.dir, "../..");
+    const proc = Bun.spawn(
+      [
+        "bun",
+        join(repoRoot, "src/index.ts"),
+        "search",
+        "--query-file",
+        "-",
+        "--json",
+      ],
+      {
+        cwd: repoRoot,
+        stdin: new Blob(["markdown\n"]),
+        env: {
+          ...process.env,
+          GNO_CONFIG_DIR: process.env.GNO_CONFIG_DIR,
+          GNO_DATA_DIR: process.env.GNO_DATA_DIR,
+          GNO_CACHE_DIR: process.env.GNO_CACHE_DIR,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("");
+    const parsed = JSON.parse(stdout);
+    expect(parsed.results?.length).toBeGreaterThan(0);
   });
 
   test("search --json validates against schema", async () => {
@@ -307,7 +405,7 @@ describe("search on empty index", () => {
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = getTestDir();
+    testDir = await getTestDir();
     await setupTestEnv(testDir);
     // Create empty docs dir and init with it
     const docsDir = join(testDir, "docs");
