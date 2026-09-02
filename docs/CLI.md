@@ -58,6 +58,7 @@ never raw roots.
 | `gno mcp`        | Start MCP server for AI clients      |
 | `gno models`     | Manage models (list, pull, use)      |
 | `gno skill`      | Install GNO skill for AI agents      |
+| `gno agents`     | Manage GNO block in harness files    |
 | `gno tags`       | Manage document tags                 |
 | `gno completion` | Shell tab completion                 |
 | `gno vec`        | Vector index maintenance             |
@@ -1356,6 +1357,69 @@ gno skill paths --json
 ```
 
 See [Using GNO with AI Agents](USE-CASES.md#ai-agent-integration) for setup guide.
+
+## Agents Commands
+
+Install a compact, versioned GNO protocol block into the **global (user-scope)
+instruction files** of every AI harness detected on the machine, so agents
+discover and use GNO without hand-pasted blocks that rot. The block is bounded
+by stable markers; only the owned block is ever touched — your content outside
+the markers stays byte-identical. See
+[AGENT-INSTRUCTIONS.md](AGENT-INSTRUCTIONS.md) for the full harness matrix and
+operator practices.
+
+### gno agents install
+
+```bash
+gno agents install                       # every detected harness
+gno agents install --target claude
+gno agents install --dry-run             # unified diff, writes nothing
+gno agents install --extra-dir ~/.claude-instances/work-cli
+gno agents install --json
+```
+
+- Detects harnesses by their standard config dirs; undetected harnesses are
+  skipped (never fabricated).
+- Backup-first (`<file>.gno-agents.bak.<timestamp>`), atomic write, idempotent
+  (second run is a no-op), symlink-aware (writes through links; shared files
+  written once).
+- Grok Build imports the Claude global file, so it is reported
+  `covered via claude` — no double block. `--target grok` resolves the
+  covering claude target too, but only when Grok itself is detected.
+- `--extra-dir` (repeatable) serves nonstandard/multi-instance layouts
+  explicitly; discovery never guesses.
+- If a file cannot be updated (malformed markers, not UTF-8, unwritable), the
+  command reports the failure and prints the complete block so you can paste
+  it yourself; other targets still proceed.
+
+### gno agents update
+
+Refresh an installed block in place after a GNO upgrade (block version bump):
+
+```bash
+gno agents update
+```
+
+### gno agents verify
+
+Deterministic per-target checks: exactly one marker block, version + hash match
+the installed release. Targets sharing one real file (symlink schemes) are
+verified once via the same ownership order as install; the rest report
+`covered`.
+
+```bash
+gno agents verify
+gno agents verify --json    # exit 1 when any target is outdated/missing/malformed; exit 2 when a file could not be read (status "error")
+```
+
+### gno agents uninstall
+
+Remove the block and markers cleanly:
+
+```bash
+gno agents uninstall
+gno agents uninstall --dry-run
+```
 
 ## Tag Commands
 
