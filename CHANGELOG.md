@@ -38,6 +38,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Doc View header actions wrap at narrow viewports instead of expanding the
   page past the window and clipping Reveal / Open original / Download.
 
+## [1.39.1] - 2026-09-02
+
+### Fixed
+
+- `gno skill install --json`, `gno skill uninstall --json`, and
+  `gno skill paths --json` printed human-readable text when the global
+  `--json` flag was consumed by the root program; the subcommands now fall
+  back to the global flag like every other command.
+
+## [1.39.0] - 2026-09-02
+
+### Added
+
+- `gno agents install|update|verify|uninstall` — marker-managed installer for a
+  compact, versioned GNO protocol block in the global (user-scope) instruction
+  files of every detected harness (Claude Code, Codex, Cursor Agent, OpenCode,
+  Hermes, OpenClaw; Grok Build is covered via its Claude-global import chain).
+  Backup-first with atomic writes, idempotent, symlink-aware, fail-closed on
+  malformed markers (printing the block for manual application when a file
+  cannot be updated), with `--dry-run` diffs, repeatable `--extra-dir` for
+  nonstandard layouts, and `--json` everywhere. See
+  `docs/AGENT-INSTRUCTIONS.md`.
+
 ## [1.38.0] - 2026-08-31
 
 ### Added
@@ -2324,7 +2347,9 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.38.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.39.1...HEAD
+[1.39.1]: https://github.com/gmickel/gno/compare/v1.39.0...v1.39.1
+[1.39.0]: https://github.com/gmickel/gno/compare/v1.38.0...v1.39.0
 [1.38.0]: https://github.com/gmickel/gno/compare/v1.37.1...v1.38.0
 [1.37.1]: https://github.com/gmickel/gno/compare/v1.37.0...v1.37.1
 [1.37.0]: https://github.com/gmickel/gno/compare/v1.36.1...v1.37.0

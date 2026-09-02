@@ -10,12 +10,13 @@
   "id": "fn-129-gno-agents-install-global-instruction",
   "impl_review_rounds": {},
   "next_task": 1,
+  "no_plan": true,
   "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "ready": true,
   "spec_path": ".flow/specs/fn-129-gno-agents-install-global-instruction.md",
-  "status": "open",
+  "status": "done",
   "title": "gno agents install \u2014 global instruction-block installer for harness files",
   "tracker": {
     "baseHashFlow": null,
@@ -28,5 +29,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T14:55:29.395851Z"
+  "updated_at": "2026-09-02T20:46:10.874665Z"
 }

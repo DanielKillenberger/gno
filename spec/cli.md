@@ -113,6 +113,10 @@ equivalent files fail closed as ambiguous.
 | skill uninstall    | yes    | no      | no    | no   | no    | terminal |
 | skill show         | no     | no      | no    | no   | no    | terminal |
 | skill paths        | yes    | no      | no    | no   | no    | terminal |
+| agents install     | yes    | no      | no    | no   | no    | terminal |
+| agents update      | yes    | no      | no    | no   | no    | terminal |
+| agents verify      | yes    | no      | no    | no   | no    | terminal |
+| agents uninstall   | yes    | no      | no    | no   | no    | terminal |
 | tags list          | yes    | no      | no    | yes  | no    | terminal |
 | tags add           | yes    | no      | no    | no   | no    | terminal |
 | tags rm            | yes    | no      | no    | no   | no    | terminal |
@@ -2625,7 +2629,7 @@ Remove GNO agent skill.
 gno skill uninstall [--scope <project|user>] [--target <claude|codex|opencode|openclaw|hermes|all>] [--json]
 ```
 
-**Options:** Same as `skill install` (except `--force`)
+**Options:** Same as `skill install` (except `--force`).
 
 **Safety Checks:**
 
@@ -2727,6 +2731,195 @@ gno skill paths [--scope <project|user>] [--target <claude|codex|opencode|opencl
 **Exit Codes:**
 
 - 0: Success
+
+---
+
+### gno agents install
+
+Install the compact, versioned GNO protocol block into the global (user-scope)
+instruction files of every detected harness. The block is bounded by stable
+markers (`<!-- gno:agents:begin -->` / `<!-- gno:agents:end -->`); install and
+update touch ONLY the owned block — content outside the markers stays
+byte-identical. The block content is static (identical on every machine), so
+a block is current exactly when its stamp version and hash match the installed
+release.
+
+**Synopsis:**
+
+```bash
+gno agents install [--target <claude|codex|cursor|opencode|grok|hermes|openclaw|all>] [--extra-dir <path>]... [--dry-run] [--json]
+```
+
+**Options:**
+
+| Option        | Type    | Default | Description                                                                                     |
+| ------------- | ------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `--target`    | string  | all     | Harness to install for; `all` = every harness detected on this machine                          |
+| `--extra-dir` | string  | —       | Additional instruction dir (repeatable, for nonstandard/multi-instance layouts). Never guessed. |
+| `--dry-run`   | boolean | false   | Print per-target unified diffs; write nothing                                                   |
+
+**Harness matrix (standard documented locations):**
+
+| Target     | Instruction file                                        | Detection root          | Notes                                                                               |
+| ---------- | ------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| `claude`   | `$CLAUDE_CONFIG_DIR/CLAUDE.md` or `~/.claude/CLAUDE.md` | `~/.claude`             | Honors `CLAUDE_CONFIG_DIR`                                                          |
+| `codex`    | `$CODEX_HOME/AGENTS.md` or `~/.codex/AGENTS.md`         | `~/.codex`              | Honors `CODEX_HOME`                                                                 |
+| `cursor`   | `~/AGENTS.md`                                           | `~/.cursor`             | Cursor Agent walks cwd → home for AGENTS.md                                         |
+| `opencode` | `~/.config/opencode/AGENTS.md`                          | `~/.config/opencode`    |                                                                                     |
+| `grok`     | — (import chain)                                        | `~/.grok`               | Reads the Claude global file; reported `covered via claude`, never double-installed |
+| `hermes`   | `~/.hermes/SOUL.md`                                     | `~/.hermes`             |                                                                                     |
+| `openclaw` | `~/.openclaw/workspace/AGENTS.md`                       | `~/.openclaw/workspace` |                                                                                     |
+
+**Behavior:**
+
+1. Detects harnesses (config dir exists); undetected targets are reported
+   `not-detected` and skipped — the installer never fabricates harness dirs
+   (creating the instruction FILE inside a detected dir is fine). An explicit
+   detected covered target (e.g. `--target grok`) also resolves its covering
+   target so the file it actually reads converges; when the explicit target is
+   absent, the covering chain never activates.
+2. Backup-first, atomic: an existing file is copied to
+   `<file>.gno-agents.bak.<timestamp>` (same permission mode as the source),
+   then the new content is written to a sibling temp file and renamed over the
+   destination, so a failed write leaves the live file unchanged. A fresh
+   install appends the block after one blank line (a file without a final
+   newline gets that newline first).
+3. Idempotent: a current block is a `current` no-op (no write, no backup).
+4. Fail-closed: malformed or duplicate markers, a file that is not valid
+   UTF-8, or any read/write failure produce a per-target `error` row, nothing
+   is written to that file, and — for install/update — the command prints the
+   complete block (`manualBlock` in JSON) so the operator can apply it by
+   hand. Other targets in the same run still proceed. A leading UTF-8 BOM is
+   preserved across every operation.
+5. Symlink-aware: writes go through the resolved real file (an operator's
+   canonical-file-linked-everywhere scheme survives); targets resolving to the
+   same real file are written once (`covered via <target> (same file)`).
+6. `GNO_AGENTS_HOME_OVERRIDE` overrides the home directory (testing/sandboxed
+   verification); any home override suppresses harness config-dir env vars.
+
+**Output (JSON):**
+
+```json
+{
+  "command": "install",
+  "blockVersion": 2,
+  "dryRun": false,
+  "results": [
+    {
+      "target": "claude",
+      "label": "Claude Code",
+      "path": "/home/user/.claude/CLAUDE.md",
+      "action": "install",
+      "detected": true,
+      "backup": null
+    },
+    {
+      "target": "grok",
+      "label": "Grok Build",
+      "path": "/home/user/.claude/CLAUDE.md",
+      "action": "covered",
+      "detected": true,
+      "via": "claude",
+      "detail": "covered via claude"
+    }
+  ]
+}
+```
+
+`action` is one of `install`, `update`, `current`, `covered`, `not-detected`,
+`error` (and `remove`, `absent` for uninstall). A covered row's `path` is the
+file the harness actually reads (its covering target's file). With
+`--dry-run`, a `diffs` array of unified diffs is included. When
+any target failed on install/update, `manualBlock` carries the complete block
+text to paste. Schema: `spec/output-schemas/agents-mutation.schema.json`
+(shared by install, update, and uninstall).
+
+**Exit Codes:**
+
+- 0: Success (including no-op)
+- 1: Validation failure (unknown target, missing `--extra-dir`, malformed
+  markers, non-UTF-8 file)
+- 2: Runtime failure — every failing target hit an I/O error (unreadable file,
+  backup or write failed); the receipt still lists every target's outcome
+
+---
+
+### gno agents update
+
+Refresh an installed block in place (block-version migration). Same options,
+output, and exit codes as `agents install`; both verbs converge the block to
+the current release — `update` exists for operator intent clarity.
+
+```bash
+gno agents update [--target <...>] [--extra-dir <path>]... [--dry-run] [--json]
+```
+
+---
+
+### gno agents verify
+
+Deterministic per-target verification of installed blocks. Fresh-session
+behavioral canaries are an operator practice, not automated here.
+
+**Synopsis:**
+
+```bash
+gno agents verify [--target <...>] [--extra-dir <path>]... [--json]
+```
+
+**Checks per target:**
+
+- Exactly one marker block (`malformed` otherwise)
+- Block stamp hash matches the block body (tamper detection)
+- Block version and content match the installed release (`outdated` otherwise)
+- The block carries no filesystem references by construction, so the spec's
+  link-resolution check is vacuously satisfied
+- Targets resolving to the same real file are verified once, using install's
+  ownership order; the rest report `covered via <target> (same file)`
+
+**Output (JSON):**
+
+```json
+{
+  "command": "verify",
+  "blockVersion": 2,
+  "ok": true,
+  "results": [
+    {
+      "target": "claude",
+      "label": "Claude Code",
+      "path": "/home/user/.claude/CLAUDE.md",
+      "status": "ok",
+      "detected": true,
+      "blockVersion": 2,
+      "hashOk": true
+    }
+  ]
+}
+```
+
+`status` is one of `ok`, `outdated`, `missing`, `malformed`, `error`,
+`covered`, `not-detected`. `error` means the file exists but could not be read
+— a "could not check", never a content verdict. Schema:
+`spec/output-schemas/agents-verify.schema.json`.
+
+**Exit Codes:**
+
+- 0: All verified targets ok (covered / not-detected do not fail)
+- 1: One or more targets `outdated`, `missing`, or `malformed`
+- 2: Every failing target is an `error` (I/O) row
+
+---
+
+### gno agents uninstall
+
+Remove the block, its markers, and the blank line install added above it;
+everything else stays byte-identical. Same options, output shape
+(`action: remove|absent|...`), and exit codes as `agents install`.
+
+```bash
+gno agents uninstall [--target <...>] [--extra-dir <path>]... [--dry-run] [--json]
+```
 
 ---
 
@@ -3645,16 +3838,18 @@ Write-lease contention on `index` / `update` / `embed` does not use the generic 
 
 ## Environment Variables
 
-| Variable                   | Description                                                           |
-| -------------------------- | --------------------------------------------------------------------- |
-| `GNO_CONFIG_DIR`           | Override config directory                                             |
-| `GNO_DATA_DIR`             | Override data directory (DB location)                                 |
-| `GNO_CACHE_DIR`            | Override cache directory (models)                                     |
-| `NO_COLOR`                 | Disable colored output (standard)                                     |
-| `PAGER`                    | Pager for long output (default: less -R on Unix, built-in on Windows) |
-| `GNO_SKILLS_HOME_OVERRIDE` | Override home dir for skill user scope (testing)                      |
-| `CLAUDE_SKILLS_DIR`        | Override Claude skills directory                                      |
-| `CODEX_SKILLS_DIR`         | Override Codex skills directory                                       |
+| Variable                   | Description                                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GNO_CONFIG_DIR`           | Override config directory                                                                                                  |
+| `GNO_DATA_DIR`             | Override data directory (DB location)                                                                                      |
+| `GNO_CACHE_DIR`            | Override cache directory (models)                                                                                          |
+| `NO_COLOR`                 | Disable colored output (standard)                                                                                          |
+| `PAGER`                    | Pager for long output (default: less -R on Unix, built-in on Windows)                                                      |
+| `GNO_SKILLS_HOME_OVERRIDE` | Override home dir for skill user scope (testing)                                                                           |
+| `CLAUDE_SKILLS_DIR`        | Override Claude skills directory                                                                                           |
+| `CODEX_SKILLS_DIR`         | Override Codex skills directory                                                                                            |
+| `CLAUDE_CONFIG_DIR`        | Claude Code config dir; `gno agents` resolves Claude's instruction file under it (suppressed by an explicit home override) |
+| `CODEX_HOME`               | Codex config dir; same rule as `CLAUDE_CONFIG_DIR`                                                                         |
 
 ---
 
