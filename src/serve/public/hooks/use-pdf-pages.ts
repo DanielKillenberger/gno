@@ -89,8 +89,9 @@ export type UsePdfPagesResult = {
   slots: PageSlotState[];
   /**
    * Fatal failure classified for the viewer state model: page 1 geometry (the
-   * document behind it) or a render-path page acquisition failure. A later
-   * page's geometry failure is not fatal — it rides on `PageSlotState.error`.
+   * document behind it) or a page-1 render-path page acquisition failure. A later
+   * page's geometry or render-path acquisition failure is not fatal — it rides
+   * on `PageSlotState.error`.
    */
   error: PdfFallbackReason | null;
   liveCanvasCount: number;
@@ -216,6 +217,54 @@ function anchorPage(visible: ReadonlySet<number>): number | null {
   for (const pageNumber of visible) {
     if (anchor === null || pageNumber < anchor) {
       anchor = pageNumber;
+    }
+  }
+  return anchor;
+}
+
+/**
+ * Page whose top edge straddles the viewport top, derived from laid-out boxes
+ * rather than the IntersectionObserver visible set (that set uses a 200px
+ * rootMargin and can include a page entirely above the viewport).
+ *
+ * Measures the DOM — including `.gno-pdf-page` 1rem margin and the column's
+ * padding — instead of reconstructing offsets from slot heights plus CSS
+ * constants. Returns null when the measurement is unusable: fewer than two
+ * registered pages, or offsets that are not strictly increasing (happy-dom
+ * and a not-yet-laid-out DOM return zero rects).
+ */
+function anchorPageFromLayout(
+  container: HTMLElement,
+  elements: ReadonlyMap<number, HTMLElement>,
+  numPages: number
+): number | null {
+  const pages: number[] = [];
+  const offsets: number[] = [];
+  const containerTop = container.getBoundingClientRect().top;
+  for (let pageNumber = 1; pageNumber <= numPages; pageNumber += 1) {
+    const el = elements.get(pageNumber);
+    if (!el) {
+      continue;
+    }
+    pages.push(pageNumber);
+    offsets.push(
+      el.getBoundingClientRect().top - containerTop + container.scrollTop
+    );
+  }
+  if (pages.length < 2) {
+    return null;
+  }
+  for (let index = 1; index < offsets.length; index += 1) {
+    if (!(offsets[index]! > offsets[index - 1]!)) {
+      return null;
+    }
+  }
+  const edge = container.scrollTop + 0.5;
+  // No qualifying page means the reader is above page 1.
+  let anchor = 1;
+  for (let index = 0; index < pages.length; index += 1) {
+    if (offsets[index]! <= edge) {
+      anchor = pages[index]!;
     }
   }
   return anchor;
@@ -353,22 +402,26 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
     }
   }, []);
 
+  const openEpoch = (): void => {
+    epochSeqRef.current += 1;
+    epochBatchOpenRef.current = true;
+    epochAdmittedRef.current = 0;
+    pendingRef.current.clear();
+    reservationsRef.current.clear();
+    latestRequestRef.current.clear();
+    if (pendingTimerRef.current !== null) {
+      clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = null;
+    }
+  };
+
   // Synchronous epoch bump (same pattern as genIdRef above): a doc or gen change
   // must open its exempt batch before any render path observes the new state.
   {
     const epochKey = `${docId ?? ""}:${genId}`;
     if (epochKeyRef.current !== epochKey) {
       epochKeyRef.current = epochKey;
-      epochSeqRef.current += 1;
-      epochBatchOpenRef.current = true;
-      epochAdmittedRef.current = 0;
-      pendingRef.current.clear();
-      reservationsRef.current.clear();
-      latestRequestRef.current.clear();
-      if (pendingTimerRef.current !== null) {
-        clearTimeout(pendingTimerRef.current);
-        pendingTimerRef.current = null;
-      }
+      openEpoch();
     }
   }
   const scaleRef = useRef(scale);
@@ -425,8 +478,9 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
     const commit = (
       results: PageGeometryResult[],
       placeholder: BasePageGeometry,
-      correction: boolean
-    ): void => {
+      correction: boolean,
+      placeholderScale?: number
+    ): number => {
       const sizes = results.map((entry) => entry.geometry ?? placeholder);
       const maxWidth = Math.max(...sizes.map((entry) => entry.width));
       const maxHeight = Math.max(...sizes.map((entry) => entry.height));
@@ -460,11 +514,19 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       );
 
       if (correction) {
-        // Keep the top edge of the page in view where it is: shift the scroll
-        // position by the height delta of the pages above it, applied by the
-        // layout effect below once the new heights are in the DOM.
+        // Keep the top edge of the page straddling the viewport top where it
+        // is: shift scrollTop by the height delta of pages strictly above that
+        // page, applied once the new heights are in the DOM. The anchor is
+        // read from laid-out boxes here only (DOM includes page margin and
+        // column padding); the observer set is the fallback when layout is
+        // unusable or the scroll container is missing.
         const shown = slotsRef.current;
-        const anchor = anchorPage(visible);
+        const container = scrollContainerRef?.current;
+        const layoutAnchor =
+          container == null
+            ? null
+            : anchorPageFromLayout(container, elementsRef.current, numPages);
+        const anchor = layoutAnchor ?? anchorPage(visible);
         if (anchor !== null && shown.length === next.length) {
           let delta = 0;
           for (let index = 0; index < anchor - 1; index += 1) {
@@ -474,15 +536,22 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         }
       }
 
+      // Same scale as the placeholder publish: a page already drawn stays
+      // drawn. Compare against the scale that commit actually returned, not
+      // scaleRef — that ref is stale if the full pass settles before React
+      // re-rendered after the placeholder.
+      const keepRendered = nextScale === (placeholderScale ?? nextScale);
+      if (correction && !keepRendered) {
+        // The correction is a scale commit like a zoom, so it opens a new
+        // admission epoch and the exempt batch admits every active page immediately.
+        openEpoch();
+      }
       setScale(nextScale);
       setPageError(null);
       if (!correction) {
         setSlots(next);
-        return;
+        return nextScale;
       }
-      // Same scale: a page already drawn against the placeholder publish stays
-      // drawn. A scale change re-renders it anyway (startScale mismatch).
-      const keepRendered = nextScale === scaleRef.current;
       setSlots((prev) =>
         next.map((slot, index) =>
           keepRendered && prev[index]?.pageNumber === slot.pageNumber
@@ -490,6 +559,7 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
             : slot
         )
       );
+      return nextScale;
     };
 
     void (async () => {
@@ -516,8 +586,9 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       }
 
       const publishedPlaceholder = pass.settled === null;
+      let placeholderScale = 1;
       if (publishedPlaceholder) {
-        commit(
+        placeholderScale = commit(
           Array.from(
             { length: numPages },
             (): PageGeometryResult => ({ geometry: null, error: null })
@@ -531,7 +602,7 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
       if (cancelled) {
         return;
       }
-      commit(results, firstPage, publishedPlaceholder);
+      commit(results, firstPage, publishedPlaceholder, placeholderScale);
     })();
 
     return () => {
@@ -985,6 +1056,16 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
           page = await doc.getPage(pageNumber);
         } catch (error) {
           releaseReservation();
+          if (pageNumber > 1) {
+            setSlots((prev) =>
+              prev.map((s) =>
+                s.pageNumber === pageNumber
+                  ? { ...s, error: classifyPdfError(error), rendered: false }
+                  : s
+              )
+            );
+            return;
+          }
           setPageError(classifyPdfError(error));
           return;
         }

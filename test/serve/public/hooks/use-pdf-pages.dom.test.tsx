@@ -1693,6 +1693,92 @@ describe("use-pdf-pages", () => {
     expect(renderCalls).toHaveLength(0);
   });
 
+  test("R2: a scale-changing geometry correction opens a new admission epoch", async () => {
+    const held = makeHeldDoc(2, [2], { mixedGeometry: true });
+    let page2AcquireStarted = 0;
+    const originalGetPage = held.getPage.bind(held);
+    held.getPage = async (pageNumber: number) => {
+      if (pageNumber === 2) {
+        page2AcquireStarted += 1;
+      }
+      return originalGetPage(pageNumber);
+    };
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: held as never,
+        docId: "epoch-correction",
+        numPages: 2,
+        zoom: 1,
+        fitMode: "width",
+        containerWidth: 200,
+        containerHeight: 140,
+        genId: 1,
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots.length).toBe(2));
+    expect(result.current.scale).toBe(2);
+
+    for (const pageNumber of [1, 2]) {
+      const el = document.createElement("div");
+      act(() => result.current.observePage(pageNumber, el));
+    }
+    await act(async () => {
+      emitIntersections({ 1: true, 2: true });
+    });
+    await waitFor(() => expect(result.current.slots[0]?.active).toBe(true));
+
+    const canvas1 = document.createElement("canvas");
+    const canvas2 = document.createElement("canvas");
+    document.body.appendChild(canvas1);
+    document.body.appendChild(canvas2);
+
+    const page1Done = result.current.ensureRendered(1, canvas1);
+    await waitFor(() => expect(held._pages.get(1)?.lastTask).toBeTruthy());
+    await act(async () => {
+      held._pages.get(1)!.lastTask!.settle();
+      await page1Done;
+    });
+    await waitFor(() => expect(result.current.slots[0]?.rendered).toBe(true));
+    expect(page2AcquireStarted).toBe(1);
+
+    // Close the exempt batch: a visible-set mutation after an admission.
+    await act(async () => {
+      emitIntersections({ 2: false });
+      emitIntersections({ 2: true });
+    });
+
+    await act(async () => {
+      void result.current.ensureRendered(2, canvas2);
+      await Promise.resolve();
+    });
+    // Deferred: the held page is not acquired until quiescence. Do not await
+    // SCROLL_QUIESCENCE_MS — a second getPage(2) here would mean the batch
+    // never closed.
+    expect(page2AcquireStarted).toBe(1);
+    expect(held._pages.get(2)?.lastTask).toBeUndefined();
+    expect(renderCalls.map((call) => call.pageNumber)).toEqual([1]);
+
+    held.releaseAll();
+    await waitFor(() => expect(result.current.scale).toBe(1));
+
+    const startsBeforeCorrection = renderCalls.length;
+    await act(async () => {
+      void result.current.ensureRendered(1, canvas1);
+      void result.current.ensureRendered(2, canvas2);
+      await Promise.resolve();
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+    // New epoch admits immediately: both active pages start without waiting
+    // out SCROLL_QUIESCENCE_MS.
+    expect(renderCalls.length).toBeGreaterThan(startsBeforeCorrection);
+    expect(
+      new Set(
+        renderCalls.slice(startsBeforeCorrection).map((c) => c.pageNumber)
+      )
+    ).toEqual(new Set([1, 2]));
+  });
+
   test("R2: the top edge of the page in view stays fixed when later heights land", async () => {
     const doc = makeHeldDoc(4, [2, 3, 4], { mixedGeometry: true });
     const container = document.createElement("div");
@@ -1740,6 +1826,80 @@ describe("use-pdf-pages", () => {
     expect(container.scrollTop).toBe(460);
   });
 
+  test("R2: the anchor is the page straddling the viewport top, not the first page inside the observer margin", async () => {
+    const doc = makeHeldDoc(4, [2, 3, 4], { mixedGeometry: true });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const { result } = renderHook(() =>
+      usePdfPages({
+        doc: doc as never,
+        docId: "layout-anchor",
+        numPages: 4,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        scrollContainerRef: { current: container },
+        ...baseDeps,
+      })
+    );
+    await waitFor(() => expect(result.current.slots.length).toBe(4));
+    expect(result.current.slots.map((slot) => slot.height)).toEqual([
+      140, 140, 140, 140,
+    ]);
+
+    const placeholderHeight = 140;
+    const pageGap = 16;
+    const pageTop = (pageNumber: number): number =>
+      (pageNumber - 1) * (placeholderHeight + pageGap);
+
+    const stubRect = (top: number, height: number): DOMRect =>
+      ({
+        top,
+        left: 0,
+        bottom: top + height,
+        right: 800,
+        width: 800,
+        height,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    container.getBoundingClientRect = () => stubRect(0, 600);
+    const elements: HTMLElement[] = [];
+    for (let pageNumber = 1; pageNumber <= 4; pageNumber += 1) {
+      const el = document.createElement("div");
+      container.appendChild(el);
+      el.getBoundingClientRect = () =>
+        stubRect(pageTop(pageNumber) - container.scrollTop, placeholderHeight);
+      act(() => result.current.observePage(pageNumber, el));
+      elements.push(el);
+    }
+    expect(elements).toHaveLength(4);
+
+    // Viewport top sits inside page 3 (offset 312); page 2 (offset 156) is
+    // still inside the 200px observer margin. The old visible-set min picks
+    // page 2 and applies a 0 delta; layout must pick page 3.
+    container.scrollTop = 320;
+    await act(async () => {
+      emitIntersections({ 2: true, 3: true });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.slots[1]?.visible).toBe(true));
+    await waitFor(() => expect(result.current.slots[2]?.visible).toBe(true));
+
+    doc.releaseAll();
+    await waitFor(() =>
+      expect(result.current.slots.map((slot) => slot.height)).toEqual([
+        140, 100, 140, 100,
+      ])
+    );
+    // Pages 1 and 2 sit above the layout anchor (page 3): 0 + (100 - 140) = -40.
+    expect(container.scrollTop).toBe(280);
+  });
+
   test("R2: a later page's geometry failure rides on its slot and is not fatal", async () => {
     const doc = makeHeldDoc(3, [2], { mixedGeometry: true });
     const { result } = renderHook(() =>
@@ -1779,6 +1939,72 @@ describe("use-pdf-pages", () => {
       [100, 140],
       [100, 140],
     ]);
+  });
+
+  test("R2: a render-path getPage failure on a later page is nonfatal and rides on its slot", async () => {
+    const doc = makeHeldDoc(3, [2], { mixedGeometry: true });
+    const errors: Array<string | null> = [];
+    const { result } = renderHook(() => {
+      const pages = usePdfPages({
+        doc: doc as never,
+        docId: "render-partial",
+        numPages: 3,
+        zoom: 1,
+        fitMode: "custom",
+        containerWidth: 800,
+        containerHeight: 600,
+        genId: 1,
+        ...baseDeps,
+      });
+      errors.push(pages.error);
+      return pages;
+    });
+    await waitFor(() => expect(result.current.slots.length).toBe(3));
+
+    for (const pageNumber of [1, 2, 3]) {
+      const el = document.createElement("div");
+      act(() => result.current.observePage(pageNumber, el));
+    }
+    await act(async () => {
+      emitIntersections({ 1: true, 2: true });
+    });
+
+    const canvas1 = document.createElement("canvas");
+    document.body.appendChild(canvas1);
+    const page1Done = result.current.ensureRendered(1, canvas1);
+    await waitFor(() => expect(doc._pages.get(1)?.lastTask).toBeTruthy());
+    await act(async () => {
+      doc._pages.get(1)!.lastTask!.settle();
+      await page1Done;
+    });
+    await waitFor(() => expect(result.current.slots[0]?.rendered).toBe(true));
+
+    const canvas2 = document.createElement("canvas");
+    document.body.appendChild(canvas2);
+    let page2Done!: Promise<void>;
+    await act(async () => {
+      page2Done = result.current.ensureRendered(2, canvas2);
+    });
+    doc.fail(
+      2,
+      Object.assign(new Error("corrupted xref"), {
+        name: "InvalidPDFException",
+      })
+    );
+    await act(async () => {
+      await page2Done;
+    });
+
+    await waitFor(() => {
+      expect(result.current.slots[1]?.error).toBe("corrupt");
+      expect(result.current.error).toBeNull();
+      expect(result.current.slots).toHaveLength(3);
+      expect(result.current.slots[0]?.rendered).toBe(true);
+    });
+    // The render path must never publish a fatal hook error: a transient
+    // `error === "corrupt"` fires the viewer's text fallback even if a later
+    // correction commit clears it.
+    expect(errors).not.toContain("corrupt");
   });
 
   test("page metadata acquisition failures surface a classified viewer error", async () => {

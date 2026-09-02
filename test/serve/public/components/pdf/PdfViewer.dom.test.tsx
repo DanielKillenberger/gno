@@ -685,7 +685,7 @@ describe("PdfViewer", () => {
     );
     // The failed slot shows the page error state in place, at its slot size.
     const failed = screen.getByTestId("pdf-page-2");
-    expect(failed.getAttribute("role")).toBe("alert");
+    expect(failed.getAttribute("role")).toBe("status");
     expect(failed.getAttribute("data-page-error")).toBe("corrupt");
     expect(failed.textContent).toContain("CANNOT RENDER");
     expect(failed.textContent).toContain("Page 2");

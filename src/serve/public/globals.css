@@ -460,6 +460,10 @@ mark {
 
 .gno-pdf-page-column {
   scrollbar-gutter: stable;
+  /* The page hook is the sole scroll compensator for geometry corrections
+     (use-pdf-pages.ts anchored correction); browser scroll anchoring on top
+     of it would move the page in view by the delta a second time. */
+  overflow-anchor: none;
 }
 
 .gno-pdf-page {

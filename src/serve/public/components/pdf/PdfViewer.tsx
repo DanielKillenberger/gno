@@ -149,7 +149,7 @@ function PdfPageErrorSlot({
       data-page-number={pageNumber}
       data-testid={`pdf-page-${pageNumber}`}
       ref={rootRef}
-      role="alert"
+      role="status"
       style={{ width: width || undefined, height: height || undefined }}
     >
       <p className="font-mono text-[10px] text-muted-foreground/60 uppercase tracking-[0.15em]">

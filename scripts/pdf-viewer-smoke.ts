@@ -2577,6 +2577,110 @@ async function main(): Promise<void> {
         await waitForProgressive(page);
         await waitForNonBlankCanvas(page, 20_000);
 
+        // pdf.js walks every page dictionary during document load
+        // (checkLastPage → getPage(numPages - 1)), so the geometry
+        // correction never waits on a held Range, and the generated
+        // large fixture is uniform Letter so the correction has zero
+        // delta. This oracle proves the CSS contract the hook relies
+        // on: overflow-anchor:none, so use-pdf-pages.ts is the sole
+        // scroll compensator for geometry corrections.
+        log("CLEAN: anchored-correction CSS contract");
+        const anchoredCorrection = await page.evaluate(() => {
+          const column = document.querySelector(
+            '[data-testid="pdf-page-column"]'
+          );
+          if (!(column instanceof HTMLElement)) {
+            throw new Error('missing [data-testid="pdf-page-column"]');
+          }
+          const overflowAnchor = getComputedStyle(column).overflowAnchor;
+
+          const runScratch = (
+            overflowAnchorOverride: string | null
+          ): {
+            before: number;
+            after: number;
+            moved: number;
+            scrollTop: number;
+          } => {
+            const scroller = document.createElement("div");
+            scroller.className = "gno-pdf-page-column";
+            scroller.style.cssText =
+              "overflow-y: auto; height: 300px; width: 200px; position: fixed; left: 0; top: 0; visibility: hidden;";
+            if (overflowAnchorOverride !== null) {
+              scroller.style.overflowAnchor = overflowAnchorOverride;
+            }
+            const children: HTMLElement[] = [];
+            for (const pageHeight of [200, 200, 200, 200, 200]) {
+              const child = document.createElement("div");
+              child.className = "gno-pdf-page";
+              child.style.height = `${pageHeight}px`;
+              scroller.appendChild(child);
+              children.push(child);
+            }
+            document.body.appendChild(scroller);
+            try {
+              scroller.scrollTop = 450;
+              const primed = scroller.scrollTop;
+              if (primed !== 450) {
+                throw new Error(
+                  `scratch scroller scrollTop ${primed} after setting 450`
+                );
+              }
+              const child1 = children[0];
+              const child3 = children[2];
+              if (!child1 || !child3) {
+                throw new Error("scratch scroller missing children");
+              }
+              const before = child3.getBoundingClientRect().top;
+              child1.style.height = "300px";
+              scroller.scrollTop += 100;
+              const after = child3.getBoundingClientRect().top;
+              return {
+                before,
+                after,
+                moved: Math.abs(after - before),
+                scrollTop: scroller.scrollTop,
+              };
+            } finally {
+              scroller.remove();
+            }
+          };
+
+          const none = runScratch(null);
+          const control = runScratch("auto");
+          return {
+            overflowAnchor,
+            before: none.before,
+            after: none.after,
+            moved: none.moved,
+            scrollTop: none.scrollTop,
+            movedControl: control.moved,
+            scrollTopControl: control.scrollTop,
+          };
+        });
+        clean.anchoredCorrection = anchoredCorrection;
+        assert(
+          anchoredCorrection.overflowAnchor === "none",
+          `CLEAN anchored-correction: expected overflow-anchor none on pdf-page-column, got ${anchoredCorrection.overflowAnchor}`
+        );
+        assert(
+          anchoredCorrection.moved <= 2,
+          `CLEAN anchored-correction: child 3 moved ${anchoredCorrection.moved}px (want <= 2); before=${anchoredCorrection.before} after=${anchoredCorrection.after} scrollTop=${anchoredCorrection.scrollTop}`
+        );
+        assert(
+          anchoredCorrection.scrollTop === 550,
+          `CLEAN anchored-correction: expected scrollTop 550 after hook-style +100, got ${anchoredCorrection.scrollTop}`
+        );
+        assert(
+          anchoredCorrection.movedControl >= 90,
+          `CLEAN anchored-correction: Chromium control with overflow-anchor:auto moved ${anchoredCorrection.movedControl}px (want >= 90); the oracle is vacuous if the browser does not anchor this structure. scrollTopControl=${anchoredCorrection.scrollTopControl}`
+        );
+        evidence.commands.push({
+          name: "CLEAN anchored-correction",
+          ok: true,
+          detail: JSON.stringify(anchoredCorrection),
+        });
+
         evidence.modes.CLEAN = clean;
         evidence.commands.push({ name: "CLEAN", ok: true });
         log(
