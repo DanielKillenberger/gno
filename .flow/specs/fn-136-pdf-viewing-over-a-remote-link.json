@@ -11,7 +11,8 @@
   "impl_review_rounds": {
     "fn-136-pdf-viewing-over-a-remote-link.1": 0,
     "fn-136-pdf-viewing-over-a-remote-link.2": 0,
-    "fn-136-pdf-viewing-over-a-remote-link.3": 0
+    "fn-136-pdf-viewing-over-a-remote-link.3": 0,
+    "fn-136-pdf-viewing-over-a-remote-link.4": 0
   },
   "next_task": 1,
   "plan_review_rounds": 0,
@@ -361,12 +362,65 @@
       "task": "fn-136-pdf-viewing-over-a-remote-link.3",
       "timestamp": "2026-09-02T15:22:04.202043Z",
       "verdict": "SHIP"
+    },
+    {
+      "artifact_sha256": "ecec270232dca82e25ef47821bf190d0a1b3a5332077c5999aa7a8fa688ba19f",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "5e69f66fb7f5d0ce087edbfade5c80f4145686a5",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 4626,
+      "output_sha256": "b0c52f039eb78c886f21441db3a0995024816b7172abba9f76c4b0605604b94a",
+      "reservation_id": "1e530ecf9dc046d2a7ae40536cd69bb6",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.4",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.4",
+      "timestamp": "2026-09-02T15:59:14.569482Z",
+      "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "5521cf978bc812f17af7eca9027304b6a2dcfbaa481a2d05c74304e6ab305e11",
+      "backend": "host",
+      "counter_kind": "impl",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "3eb34c891fcf7d3a6e2b66072127f438b29a87df",
+      "head_sha_observed": false,
+      "kind": "impl",
+      "outcome": "verdict",
+      "output_bytes": 2300,
+      "output_sha256": "50f7cc65e1a6947436c561392ad3aeb860bf53d45550be9cd21bd80045aeb937",
+      "reservation_id": "282e1c9171fd43a3a9bd791c0fdeb6db",
+      "round_consumed": true,
+      "scope": "impl:fn-136-pdf-viewing-over-a-remote-link.4",
+      "superseded_by": null,
+      "task": "fn-136-pdf-viewing-over-a-remote-link.4",
+      "timestamp": "2026-09-02T17:36:55.500137Z",
+      "verdict": "SHIP"
     }
   ],
   "review_hash_epoch": {
     "impl:fn-136-pdf-viewing-over-a-remote-link.1": 1,
     "impl:fn-136-pdf-viewing-over-a-remote-link.2": 1,
     "impl:fn-136-pdf-viewing-over-a-remote-link.3": 1,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.4": 1,
     "plan": 1,
     "plan#completion": 0
   },
@@ -376,6 +430,7 @@
     "impl:fn-136-pdf-viewing-over-a-remote-link.1": 0,
     "impl:fn-136-pdf-viewing-over-a-remote-link.2": 0,
     "impl:fn-136-pdf-viewing-over-a-remote-link.3": 0,
+    "impl:fn-136-pdf-viewing-over-a-remote-link.4": 0,
     "plan": 0
   },
   "spec_path": ".flow/specs/fn-136-pdf-viewing-over-a-remote-link.md",
@@ -392,5 +447,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-02T15:22:04.667056Z"
+  "updated_at": "2026-09-02T17:36:55.959068Z"
 }

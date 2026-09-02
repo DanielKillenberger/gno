@@ -547,8 +547,11 @@ export function usePdfPages(options: UsePdfPagesOptions): UsePdfPagesResult {
         openEpoch();
       }
       setScale(nextScale);
-      setPageError(null);
       if (!correction) {
+        // Geometry recovered: the placeholder commit clears any earlier
+        // geometry error. The correction never clears, so a fatal error raised
+        // by a page 1 render attempt during the placeholder window stays.
+        setPageError(null);
         setSlots(next);
         return nextScale;
       }
