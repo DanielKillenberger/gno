@@ -37,9 +37,16 @@ Implement R2. Publish page slots as soon as page 1 geometry resolves, use page 1
 - [ ] A later-page geometry failure keeps already-rendered pages mounted and shows the page error on the failed slot; a page 1 or document-level failure still takes the existing fallback path (PdfViewer tests for both)
 - [ ] The all-or-nothing geometry test is rewritten; existing use-pdf-pages and PdfViewer tests pass; `bun test` and `bun run lint:check` pass
 ## Done summary
-TBD
+Implemented R2. `usePdfPages` publishes every slot as soon as page 1's geometry resolves (page 1's size as the placeholder for unmeasured pages, fit scale from page 1) so the first page paints before the rest of the document is measured; when the 4-worker pass lands, per-page sizes and the fit-width and fit-page scale (against the widest measured page) are corrected in one commit, and the scroll container is shifted by the height delta of the pages above the page in view in a layout effect so the top edge holds. The hook's `error` is fatal-only (page 1 geometry, document-level failure); a later page's `getPage` failure, whether hit by the geometry pass or by the render path during the placeholder window, rides on `PageSlotState.error` and `PdfViewer` renders a per-page status slot in its place while every other page stays mounted. The geometry cache holds the full pass only.
 
+Review round 1 (Opus, host backend): NEEDS_WORK. P1: a render-path `getPage` failure for pages 2-3 in the placeholder window was still fatal; P2: native scroll anchoring double-compensated the hook's adjustment; P2: the anchor page came from the overscan-inflated visible set; P3: per-page error slot used role="alert"; FYI: the correction did not open an admission epoch. All addressed through the Grok bridge in the review-fix commit: nonfatal slot error for pages after page 1 with a hook test that observes page 2 before failing it; `.gno-pdf-page-column` sets `overflow-anchor: none` and the smoke asserts that CSS contract on the live page; the anchor is derived from slot element offsets against `scrollTop` with a fallback to the visible-set anchor; role="status"; the correction commit opens an admission epoch. Focused suites 135 pass, lint clean, `bun run test:e2e:pdf` PASSED on the fixed tree. Round 2: SHIP, with one P3 (the correction commit cleared the fatal viewer error unconditionally) closed after the verdict by a conductor commit that clears it only on the placeholder commit.
+
+Follow-up not built (out of R2's wording): a render-path `getPage` failure after a successful measurement remains fatal; near-unreachable since pdf.js caches page promises.
+
+stage: wave-join - ran (cherry-pick of the worker commit and the review-fix commit onto the target; SPA snapshot refreshed by the conductor)
+stage: impl-review - ran [round 1 NEEDS_WORK -> fixes -> round 2 SHIP] (model: claude-opus-5 via harness subagent, host backend; fixes: cursor-grok-4.6-high via cursor-agent bridge, verification and commit by the conductor after the bridge agent hit a session limit)
+stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 23ebb1f2, 5e69f66f, 3eb34c89, 40d2c96400f5e6846666e19dcfdfb6b7d5699547
+- Tests: bun test test/serve/public/hooks test/serve/public/lib test/serve/public/components/pdf -> 135 pass, 0 fail (integrated target), bun run lint:check -> clean, bun test test/serve/spa-snapshot-freshness.test.ts -> 2 pass, bun run test:e2e:pdf -> PASSED on the review-fix tree (incl. CLEAN: anchored-correction CSS contract), worker: bun test (full) -> 4486 pass, 1 fail (snapshot freshness, fixed by the conductor rebuild); e2e PASSED twice
 - PRs:
