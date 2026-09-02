@@ -152,8 +152,8 @@ Task fn-136-pdf-viewing-over-a-remote-link.3 validates the core approach (fewer,
 | R3  | ETag/304 on doc-asset, gzip + immutable SPA chunks; warm reload under 100 KB | fn-136-pdf-viewing-over-a-remote-link.1 (headers, tests), fn-136-pdf-viewing-over-a-remote-link.5 (warm-reload measurement) | — |
 | R4  | `localClient` capability, reveal 403, action gating | fn-136-pdf-viewing-over-a-remote-link.2 | — |
 | R5  | Remote "Open original" inline link | fn-136-pdf-viewing-over-a-remote-link.2 | — |
-| R6  | Measured first paint and request count over the relay | fn-136-pdf-viewing-over-a-remote-link.3 (proof measurement), fn-136-pdf-viewing-over-a-remote-link.5 (final measurement) | — |
-| R7  | Sharp render over the remote link, with capture | fn-136-pdf-viewing-over-a-remote-link.5 | Task .5 can complete with R7 unmet: it then files a follow-up task and the spec stays open until R7 is met |
+| R6  | Measured first paint and request count over the relay | fn-136-pdf-viewing-over-a-remote-link.3 (proof measurement), fn-136-pdf-viewing-over-a-remote-link.5 (final measurement) | BLOCKED: before-numbers captured (37.2 s first paint, 79 requests, 25 x 64 KB Range); after-measurement needs the remote install updated to this build, which this machine cannot do |
+| R7  | Sharp render over the remote link, with capture | fn-136-pdf-viewing-over-a-remote-link.5 | UNMET, capture BLOCKED: the remote screenshot needs the updated build on the remote host; a local DPR 2 check shows a crisp 2.0x canvas, ruling out the render math; the spec stays open until the remote capture lands |
 
 ## References
 
