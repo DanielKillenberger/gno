@@ -16,7 +16,13 @@ import {
   PDFJS_STANDARD_FONT_EXTENSIONS,
   resolvePdfjsPackageRoot,
 } from "../../src/serve/pdfjs-assets";
-import { handleDocAsset, isPathWithinRoot } from "../../src/serve/routes/api";
+import {
+  DOC_ASSET_CACHE_CONTROL,
+  docAssetEtag,
+  etagMatches,
+  handleDocAsset,
+  isPathWithinRoot,
+} from "../../src/serve/routes/api";
 import { safeRm } from "../helpers/cleanup";
 
 function createConfig(root: string): Config {
@@ -63,6 +69,9 @@ function createDoc(relPath: string): DocumentRow {
   };
 }
 
+/** Strong validator: quoted, never `W/`-prefixed. */
+const STRONG_ETAG_RE = /^"[^"]+"$/u;
+
 function assertDocAssetEnvelope(
   res: Response,
   opts: {
@@ -73,9 +82,10 @@ function assertDocAssetEnvelope(
 ): void {
   expect(res.status).toBe(opts.status);
   expect(res.headers.get("accept-ranges")).toBe("bytes");
-  expect(res.headers.get("cache-control")).toBe("no-store");
+  expect(res.headers.get("cache-control")).toBe(DOC_ASSET_CACHE_CONTROL);
   expect(res.headers.get("content-disposition")).toContain("inline;");
   expect(res.headers.get("content-type")).toBeTruthy();
+  expect(res.headers.get("etag")).toMatch(STRONG_ETAG_RE);
   if (opts.contentRange !== undefined) {
     expect(res.headers.get("content-range")).toBe(opts.contentRange);
   }
@@ -171,7 +181,7 @@ describe("doc asset API", () => {
     expect(res.headers.get("accept-ranges")).toBe("bytes");
     expect(res.headers.get("content-disposition")).toContain("inline;");
     expect(res.headers.get("content-disposition")).toContain("4-1.png");
-    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("cache-control")).toBe(DOC_ASSET_CACHE_CONTROL);
     expect(await res.text()).toBe("png-bytes");
   });
 
@@ -449,6 +459,7 @@ describe("doc asset API", () => {
         "content-type",
         "content-range",
         "content-length",
+        "etag",
       ]) {
         expect(headRes.headers.get(h)).toBe(getRes.headers.get(h));
       }
@@ -491,8 +502,132 @@ describe("doc asset API", () => {
     expect(res.headers.get("content-range")).toBe(
       `bytes 0-${body.length - 1}/${body.length}`
     );
-    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("cache-control")).toBe(DOC_ASSET_CACHE_CONTROL);
     expect(await res.text()).toBe(body);
+  });
+
+  test("ETag is strong and derived from size + mtime; If-None-Match comparison is weak-tolerant", async () => {
+    const { store, url, body } = await setupSimpleAsset(tmpDir);
+    const config = createConfig(tmpDir);
+    const res = await handleDocAsset(store as never, config, url);
+    const etag = res.headers.get("etag");
+    await res.arrayBuffer();
+    expect(etag).toMatch(STRONG_ETAG_RE);
+    expect(etag).toBe(
+      docAssetEtag(Bun.file(join(tmpDir, "notes", "asset.bin")))
+    );
+
+    // A content change that alters the size yields a different validator.
+    await writeFile(join(tmpDir, "notes", "asset.bin"), `${body}-grown`);
+    const grown = await handleDocAsset(store as never, config, url);
+    await grown.arrayBuffer();
+    expect(grown.headers.get("etag")).not.toBe(etag);
+
+    const current = grown.headers.get("etag") ?? "";
+    const cases: Array<{ header: string | null; matches: boolean }> = [
+      { header: null, matches: false },
+      { header: current, matches: true },
+      { header: `W/${current}`, matches: true },
+      { header: `"stale", ${current}`, matches: true },
+      { header: "*", matches: true },
+      { header: '"stale"', matches: false },
+      { header: etag, matches: false },
+    ];
+    for (const c of cases) {
+      expect(etagMatches(c.header, current)).toBe(c.matches);
+    }
+  });
+
+  test("conditional GET/HEAD matrix: matching If-None-Match → 304, mismatch → normal 200/206", async () => {
+    const { store, url, body } = await setupSimpleAsset(tmpDir);
+    const config = createConfig(tmpDir);
+    const probe = await handleDocAsset(store as never, config, url);
+    const etag = probe.headers.get("etag") ?? "";
+    await probe.arrayBuffer();
+    expect(etag).toMatch(STRONG_ETAG_RE);
+
+    const cases: Array<{
+      name: string;
+      method: "GET" | "HEAD";
+      ifNoneMatch: string;
+      range?: string;
+      status: number;
+      bodyText: string;
+      contentRange?: string;
+    }> = [
+      {
+        name: "GET full, match",
+        method: "GET",
+        ifNoneMatch: etag,
+        status: 304,
+        bodyText: "",
+      },
+      {
+        name: "HEAD full, match",
+        method: "HEAD",
+        ifNoneMatch: etag,
+        status: 304,
+        bodyText: "",
+      },
+      {
+        name: "GET range, match (conditional wins over Range)",
+        method: "GET",
+        ifNoneMatch: etag,
+        range: "bytes=0-4",
+        status: 304,
+        bodyText: "",
+      },
+      {
+        name: "GET full, mismatch",
+        method: "GET",
+        ifNoneMatch: '"stale"',
+        status: 200,
+        bodyText: body,
+      },
+      {
+        name: "GET range, mismatch → normal 206",
+        method: "GET",
+        ifNoneMatch: '"stale"',
+        range: "bytes=0-4",
+        status: 206,
+        bodyText: "01234",
+        contentRange: `bytes 0-4/${body.length}`,
+      },
+      {
+        name: "HEAD range, mismatch → normal 206",
+        method: "HEAD",
+        ifNoneMatch: '"stale"',
+        range: "bytes=0-4",
+        status: 206,
+        bodyText: "",
+        contentRange: `bytes 0-4/${body.length}`,
+      },
+    ];
+
+    for (const c of cases) {
+      const headers: Record<string, string> = {
+        "If-None-Match": c.ifNoneMatch,
+      };
+      if (c.range) {
+        headers.Range = c.range;
+      }
+      const req = new Request("http://localhost/api/doc-asset", {
+        method: c.method,
+        headers,
+      });
+      const res = await handleDocAsset(store as never, config, url, req);
+      expect(res.status).toBe(c.status);
+      expect(res.headers.get("etag")).toBe(etag);
+      expect(res.headers.get("cache-control")).toBe(DOC_ASSET_CACHE_CONTROL);
+      expect(res.headers.get("accept-ranges")).toBe("bytes");
+      expect(await res.text()).toBe(c.bodyText);
+      if (c.status === 304) {
+        expect(res.headers.get("content-length")).toBeNull();
+        expect(res.headers.get("content-range")).toBeNull();
+      } else {
+        expect(res.headers.get("content-range")).toBe(c.contentRange ?? null);
+      }
+    }
   });
 });
 

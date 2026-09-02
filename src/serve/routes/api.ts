@@ -2180,6 +2180,49 @@ function parseSingleByteRange(
 }
 
 /**
+ * Revalidate-on-every-open: the browser asks once per open and reuses the
+ * cached bytes on 304. Deliberately replaces fn-112's `no-store` (fn-136 R3).
+ */
+export const DOC_ASSET_CACHE_CONTROL = "private, max-age=0, must-revalidate";
+
+const WEAK_ETAG_PREFIX = "W/";
+
+/** Strong, quoted validator from file size and mtime (fn-136 R3). */
+export function docAssetEtag(file: {
+  size: number;
+  lastModified: number;
+}): string {
+  return `"${file.size.toString(16)}-${file.lastModified.toString(16)}"`;
+}
+
+/**
+ * RFC 9110 §13.1.2 If-None-Match: `*` or any listed validator matching under
+ * weak comparison (a `W/` prefix is ignored on the client's side).
+ */
+export function etagMatches(
+  ifNoneMatch: string | null | undefined,
+  etag: string
+): boolean {
+  if (!ifNoneMatch) {
+    return false;
+  }
+  const trimmed = ifNoneMatch.trim();
+  if (trimmed === "*") {
+    return true;
+  }
+  for (const candidate of trimmed.split(",")) {
+    const value = candidate.trim();
+    const strong = value.startsWith(WEAK_ETAG_PREFIX)
+      ? value.slice(WEAK_ETAG_PREFIX.length)
+      : value;
+    if (strong === etag) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * GET|HEAD /api/doc-asset
  * Query params:
  *   - path (required): relative to current doc, or absolute filesystem path
@@ -2187,6 +2230,8 @@ function parseSingleByteRange(
  *
  * Supports single-range Range requests (206/416). Multi-range → 416 (I1-03).
  * HEAD mirrors GET status/headers with empty body (I1-02).
+ * Strong ETag from size + mtime; a matching If-None-Match answers 304 before
+ * any Range handling, so full and ranged GETs revalidate alike (fn-136 R3).
  */
 export async function handleDocAsset(
   store: SqliteAdapter,
@@ -2269,12 +2314,25 @@ export async function handleDocAsset(
 
   const isHead = (request?.method ?? "GET").toUpperCase() === "HEAD";
   const filename = resolvedPath.split(/[\\/]/u).at(-1) ?? "document";
+  const etag = docAssetEtag(file);
   const headers = new Headers({
     "Accept-Ranges": "bytes",
-    "Cache-Control": "no-store",
+    "Cache-Control": DOC_ASSET_CACHE_CONTROL,
     "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
     "Content-Type": file.type || "application/octet-stream",
+    ETag: etag,
   });
+
+  if (etagMatches(request?.headers.get("If-None-Match"), etag)) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": DOC_ASSET_CACHE_CONTROL,
+        ETag: etag,
+      },
+    });
+  }
 
   const rangeHeader = request?.headers.get("Range");
   if (!rangeHeader) {

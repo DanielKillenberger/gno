@@ -1424,8 +1424,18 @@ absolute `path` must resolve inside one of the configured collection roots.
 | `Content-Length`      | Full size, or the slice length on a `206`                          |
 | `Accept-Ranges`       | `bytes`                                                            |
 | `Content-Disposition` | `inline; filename*=UTF-8''<encoded basename>`                      |
-| `Cache-Control`       | `no-store`                                                         |
+| `Cache-Control`       | `private, max-age=0, must-revalidate`                              |
+| `ETag`                | Strong validator derived from file size and modification time      |
 | `Content-Range`       | On `206`: `bytes <start>-<end>/<size>`; on `416`: `bytes */<size>` |
+
+The browser revalidates on every open and reuses its cached bytes when the
+file is unchanged: send `If-None-Match` with the stored `ETag` and a matching
+value answers `304 Not Modified` with an empty body (carrying `ETag`,
+`Cache-Control`, and `Accept-Ranges`). The conditional check runs before
+`Range` handling, so a ranged request with a matching validator also gets
+`304`; a mismatched validator serves the requested bytes normally (`200` or
+`206`). A file that changes within one second while keeping the same size is
+an accepted limit of an mtime-based validator.
 
 **Status Codes**:
 
@@ -1433,6 +1443,7 @@ absolute `path` must resolve inside one of the configured collection roots.
 | :----- | :--------------------------------------------------------------------------------------- |
 | `200`  | Full body (no `Range` header sent)                                                       |
 | `206`  | Single byte range satisfied                                                              |
+| `304`  | `If-None-Match` matched the current `ETag`; empty body                                   |
 | `400`  | `VALIDATION` — `path` missing, or `path` relative with no `uri`                          |
 | `403`  | `FORBIDDEN` — path escapes the collection root, or is outside all collections            |
 | `404`  | `NOT_FOUND` — document, resolved document path, or file on disk not found                |
@@ -1451,6 +1462,27 @@ curl -i -H "Range: bytes=0-1023" \
 
 # Size probe without a body
 curl -I "http://localhost:3000/api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf"
+
+# Revalidate a cached copy (304 when unchanged)
+curl -i -H 'If-None-Match: "1a2b-19c0ffee"' \
+  "http://localhost:3000/api/doc-asset?uri=gno://notes/papers/spec.pdf&path=spec.pdf"
+```
+
+---
+
+### Web UI Static Assets
+
+The production Web UI is served as an entry HTML page plus hashed chunks
+(`/chunk-<hash>.js`, `/chunk-<hash>.css`). Chunk names change whenever their
+content does, so they carry `Cache-Control: public, max-age=31536000,
+immutable` and are delivered gzip-encoded (`Content-Encoding: gzip`,
+`Vary: Accept-Encoding`, `Content-Length` of the encoded body) to any client
+whose `Accept-Encoding` lists gzip. A client without gzip acceptance receives
+the identity bytes with the same cache headers. The entry HTML keeps its
+existing headers (no long-lived cache), so a reload picks up a new snapshot.
+
+```bash
+curl -I -H "Accept-Encoding: gzip" http://localhost:3000/chunk-<hash>.js
 ```
 
 ---
