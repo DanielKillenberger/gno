@@ -161,7 +161,12 @@ test("hashed chunk path and Accept-Encoding predicates", () => {
     ["gzip;q=0", false],
     ["gzip;q=0.5, br", true],
     ["x-gzip", true],
-    ["*", false],
+    ["*", true],
+    ["*;q=0.1", true],
+    ["*;q=0", false],
+    ["*, gzip;q=0", false],
+    ["gzip;q=0, *", false],
+    ["identity", false],
   ];
   for (const [header, expected] of encodingCases) {
     expect(acceptsGzip(header)).toBe(expected);
@@ -254,6 +259,24 @@ test("public fallback serves hashed chunks gzip + immutable, identity on demand,
       expect(plain.headers.get("content-length")).toBe(
         String(new TextEncoder().encode(identityText).byteLength)
       );
+      // HEAD mirrors GET headers on the identity path too (fn-112 discipline):
+      // the proxied Content-Length is the real byte length, never 0.
+      const plainHead = await fetch(`${origin}${chunkPath}`, {
+        method: "HEAD",
+        decompress: false,
+        headers: acceptEncoding
+          ? { "Accept-Encoding": acceptEncoding }
+          : { "Accept-Encoding": "" },
+      });
+      expect(plainHead.status).toBe(200);
+      expect(plainHead.headers.get("content-encoding")).toBeNull();
+      expect(plainHead.headers.get("cache-control")).toBe(
+        SPA_CHUNK_CACHE_CONTROL
+      );
+      expect(plainHead.headers.get("content-length")).toBe(
+        String(new TextEncoder().encode(identityText).byteLength)
+      );
+      expect(await plainHead.text()).toBe("");
     }
     expect(gzipCalls).toBe(1);
 

@@ -1434,7 +1434,7 @@ value answers `304 Not Modified` with an empty body (carrying `ETag`,
 `Cache-Control`, and `Accept-Ranges`). The conditional check runs before
 `Range` handling, so a ranged request with a matching validator also gets
 `304`; a mismatched validator serves the requested bytes normally (`200` or
-`206`). A file that changes within one second while keeping the same size is
+`206`). A file that changes within the same millisecond while keeping the same size is
 an accepted limit of an mtime-based validator.
 
 **Status Codes**:

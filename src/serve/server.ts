@@ -215,7 +215,7 @@ export function withSecurityHeaders(
  * (`/chunk-<hash>.js|css`). The entry HTML never matches, so it keeps its
  * existing headers and ETag pass-through.
  */
-const SPA_HASHED_CHUNK_RE = /^\/chunk-[a-z0-9]+\.(?:js|css)$/u;
+const SPA_HASHED_CHUNK_RE = /^\/chunk-[A-Za-z0-9]+\.(?:js|css)$/u;
 
 /** One-year immutable policy shared with the version-pinned pdfjs assets. */
 export const SPA_CHUNK_CACHE_CONTROL = PDFJS_ASSET_CACHE_CONTROL;
@@ -225,25 +225,39 @@ export const isHashedSpaChunkPath = (pathname: string): boolean =>
 
 const GZIP_CODINGS = new Set(["gzip", "x-gzip"]);
 
-/** True when an Accept-Encoding value lists gzip with a non-zero q-value. */
+/**
+ * True when an Accept-Encoding value accepts gzip: gzip (or x-gzip) listed
+ * with a non-zero q-value, or a bare `*` with a non-zero q-value while gzip
+ * is not explicitly refused (RFC 9110 §12.5.3: `*` matches any coding not
+ * otherwise listed). Absent header → identity only.
+ */
 export function acceptsGzip(acceptEncoding: string | null): boolean {
   if (!acceptEncoding) {
     return false;
   }
+  let gzipQ: number | undefined;
+  let wildcardQ: number | undefined;
   for (const member of acceptEncoding.split(",")) {
     const [rawCoding, ...params] = member.trim().toLowerCase().split(";");
-    if (!rawCoding || !GZIP_CODINGS.has(rawCoding.trim())) {
+    const coding = rawCoding?.trim();
+    if (!coding) {
       continue;
     }
     const q = params
       .map((param) => param.trim())
       .find((param) => param.startsWith("q="))
       ?.slice(2);
-    if (q === undefined || Number.parseFloat(q) > 0) {
-      return true;
+    const weight = q === undefined ? 1 : Number.parseFloat(q);
+    if (GZIP_CODINGS.has(coding)) {
+      gzipQ = Math.max(gzipQ ?? 0, Number.isNaN(weight) ? 0 : weight);
+    } else if (coding === "*") {
+      wildcardQ = Math.max(wildcardQ ?? 0, Number.isNaN(weight) ? 0 : weight);
     }
   }
-  return false;
+  if (gzipQ !== undefined) {
+    return gzipQ > 0;
+  }
+  return (wildcardQ ?? 0) > 0;
 }
 
 export type PublicFetchFallbackOptions = {
@@ -298,14 +312,17 @@ export function createPublicFetchFallback(
     headers.set("Cache-Control", SPA_CHUNK_CACHE_CONTROL);
     headers.set("Vary", "Accept-Encoding");
     if (!acceptsGzip(req.headers.get("accept-encoding"))) {
+      if (req.method === "HEAD") {
+        // HEAD reaches the source as HEAD: its body is empty but its headers
+        // (Content-Length included) already describe the GET body. Keep them.
+        await asset.body?.cancel();
+        return new Response(null, { status: asset.status, headers });
+      }
       // Buffer the identity bytes: re-wrapping the proxied stream would drop
       // Content-Length and fall back to chunked transfer.
       const identity = await asset.arrayBuffer();
       headers.set("Content-Length", String(identity.byteLength));
-      return new Response(req.method === "HEAD" ? null : identity, {
-        status: asset.status,
-        headers,
-      });
+      return new Response(identity, { status: asset.status, headers });
     }
     const encoded = await gzipBodyFor(req, pathname, asset);
     headers.set("Content-Encoding", "gzip");

@@ -2198,6 +2198,10 @@ export function docAssetEtag(file: {
 /**
  * RFC 9110 §13.1.2 If-None-Match: `*` or any listed validator matching under
  * weak comparison (a `W/` prefix is ignored on the client's side).
+ *
+ * The list is split on a bare comma. Our validators (`"<size-hex>-<mtime-hex>"`)
+ * never contain one; a foreign tag that does would only produce a false
+ * negative (full body instead of 304), never a false match.
  */
 export function etagMatches(
   ifNoneMatch: string | null | undefined,
@@ -2324,14 +2328,12 @@ export async function handleDocAsset(
   });
 
   if (etagMatches(request?.headers.get("If-None-Match"), etag)) {
-    return new Response(null, {
-      status: 304,
-      headers: {
-        "Accept-Ranges": "bytes",
-        "Cache-Control": DOC_ASSET_CACHE_CONTROL,
-        ETag: etag,
-      },
-    });
+    // 304 carries the revalidation headers of the 200 set (RFC 9110 §15.4.5)
+    // and nothing that describes a body.
+    const notModified = new Headers(headers);
+    notModified.delete("Content-Disposition");
+    notModified.delete("Content-Type");
+    return new Response(null, { status: 304, headers: notModified });
   }
 
   const rangeHeader = request?.headers.get("Range");
