@@ -67,8 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`provenance.memory-record` rule); they stay searchable but are excluded from
   managed recall.
 
-### Changed
-
 ## [1.40.0] - 2026-09-03
 
 ### Added
