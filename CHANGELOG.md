@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.46.0] - 2026-09-03
+
+### Added
+
 - `gno mcp install --tool-profile <core|full>`: the generated stdio
   registration starts `gno mcp --tool-profile <profile>` (alongside
   `--enable-write` when requested) for every installer target, scope, and the
@@ -2594,7 +2602,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.45.1...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.46.0...HEAD
+[1.46.0]: https://github.com/gmickel/gno/compare/v1.45.1...v1.46.0
 [1.45.1]: https://github.com/gmickel/gno/compare/v1.45.0...v1.45.1
 [1.45.0]: https://github.com/gmickel/gno/compare/v1.44.0...v1.45.0
 [1.44.0]: https://github.com/gmickel/gno/compare/v1.43.0...v1.44.0
