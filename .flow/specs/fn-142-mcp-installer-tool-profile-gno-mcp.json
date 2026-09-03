@@ -15,7 +15,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-142-mcp-installer-tool-profile-gno-mcp.md",
-  "status": "open",
+  "status": "done",
   "title": "MCP installer tool profile: gno mcp install --tool-profile core|full",
   "tracker": {
     "baseHashFlow": null,
@@ -28,5 +28,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-03T21:44:51.757134Z"
+  "updated_at": "2026-09-03T22:25:58.603907Z"
 }
