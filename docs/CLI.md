@@ -582,6 +582,66 @@ capture inputs are unchanged. A browser clip using `open_existing` opens only a
 note with the same stored `clipIdentity`; missing or different provenance is an
 explicit conflict. `create_with_suffix` creates a distinct note.
 
+## Memory Commands
+
+`gno remember` and `gno recall` store and retrieve single facts in a
+memory-managed collection (a collection with `memoryManaged: true` in the
+config). Every call names explicit scopes; there is no implicit global scope.
+Both commands call the core memory service, which takes the shared write lease
+itself.
+
+### gno remember
+
+```bash
+gno remember "Prod deploys from main only" --scope project:gno            # candidates only, no write
+gno remember "Prod deploys from main only" --scope project:gno --add      # write a new fact
+gno remember "Prod deploys from release/*" --scope project:gno \
+  --supersede gno://memory/facts/... --predecessor-hash <hash> --json     # replace a fact
+gno remember "..." --scope family --scope shared --collection memory --add
+```
+
+- `--scope <scope>` is required and repeatable (up to 8). Missing scope exits 1
+  with a message naming the flag.
+- `--collection <name>` may be omitted when exactly one memory-managed
+  collection is configured. Other collections are refused with a message that
+  names the `memoryManaged` flag.
+- Without a decision, `remember` searches the same scopes for likely matches
+  and returns them without writing (`outcome: "candidates"`). Decide with
+  `--add` (or `--decision add`) for a new fact, or `--supersede <uri>` (or
+  `--decision supersede --predecessor <uri>`) plus `--predecessor-hash <hash>`
+  to replace one. An exact duplicate returns the existing record.
+- Supersede is verified under the write lease: a second writer racing on the
+  same predecessor exits 4 (`MEMORY_SUPERSEDE_CONFLICT`); recall the current
+  fact and decide again.
+- `--receipt <path>` (a saved `gno recall --json` output) fences replays of
+  recalled spans; `--derived-from gno://...` declares GNO-derived origin and is
+  rejected. Paraphrases without either cannot be fenced.
+- `--source <text>` records free-text evidence with the fact; it is stored in
+  the fact frontmatter and returned as `source` on the record in every result.
+- `--caller` / `--session` default to `$GNO_MEMORY_CALLER` / `$GNO_MEMORY_SESSION`,
+  then `cli:<user>` / `ppid:<parent pid>`.
+- Success means the file exists and lexical sync completed: the fact is
+  retrievable before the command returns. `--json` prints the shared result
+  (`outcome`, `record`, `absPath`, `sync`, `matching`).
+
+### gno recall
+
+```bash
+gno recall "deploy branch" --scope project:gno
+gno recall "kindergarten" --scope family --max-facts 3 --max-tokens 256 --json
+```
+
+- Returns only current facts (superseded ones are excluded inside the query),
+  at most `--max-facts` (default 8) under `--max-tokens` (default 512).
+- Each fact carries its `gno://` URI, text, scopes, identity, `contentHash`,
+  and egress lineage; the response includes a content-free receipt (caller,
+  session, memory ids, span hashes, digest) to hand back to `remember --receipt`.
+- Retrieval is BM25 plus vectors when the embedding model is already cached
+  (`Retrieval: hybrid`); otherwise lexical with the reason. Recall never
+  downloads a model.
+- With nothing in scope it prints the self-teaching line
+  (`No memories in scope yet. Store one with: gno remember ...`) and exits 0.
+
 ## Document Commands
 
 ### gno get
@@ -787,6 +847,13 @@ Exit codes: `0` clean, `1` invalid input, `2` runtime failure, `4` complete with
 findings, and `5` partial, unavailable, inconclusive, cancelled, or repeatedly
 changed during the run. This command is unrelated to `gno egress-audit`, which
 manages content-free transport-policy receipts.
+
+The `provenance` category also runs `provenance.memory-record`: every file in a
+`memoryManaged` collection is checked against the managed memory record
+contract, and each malformed file yields one warning per diagnostic code
+(`MEMORY_FRONTMATTER_MISSING`, `MEMORY_SCOPES_EMPTY`,
+`MEMORY_CONTENT_HASH_MISMATCH`, ...). Malformed files stay visible to ordinary
+search but are excluded from managed recall until repaired.
 
 ### gno embed
 
@@ -1669,6 +1736,11 @@ Status also projects `contentTypeBoost.rules` as redacted rule IDs and effective
 factors plus the full `rulesFingerprint`. Configured path prefixes are never
 included. The same projection is available from REST, MCP, and SDK status.
 
+The `Memory:` section (JSON `memory`) counts valid managed memory records per
+`memoryManaged` collection and lists malformed files with their diagnostic
+codes; those files are excluded from managed recall until repaired. Without any
+memory-managed collection it reads `Memory: no memory-managed collections`.
+
 ### gno doctor
 
 Check system health.
@@ -1749,13 +1821,13 @@ gno search "test" --json | jq '.results[].uri'
 
 ## Exit Codes
 
-| Code | Meaning                                                              |
-| ---- | -------------------------------------------------------------------- |
-| 0    | Success                                                              |
-| 1    | Validation error (bad input)                                         |
-| 2    | Runtime error (IO, DB, model)                                        |
-| 3    | `NOT_RUNNING` — `--status` / `--stop` found no live matching process |
-| 4    | `BUSY` — `index` / `update` / `embed` write-lease contention         |
+| Code | Meaning                                                                |
+| ---- | ---------------------------------------------------------------------- |
+| 0    | Success                                                                |
+| 1    | Validation error (bad input)                                           |
+| 2    | Runtime error (IO, DB, model)                                          |
+| 3    | `NOT_RUNNING` — `--status` / `--stop` found no live matching process   |
+| 4    | `BUSY` — write-lease contention, or a lost `remember --supersede` race |
 
 Exit code `3` is reserved for `gno serve --status` / `--stop` and `gno daemon --status` / `--stop`. See [Long-Running Processes](#long-running-processes) below for the management contract. Exit code `4` on mutating index commands means another writer holds the lease — retry when it finishes, or raise `--lock-wait`. `gno audit` also uses `4` when the report contains findings.
 
