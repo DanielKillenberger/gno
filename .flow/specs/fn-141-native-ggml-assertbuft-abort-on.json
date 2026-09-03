@@ -1,0 +1,24 @@
+{
+  "branch_name": "fn-141-native-ggml-assertbuft-abort-on",
+  "created_at": "2026-09-03T15:25:09.150611Z",
+  "depends_on_epics": [],
+  "id": "fn-141-native-ggml-assertbuft-abort-on",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-141-native-ggml-assertbuft-abort-on.md",
+  "status": "open",
+  "title": "Native GGML_ASSERT(buft) abort on expanded+reranked gno query (macOS Metal)",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-09-03T15:25:09.152843Z"
+}
