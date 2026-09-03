@@ -293,7 +293,7 @@
     "plan": 0
   },
   "spec_path": ".flow/specs/fn-133-site-and-docs-memory-positioning-agents.md",
-  "status": "open",
+  "status": "done",
   "title": "Site and docs: memory positioning, agents-install reference, comparison refresh under copy rules",
   "tracker": {
     "baseHashFlow": null,
@@ -306,5 +306,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T14:55:30.515608Z"
+  "updated_at": "2026-09-03T13:39:01.476665Z"
 }
