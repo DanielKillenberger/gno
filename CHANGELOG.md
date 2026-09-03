@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.42.0] - 2026-09-03
+
+### Added
+
 - Slim MCP core tool profile and MCP 2026-07-28 dual-speak.
   - Tool profiles: `gno mcp --tool-profile core` advertises the 7-tool
     playbook read set (`gno_query`, `gno_search`, `gno_get`,
@@ -56,8 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discriminated unions. Calling an unknown tool now answers a JSON-RPC
   `-32602` error instead of an `isError` result. A frozen pre-migration
   capture and a parity test pin this.
-
-### Fixed
 
 ## [1.41.0] - 2026-09-03
 
@@ -2464,7 +2470,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.41.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.42.0...HEAD
+[1.42.0]: https://github.com/gmickel/gno/compare/v1.41.0...v1.42.0
 [1.41.0]: https://github.com/gmickel/gno/compare/v1.40.0...v1.41.0
 [1.40.0]: https://github.com/gmickel/gno/compare/v1.39.2...v1.40.0
 [1.39.2]: https://github.com/gmickel/gno/compare/v1.39.1...v1.39.2
