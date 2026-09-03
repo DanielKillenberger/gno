@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.45.0] - 2026-09-03
+
+### Added
+
 - Memory adapters (fn-135): the `gno agents` protocol block is now v3 and
   carries the memory rungs — `gno recall` near the top of the retrieval
   ladder for "what do we know/believe" questions, and `gno remember` in the
@@ -2572,7 +2580,8 @@ Re-release of 1.0.2 with a CHANGELOG formatting fix so the Publish workflow's
 | 0.4.0   | 2026-01-01 | Web UI and REST API                        |
 | 0.1.0   | 2025-12-30 | Initial release with full search pipeline  |
 
-[Unreleased]: https://github.com/gmickel/gno/compare/v1.44.0...HEAD
+[Unreleased]: https://github.com/gmickel/gno/compare/v1.45.0...HEAD
+[1.45.0]: https://github.com/gmickel/gno/compare/v1.44.0...v1.45.0
 [1.44.0]: https://github.com/gmickel/gno/compare/v1.43.0...v1.44.0
 [1.43.0]: https://github.com/gmickel/gno/compare/v1.42.0...v1.43.0
 [1.42.0]: https://github.com/gmickel/gno/compare/v1.41.0...v1.42.0
