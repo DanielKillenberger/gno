@@ -717,7 +717,7 @@
     "plan": 0
   },
   "spec_path": ".flow/specs/fn-130-memory-slice-rememberrecall-contracts.md",
-  "status": "open",
+  "status": "done",
   "title": "Memory slice: remember/recall contracts on all four surfaces",
   "tracker": {
     "baseHashFlow": null,
@@ -730,5 +730,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-09-01T14:55:29.680982Z"
+  "updated_at": "2026-09-03T02:26:33.317406Z"
 }
