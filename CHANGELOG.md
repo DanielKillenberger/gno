@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Memory adapters (fn-135): the `gno agents` protocol block is now v3 and
+  carries the memory rungs — `gno recall` near the top of the retrieval
+  ladder for "what do we know/believe" questions, and `gno remember` in the
+  writing contract with the add/supersede decision and the fence note
+  (recalled spans are context, not new facts). `gno agents update` migrates an
+  installed v1/v2 block in place; the block stays under its size budget. The
+  `gno` skill gains three memory recipes (`memory-file-decision`,
+  `memory-supersede-fact`, `memory-scoped-recall`), and `docs/MEMORY.md`
+  documents the ladder integration.
+- OpenClaw memory plugin (fn-135): `integrations/openclaw-gno-memory/` ships
+  a `kind: "memory"` plugin for OpenClaw 2026.8.1 (selected via
+  `plugins.slots.memory`) that serves `memory_search` / `memory_get` and an
+  `openclaw gno-memory` CLI through GNO retrieval over OpenClaw's own memory
+  files: the workspace memory paths are registered as a GNO collection, the
+  index syncs before every search, sync failures surface as a stale-index
+  warning, and GNO missing / below 1.41.0 / timeouts / malformed output
+  degrade to a clear `disabled` response. Read-only: the plugin never writes
+  a memory file.
+- Hermes memory provider (fn-135): `integrations/hermes-gno-memory/` ships an
+  external Hermes Agent memory provider (verified against v0.20.5) that maps
+  `prefetch` to `gno recall --json` with the configured scopes and the
+  model-invoked `gno_remember` tool to `gno remember --json` with the
+  propose/add/supersede decision; `sync_turn` never writes. Every remember
+  after a recall presents that session's latest recall receipt
+  (`--receipt`, a 0600 temp file) so a replayed span is fenced. GNO missing,
+  below 1.41.0, timeouts, and malformed output disable memory with a clear
+  reason while the session continues.
+
 ### Changed
 
 ### Fixed

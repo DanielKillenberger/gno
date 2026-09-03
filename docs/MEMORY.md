@@ -327,8 +327,119 @@ These are exclusions, not gaps. Each one is a decision.
 - **No implicit global scope.** Every call names its scopes.
 - **No cross-machine coordination.** Files replicate through your vault
   sync; each index catches up on its own.
-- **No harness adapters.** Framework-specific memory providers are a
-  separate follow-up; the four surfaces above are the whole contract.
+- **No write path outside the contract.** The adapters below map harness
+  slots onto the four surfaces above; none of them adds a way to store a
+  fact that bypasses `remember`.
+
+## Adapters
+
+### Ladder integration
+
+The [`gno agents`](AGENT-INSTRUCTIONS.md) protocol block (v3) carries the
+memory contract into every harness's global instruction file, and the `gno`
+skill carries the workflows. Neither is a runtime adapter: they tell an agent
+when to call `recall` and `remember`, and the agent calls them like any other
+command.
+
+- **Recall rung.** The retrieval ladder gains `gno recall "<query>" --scope <scope>`
+  near the top, after exact search and before the document rungs, for "what
+  do we know / believe" questions. It returns current facts only, cited.
+- **Remember in the writing contract.** `gno remember "<fact>" --scope <scope>`
+  proposes; the agent decides `--add` or `--supersede <uri> --predecessor-hash <hash>`
+  from a recall. The block states the fence in one line: recalled spans are
+  context, not new facts, so the recall receipt travels back as `--receipt`.
+- **Migration.** `gno agents update` replaces an installed v1 or v2 block in
+  place; `gno agents verify` reports `outdated` until it runs. The block stays
+  under its 1,500-character budget and contains no filesystem paths.
+- **Skill recipes.** `gno skill install` ships three memory recipes alongside
+  the existing ones: `recipes/memory-file-decision.md` (propose, decide,
+  add), `recipes/memory-supersede-fact.md` (hash-checked replacement, conflict
+  handling), and `recipes/memory-scoped-recall.md` (scopes, budget, empty and
+  lexical responses). Read one with
+  `gno skill show --file recipes/memory-scoped-recall.md`.
+
+The autoresearch skill eval was not re-run for this change (operator default,
+2026-09-01).
+
+### Hermes provider
+
+`integrations/hermes-gno-memory/` ships an external
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) memory provider
+(verified against Hermes v0.20.5). It maps Hermes's provider slots onto the
+contract above without adding a write path:
+
+| Hermes slot              | GNO call                                                                     |
+| :----------------------- | :--------------------------------------------------------------------------- |
+| `prefetch` (every turn)  | `gno recall --json` with the turn's message and the configured scopes        |
+| `gno_remember` tool      | `gno remember --json`; `decision` = `propose` (no write), `add`, `supersede` |
+| (after a recall)         | `--receipt <0600 temp file>` with the session's latest recall receipt        |
+| `sync_turn` (every turn) | none: Hermes's after-turn persistence never writes to GNO                    |
+
+- Scopes come from the provider config (`$HERMES_HOME/gno/config.json`)
+  only; the tool has no scope parameter.
+- `caller` is the configured id (default `hermes`); `session` is the Hermes
+  session id, rebound on `/resume`, `/branch`, and `/new`.
+- The provider pins GNO `1.41.0` (`gno --version` is checked at startup). Below
+  the pin, or when `gno` is missing, times out, or returns malformed JSON, it
+  logs the reason, reports memory unavailable in the system prompt, and the
+  session continues without memory.
+- Recalled facts are injected as `- <text> [gno://uri] (contentHash ...)` so a
+  later `supersede` can name its predecessor.
+- The latest recall receipt travels back on every `gno_remember` in the same
+  session, so a recalled span replayed as a new fact is fenced
+  (`MEMORY_FENCED_REPLAY`). A session switch drops it.
+- Embed the memory collection (`gno embed <collection>`, or a running
+  watcher). Lexical-only recall matches every query term, so question-shaped
+  turns miss facts the vector leg finds; the provider warns once while recall
+  reports `mode: lexical`.
+
+Install commands, config reference, and the unit suite
+(`bun test integrations/hermes-gno-memory`, faked `gno` subprocess) are in
+[integrations/hermes-gno-memory/README.md](../integrations/hermes-gno-memory/README.md).
+
+### OpenClaw plugin
+
+`integrations/openclaw-gno-memory/` ships an external
+[OpenClaw](https://openclaw.ai) memory plugin (verified against OpenClaw
+2026.8.1, which retired `memory.backend` and the QMD backend: external memory
+is now a `kind: "memory"` plugin selected through `plugins.slots.memory`).
+OpenClaw keeps writing its own memory files; the plugin only retrieves.
+
+| OpenClaw surface                   | GNO call                                                                    |
+| :--------------------------------- | :-------------------------------------------------------------------------- |
+| `memory_search` tool               | `gno search` scoped to the memory collection (`gno query --fast` in hybrid) |
+| `memory_get` tool                  | `gno get` by `gno://` URI or workspace-relative path                        |
+| `openclaw gno-memory <subcommand>` | `search`, `get`, `status`, `sync` on the same backend                       |
+| Init service                       | `gno collection add` for the workspace memory paths, then `gno index`       |
+
+- **Corpus provisioning.** Init registers the OpenClaw workspace as a GNO
+  collection with the pattern `{MEMORY.md,USER.md,memory/**/*.md}`, so only
+  memory files enter the index; runtime state, transcripts, and other
+  workspace files never match. A same-name collection rooted elsewhere is an
+  error, never a silent re-point.
+- **Sync-before-search.** Every search runs `gno index <collection> --no-embed`
+  first, so a file OpenClaw wrote a moment ago is retrievable, a deleted file
+  drops out, and a renamed file moves to its new URI. Set
+  `syncBeforeSearch: false` when a `gno daemon` already watches the workspace.
+- **Observability.** Every sync outcome is logged; a failed sync marks the
+  index stale, the tool response carries `stale: true` plus a warning the
+  model relays, and `openclaw gno-memory status` shows `STALE: <reason>` until
+  a sync succeeds.
+- **Failure modes.** GNO missing, below the `1.41.0` pin, a subprocess timeout,
+  or malformed output return `disabled: true` with the error kind; the CLI
+  exits 1 with the same message.
+- **Why GNO here.** One index across every harness and format (memory files
+  are searched next to PDFs, mail, and code), `gno://` citations with content
+  hashes, the evidence layer (`context build`, `ask --verify`, traces), and
+  scoped recall. OpenClaw's built-in memory already runs local GGUF
+  embeddings, so "no API key" is not the difference.
+- **Known gap (GNO core).** A memory file deleted and later restored at the
+  same path with identical content stays inactive: incremental sync treats a
+  same-hash record as unchanged. Any content change reactivates it.
+
+Install commands, the config reference, and the unit suite
+(`bun test integrations/openclaw-gno-memory`, faked `gno` subprocess) are in
+[integrations/openclaw-gno-memory/README.md](../integrations/openclaw-gno-memory/README.md).
 
 ## Eval gate and fixtures
 
