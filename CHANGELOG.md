@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Memory eval suite as the adapter gate (`bun run eval:memory`): seven
+  deterministic Evalite suites drive `remember`/`recall` through the SDK
+  against a temp index (upsert correctness, supersession current state
+  including the racing-supersede conflict, recall quality under the
+  8-fact/512-token budget with cite validity, context fence at eval scale,
+  scope isolation, a scripted agent day compared against a committed golden
+  end state with readable diffs, and a recall latency envelope). Fixtures under
+  `evals/fixtures/memory/` are content-hashed via `manifest.json`
+  (`bun run eval:memory:fixtures [--golden]` refreshes the pins); thresholds
+  live in `MEMORY_GATE` in `evals/memory.eval.ts` and the gate contract plus
+  fixture format are documented in `docs/MEMORY.md`. The gate pins the recall
+  budget as literals (8 facts / 512 tokens) and asserts both the recall
+  payload and `MEMORY_RECALL_MAX_*` against them, requires every scope read to
+  return its expected in-scope facts (`expect.includes`), requires the budget
+  query to fill the fact cap, refuses unpinned fixture files, and tears down
+  its temp index via an explicit `afterAll`.
+
 ### Changed
 
 ### Fixed
