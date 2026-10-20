@@ -68,6 +68,37 @@ export function modelTableName(modelUri: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const indexDatabases = new WeakMap<VectorIndexPort, Database>();
+/** Query-only read connections, mapped to the shared connection that writes. */
+const writerDatabases = new WeakMap<
+  Database,
+  { writer: Database; idle: () => Promise<void> }
+>();
+
+/**
+ * Register `reader` as a query-only connection whose writes go to `writer`;
+ * `idle` resolves once no write transaction is open on `writer`.
+ */
+export function bindReadConnection(
+  reader: Database,
+  writer: Database,
+  idle: () => Promise<void>
+): void {
+  writerDatabases.set(reader, { writer, idle });
+}
+
+/**
+ * The connection to write on for `db`: itself, or for a query-only read
+ * connection, the shared connection behind it. Partition resolution records
+ * runtime callers and migrates legacy partitions, so it runs there.
+ */
+export function writerConnection(db: Database): Database {
+  return writerDatabases.get(db)?.writer ?? db;
+}
+
+/** Wait until the shared connection behind `db` has committed its open batch. */
+export function writerIdle(db: Database): Promise<void> {
+  return writerDatabases.get(db)?.idle() ?? Promise.resolve();
+}
 
 /** Partition resolution needs the database behind a vector index port. */
 export function getVectorIndexDatabase(
@@ -131,9 +162,22 @@ export async function createVectorIndexPort(
     loadError = e instanceof Error ? e.message : String(e);
   }
 
+  // A query-only (read) connection cannot create the table. A missing table
+  // there means no vectors were ever stored for this model: search is empty.
+  const tableExists =
+    db
+      .query<{ found: number }, [string]>(
+        "SELECT 1 AS found FROM sqlite_master WHERE name = ?"
+      )
+      .get(tableName) !== null;
+  const queryOnly =
+    db.query<{ query_only: number }, []>("PRAGMA query_only").get()
+      ?.query_only === 1;
+  const noVectorsYet = searchAvailable && !tableExists && queryOnly;
+
   // Create per-model vec0 table if extension available
   // Graceful degradation: if table creation fails, storage still works
-  if (searchAvailable) {
+  if (searchAvailable && !tableExists && !queryOnly) {
     try {
       db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS ${tableName} USING vec0(
@@ -161,26 +205,32 @@ export async function createVectorIndexPort(
   `);
 
   // Prepared statements for vec0 table (if available)
-  const deleteVecChunkStmt = searchAvailable
-    ? db.prepare(`DELETE FROM ${tableName} WHERE chunk_id = ?`)
-    : null;
+  const deleteVecChunkStmt =
+    searchAvailable && !noVectorsYet
+      ? db.prepare(`DELETE FROM ${tableName} WHERE chunk_id = ?`)
+      : null;
 
-  const insertVecStmt = searchAvailable
-    ? db.prepare(`INSERT INTO ${tableName} (chunk_id, embedding) VALUES (?, ?)`)
-    : null;
+  const insertVecStmt =
+    searchAvailable && !noVectorsYet
+      ? db.prepare(
+          `INSERT INTO ${tableName} (chunk_id, embedding) VALUES (?, ?)`
+        )
+      : null;
 
-  const searchStmt = searchAvailable
-    ? db.prepare(`
+  const searchStmt =
+    searchAvailable && !noVectorsYet
+      ? db.prepare(`
         SELECT chunk_id, distance
         FROM ${tableName}
         WHERE embedding MATCH ?
           AND k = ?
       `)
-    : null;
+      : null;
 
-  const deleteVecStmt = searchAvailable
-    ? db.prepare(`DELETE FROM ${tableName} WHERE chunk_id LIKE ? || ':%'`)
-    : null;
+  const deleteVecStmt =
+    searchAvailable && !noVectorsYet
+      ? db.prepare(`DELETE FROM ${tableName} WHERE chunk_id LIKE ? || ':%'`)
+      : null;
 
   // Track if vec0 writes failed this session (needs sync)
   let vecDirty = false;
@@ -291,7 +341,7 @@ export async function createVectorIndexPort(
       k: number,
       searchOptions?: VectorSearchOptions
     ): Promise<StoreResult<VectorSearchResult[]>> {
-      if (!(searchAvailable && searchStmt)) {
+      if (!searchAvailable || !(searchStmt || noVectorsYet)) {
         return Promise.resolve(
           err("VEC_SEARCH_UNAVAILABLE", formatUnavailableMessage(loadError))
         );
@@ -397,6 +447,8 @@ export async function createVectorIndexPort(
             )
           );
         }
+        // No per-model table on a read connection: nothing was ever stored.
+        if (!searchStmt) return Promise.resolve(ok([]));
         const results = searchStmt.all(encodeEmbedding(embedding), k) as {
           chunk_id: string;
           distance: number;

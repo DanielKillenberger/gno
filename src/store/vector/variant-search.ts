@@ -13,10 +13,16 @@ import { buildEligibleDocumentQuery } from "../sqlite/eligibility";
 import {
   embeddingPartitionIdentity,
   identityPartitionId,
+  isPartitionActivated,
   resolveRuntimePartition,
   retrievalUse,
 } from "./runtime-compat";
-import { encodeEmbedding, getVectorIndexDatabase } from "./sqlite-vec";
+import {
+  encodeEmbedding,
+  getVectorIndexDatabase,
+  writerConnection,
+  writerIdle,
+} from "./sqlite-vec";
 import { embeddingInputHash } from "./variants";
 
 /** Fallback/warning code: this runtime may not read the activated vectors. */
@@ -35,13 +41,22 @@ export type SearchPartition =
  * an activated partition gets a reason instead of an identity; vector spaces
  * are never mixed.
  */
-export async function resolveVectorSearchIdentity(
+export function resolveVectorSearchIdentity(
   port: EmbeddingPort,
   vectorIndex: VectorIndexPort
 ): Promise<SearchPartition> {
+  return resolveSearchPartition(port, vectorIndex, false);
+}
+
+async function resolveSearchPartition(
+  port: EmbeddingPort,
+  vectorIndex: VectorIndexPort,
+  waited: boolean
+): Promise<SearchPartition> {
   const primary = embeddingPartitionIdentity(port);
-  const db = getVectorIndexDatabase(vectorIndex);
-  if (!primary || !db) return { identity: primary };
+  const indexDb = getVectorIndexDatabase(vectorIndex);
+  if (!primary || !indexDb) return { identity: primary };
+  const db = writerConnection(indexDb);
   let resolved;
   try {
     resolved = await resolveRuntimePartition(db, port, primary);
@@ -61,6 +76,28 @@ export async function resolveVectorSearchIdentity(
   );
   if (use.kind === "unavailable")
     return { unavailable: { reason: use.reason, building: use.building } };
+  // A first query on an upgraded index can migrate its legacy partition inside
+  // a sync batch still open on the shared connection; the read connection sees
+  // it only once that batch commits. Wait for that one batch, then resolve
+  // again (the migration commits with it, or reruns if the batch rolled back).
+  const partitionId = identityPartitionId(resolved.identity);
+  if (
+    indexDb !== db &&
+    isPartitionActivated(db, partitionId) &&
+    !isPartitionActivated(indexDb, partitionId)
+  ) {
+    if (!waited) {
+      await writerIdle(indexDb);
+      return resolveSearchPartition(port, vectorIndex, true);
+    }
+    return {
+      unavailable: {
+        reason:
+          "its vector partition is being migrated while the index syncs; retry shortly",
+        building: false,
+      },
+    };
+  }
   return { identity: resolved.identity };
 }
 

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Over the resident HTTP MCP endpoint (`gno serve`, `gno daemon`), a tool call naming a collection that is not configured (for example `gno_search` with `collection: "typo"`) returns the tool's `Collection not found` error instead of `500 Internal MCP transport error`. The egress check ignores unknown names and, when none of the named collections exist, checks every configured collection.
+- MCP retrieval tools read only committed index data while a sync is writing, instead of possibly seeing a batch that is later rolled back. Thanks to @DanielKillenberger for the fix (#333).
 
 ## [2.12.2] - 2026-10-20
 

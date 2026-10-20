@@ -164,7 +164,7 @@ import {
 import { getSchemaVersion, migrations, runMigrations } from "../migrations";
 import { err, ok } from "../types";
 import { getStoredEmbeddingFingerprint } from "../vector/freshness";
-import { modelTableName } from "../vector/sqlite-vec";
+import { bindReadConnection, modelTableName } from "../vector/sqlite-vec";
 import {
   getVariantStatus,
   listVectorPartitions,
@@ -622,7 +622,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   private activeTransaction?: {
     token: { revoked: boolean };
     release: () => void;
+    db: Database;
   };
+  /** Set while a read-only caller runs; its reads use `readDb`. */
+  private readonly readScope = new AsyncLocalStorage<true>();
+  /** Second connection for read-only callers, opened on first use. */
+  private readDb: Database | null = null;
   private shutdownFenced = false;
   private shutdownDeadline?: number;
   private contextGeneration = 0;
@@ -741,6 +746,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
 
   async close(): Promise<void> {
     this.fenceForShutdown();
+    this.readDb?.close(false);
+    this.readDb = null;
     if (this.db) {
       try {
         // Current Bun finalizes all statements and releases Windows handles now.
@@ -791,13 +798,54 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     // JS cannot interleave this synchronous rollback with a running callback.
     // A callback suspended at await must never commit or use the store again.
     transaction.token.revoked = true;
-    this.db?.exec("ROLLBACK");
+    transaction.db.exec("ROLLBACK");
     transaction.release();
     this.activeTransaction = undefined;
   }
 
   isOpen(): boolean {
     return this.db !== null;
+  }
+
+  /**
+   * Run a read-only caller on a second connection to the same index. All
+   * writes stay on the shared connection, so a write transaction there (a
+   * sync batch held open across file conversions) is never visible to these
+   * reads: WAL gives this connection the last committed state. An in-memory
+   * index has no second connection and reads on the shared one.
+   */
+  withReadConnection<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.dbPath === "" || this.dbPath === ":memory:") return fn();
+    return this.readScope.run(true, fn);
+  }
+
+  private openReadDb(main: Database): Database {
+    if (this.readDb) return this.readDb;
+    const db = new Database(this.dbPath);
+    try {
+      // A write here would wait out the busy timeout while the shared
+      // connection's batch, on the same event loop, cannot commit: fail fast.
+      db.exec("PRAGMA query_only = ON");
+      db.exec("PRAGMA foreign_keys = ON");
+      const busyTimeout =
+        main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()
+          ?.timeout ?? DEFAULT_BUSY_TIMEOUT_MS;
+      db.exec(`PRAGMA busy_timeout = ${busyTimeout}`);
+      if (this.ftsTokenizer.startsWith("snowball")) {
+        const snowball = loadFts5Snowball(db);
+        if (!snowball.loaded)
+          throw new Error(`Failed to load fts5-snowball: ${snowball.error}`);
+      }
+    } catch (cause) {
+      db.close(false);
+      throw cause;
+    }
+    bindReadConnection(db, main, async () => {
+      const release = await this.acquireTransactionWriter();
+      release();
+    });
+    this.readDb = db;
+    return db;
   }
 
   /**
@@ -808,6 +856,9 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
    * explicit BEGIN/COMMIT to support async callbacks.
    */
   async withTransaction<T>(fn: () => Promise<T>): Promise<StoreResult<T>> {
+    // Writes always run on the shared connection, even from a read scope.
+    if (this.readScope.getStore())
+      return this.readScope.exit(() => this.withTransaction(fn));
     const parent = this.txContext.getStore();
     const connection = this.ensureOpen();
     const isOuter = parent === undefined;
@@ -826,7 +877,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       if (isOuter) {
         // IMMEDIATE reduces lock churn for bulk writes
         db.exec("BEGIN IMMEDIATE");
-        this.activeTransaction = { token, release: releaseWriter! };
+        this.activeTransaction = { token, release: releaseWriter!, db };
       } else {
         db.exec(`SAVEPOINT ${savepoint}`);
       }
@@ -872,6 +923,11 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     }
   }
 
+  /** Write outside a transaction, on the shared connection even from a read scope. */
+  private async admitWrite<T>(write: (db: Database) => T): Promise<T> {
+    return this.readScope.exit(() => write(this.ensureOpen()));
+  }
+
   private async acquireTransactionWriter(): Promise<() => void> {
     const previous = this.txTail;
     let release!: () => void;
@@ -913,8 +969,12 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     if (!this.db) {
       throw new Error("Database not open");
     }
-    this.capShutdownBusyWait(this.db);
-    return this.db;
+    const db =
+      this.readScope.getStore() && !this.txContext.getStore()
+        ? this.openReadDb(this.db)
+        : this.db;
+    this.capShutdownBusyWait(db);
+    return db;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1507,14 +1567,16 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   async createRetrievalTrace(
     input: RetrievalTraceInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return createStoredTrace(this.ensureOpen(), input);
+    return this.admitWrite((db) => createStoredTrace(db, input));
   }
 
   async mergeRetrievalTraceEgressLineage(
     traceId: string,
     lineage: EgressLineage
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return mergeStoredTraceEgressLineage(this.ensureOpen(), traceId, lineage);
+    return this.admitWrite((db) =>
+      mergeStoredTraceEgressLineage(db, traceId, lineage)
+    );
   }
 
   async getRetrievalTrace(
@@ -1542,37 +1604,39 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     status: RetrievalTraceTerminalStatus,
     updatedAtMs: number
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return finalizeStoredTrace(this.ensureOpen(), traceId, status, updatedAtMs);
+    return this.admitWrite((db) =>
+      finalizeStoredTrace(db, traceId, status, updatedAtMs)
+    );
   }
 
   async appendRetrievalTraceRun(
     input: RetrievalTraceRunInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceRun(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceRun(db, input));
   }
 
   async appendRetrievalTraceEvent(
     input: RetrievalTraceEventInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceEvent(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceEvent(db, input));
   }
 
   async appendRetrievalTraceJudgment(
     input: RetrievalTraceJudgmentInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceJudgment(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceJudgment(db, input));
   }
 
   async appendRetrievalTraceExport(
     input: RetrievalTraceExportInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceExport(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceExport(db, input));
   }
 
   async appendRetrievalTraceExportManifest(
     input: RetrievalTraceExportManifestInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceExportManifest(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceExportManifest(db, input));
   }
 
   async getRetrievalTraceExportManifest(
@@ -1590,32 +1654,34 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   async getOrCreateRetrievalTraceRedactionSecret(): Promise<
     StoreResult<string>
   > {
-    return getOrCreateStoredTraceRedactionSecret(this.ensureOpen());
+    return this.admitWrite((db) => getOrCreateStoredTraceRedactionSecret(db));
   }
 
   async deleteRetrievalTrace(
     traceId: string
   ): Promise<StoreResult<RetrievalTraceDeleteCounts>> {
-    return deleteStoredTrace(this.ensureOpen(), traceId);
+    return this.admitWrite((db) => deleteStoredTrace(db, traceId));
   }
 
   async purgeRetrievalTraces(): Promise<
     StoreResult<RetrievalTracePurgeResult>
   > {
-    return purgeStoredTraces(this.ensureOpen());
+    return this.admitWrite((db) => purgeStoredTraces(db));
   }
 
   async enforceRetrievalTraceRetention(
     policy: RetrievalTraceRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceRetentionResult>> {
-    return enforceStoredTraceRetention(this.ensureOpen(), policy, nowMs);
+    return this.admitWrite((db) =>
+      enforceStoredTraceRetention(db, policy, nowMs)
+    );
   }
 
   async appendEgressAuditReceipt(
     receipt: EgressAuditReceiptInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredEgressAuditReceipt(this.ensureOpen(), receipt);
+    return this.admitWrite((db) => appendStoredEgressAuditReceipt(db, receipt));
   }
 
   async appendEgressAuditReceiptWithRetention(
@@ -1623,11 +1689,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     policy: EgressAuditRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredEgressAuditReceiptWithRetention(
-      this.ensureOpen(),
-      receipt,
-      policy,
-      nowMs
+    return this.admitWrite((db) =>
+      appendStoredEgressAuditReceiptWithRetention(db, receipt, policy, nowMs)
     );
   }
 
@@ -1647,7 +1710,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   async deleteEgressAuditReceipt(
     auditId: string
   ): Promise<StoreResult<EgressAuditDeleteResult>> {
-    return deleteStoredEgressAuditReceipt(this.ensureOpen(), auditId);
+    return this.admitWrite((db) => deleteStoredEgressAuditReceipt(db, auditId));
   }
 
   async getEgressAuditStatus(): Promise<StoreResult<EgressAuditStatusResult>> {
@@ -1658,13 +1721,15 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     policy: EgressAuditRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<EgressAuditRetentionResult>> {
-    return enforceStoredEgressAuditRetention(this.ensureOpen(), policy, nowMs);
+    return this.admitWrite((db) =>
+      enforceStoredEgressAuditRetention(db, policy, nowMs)
+    );
   }
 
   async purgeEgressAuditReceipts(): Promise<
     StoreResult<EgressAuditPurgeResult>
   > {
-    return purgeStoredEgressAuditReceipts(this.ensureOpen());
+    return this.admitWrite((db) => purgeStoredEgressAuditReceipts(db));
   }
 
   getContextGeneration(): number {
