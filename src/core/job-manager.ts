@@ -15,6 +15,7 @@ import {
 } from "../llm/inference-scope";
 import { MCP_ERRORS } from "./errors";
 import { acquireWriteLock, type WriteLockHandle } from "./file-lock";
+import { MAX_REINDEX_PATHS } from "./reindex-paths";
 
 const JOB_EXPIRATION_MS = 60 * 60 * 1000;
 const JOB_MAX_RECENT = 100;
@@ -250,6 +251,12 @@ export class JobManager {
         pending.options = request.options;
       } else if (pending.paths) {
         for (const path of request.paths) pending.paths.add(path);
+        // Too many files for one path pass: rescan the collection instead,
+        // with no git pull or update command, which no path request asked for.
+        if (pending.paths.size > MAX_REINDEX_PATHS) {
+          pending.paths = null;
+          pending.options = { gitPull: false, runUpdateCmd: false };
+        }
       }
       pending.run = request.run;
       pending.job.scope = scopeRecord(pending.collection, pending.paths);

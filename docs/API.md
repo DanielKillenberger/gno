@@ -1231,11 +1231,11 @@ remain owner-specific even when documents share a canonical mirror.
 }
 ```
 
-| Field        | Type     | Required | Description                                                                                                                       |
-| :----------- | :------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------- |
-| `collection` | string   | No       | Specific collection to sync (case-insensitive)                                                                                    |
-| `gitPull`    | boolean  | No       | Run `git pull` before sync                                                                                                        |
-| `paths`      | string[] | No       | Re-read only these files of `collection` (relative to its root, or absolute inside it). Requires `collection`; not with `gitPull` |
+| Field        | Type     | Required | Description                                                                                                                                                     |
+| :----------- | :------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `collection` | string   | No       | Specific collection to sync (case-insensitive)                                                                                                                  |
+| `gitPull`    | boolean  | No       | Run `git pull` before sync                                                                                                                                      |
+| `paths`      | string[] | No       | Re-read only these files of `collection` (1-256 files, relative to its root, or absolute inside it; not directories). Requires `collection`; not with `gitPull` |
 
 **Response** (202 Accepted):
 

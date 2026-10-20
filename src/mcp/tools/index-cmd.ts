@@ -112,16 +112,8 @@ export function handleIndex(
           runUpdateCmd: options.runUpdateCmd,
         });
 
-        const modelUri = resolveModelUri(
-          ctx.config,
-          "embed",
-          undefined,
-          collection?.name
-        );
-
         // Captured now: a queued pass runs after this call's context is gone.
         const config = ctx.config;
-        const modelAdapter = ctx.getModelAdapter?.();
         const allCollections = ctx.collections;
         const accepted = await ctx.jobManager.submitReindex({
           type: "index",
@@ -169,8 +161,17 @@ export function handleIndex(
                   );
               recordContentMutation(syncResult, ctx.markContentMutation);
 
-              // Phase 2: Embed
-              const llm = modelAdapter ?? new LlmAdapter(config);
+              // Phase 2: Embed. The model is looked up when the pass runs: a
+              // queued pass outlives a server reload, which disposes the
+              // adapter that was current at submit.
+              const liveConfig = ctx.config;
+              const modelUri = resolveModelUri(
+                liveConfig,
+                "embed",
+                undefined,
+                collection?.name
+              );
+              const llm = ctx.getModelAdapter?.() ?? new LlmAdapter(liveConfig);
               const embedResult = await llm.createEmbeddingPort(modelUri, {
                 egressCollections: collections,
                 policy: { offline: true, allowDownload: false },

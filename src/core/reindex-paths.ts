@@ -4,8 +4,9 @@
  * @module src/core/reindex-paths
  */
 
-// node:fs/promises realpath and node:path have no Bun equivalent.
-import { lstat, readlink, realpath } from "node:fs/promises";
+// node:fs/promises realpath, lstat/stat (symlinks, directories) and node:path
+// have no Bun equivalent.
+import { lstat, readlink, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { Collection } from "../config/types";
@@ -26,6 +27,12 @@ const missing = (error: unknown): boolean =>
   (error.code === "ENOENT" || error.code === "ENOTDIR");
 
 const MAX_SYMLINK_HOPS = 32;
+
+/**
+ * Most paths one request may list, and most a queued job keeps after merging.
+ * Past it, reindexing the whole collection is the better call.
+ */
+export const MAX_REINDEX_PATHS = 256;
 
 /**
  * Realpath of `path`, or of its nearest existing ancestor below `root`. A
@@ -63,8 +70,9 @@ async function nearestRealpath(
  * Resolve paths (relative to the collection root, or absolute inside it) to
  * deduplicated collection-relative POSIX paths. A path that no longer exists
  * is kept so the sync can mark it inactive. Throws `INVALID_INPUT: ...` for an
- * empty list and `INVALID_PATH: ...` for a path outside the root, including
- * one that leaves it through a symlink.
+ * empty list or more than `MAX_REINDEX_PATHS` paths, and `INVALID_PATH: ...`
+ * for a directory or a path outside the root, including one that leaves it
+ * through a symlink.
  */
 export async function resolveReindexPaths(
   collection: Collection,
@@ -73,6 +81,11 @@ export async function resolveReindexPaths(
   if (paths.length === 0) {
     throw new Error(
       `${MCP_ERRORS.INVALID_INPUT.code}: paths must list at least one path`
+    );
+  }
+  if (paths.length > MAX_REINDEX_PATHS) {
+    throw new Error(
+      `${MCP_ERRORS.INVALID_INPUT.code}: paths lists ${paths.length} paths (at most ${MAX_REINDEX_PATHS}); reindex the whole collection instead`
     );
   }
   const root = resolve(collection.path);
@@ -106,6 +119,15 @@ export async function resolveReindexPaths(
     ) {
       throw new Error(
         `${MCP_ERRORS.INVALID_PATH.code}: ${path} resolves outside collection ${collection.name}`
+      );
+    }
+    const isDirectory = await stat(absolute).then(
+      (stats) => stats.isDirectory(),
+      () => false
+    );
+    if (isDirectory) {
+      throw new Error(
+        `${MCP_ERRORS.INVALID_PATH.code}: ${path} is a directory; list the files in it, or reindex the whole collection`
       );
     }
     // A listed path obeys the collection's own pattern, include and exclude

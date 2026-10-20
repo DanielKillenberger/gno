@@ -250,7 +250,11 @@ because another job in the same server is running:
     same `gitPull` / `runUpdateCmd`. Whole-collection requests with different
     options stay separate passes, and a path-only pass never runs `gitPull`
     or an update command.
-- A queued pass uses the configuration of the latest request that joined it.
+  - a path-only job whose merged files pass 256 becomes a whole-collection
+    pass with no `gitPull` or update command.
+- A queued pass uses the configuration of the latest request that joined it;
+  `gno_index` resolves its embedding model when the pass starts, so a model
+  or preset change while it waits is picked up.
 - At most 64 distinct scopes wait at once; a new scope beyond that returns
   `QUEUE_FULL`. Retry after the running job finishes.
 - The queue lives in the server process. Jobs still waiting when it stops are
@@ -263,10 +267,12 @@ because another job in the same server is running:
 collection: each path is relative to the collection root or absolute inside
 it, and only those files are re-read. A listed file that no longer exists is
 marked inactive. `paths` requires `collection` and cannot be combined with
-`gitPull` or `runUpdateCmd`; an empty list, a path outside the root
-(including through a symlink) or a non-string entry is rejected before
-anything is queued (`INVALID_INPUT` / `INVALID_PATH`), and so is a path the
-collection's own `pattern`, `include` or `exclude` rules leave out.
+`gitPull` or `runUpdateCmd`; an empty list, more than 256 paths, a
+directory, a path outside the root (including through a symlink) or a
+non-string entry is rejected before anything is queued (`INVALID_INPUT` /
+`INVALID_PATH`), and so is a path the collection's own `pattern`, `include`
+or `exclude` rules leave out. To reindex a directory or more than 256 files,
+reindex the whole collection.
 
 `gno_remember` is the one write tool whose adapter takes no lock of its own:
 the core memory service acquires the same `.mcp-write.lock` lease for every
@@ -2789,6 +2795,7 @@ Reindex one or all collections (write-enabled).
     "paths": {
       "type": "array",
       "items": { "type": "string" },
+      "maxItems": 256,
       "description": "Reindex only these files of the collection (see Path-Level Reindex); requires collection"
     }
   }
@@ -2896,6 +2903,7 @@ Full index: sync files + generate embeddings (write-enabled). Runs as background
     "paths": {
       "type": "array",
       "items": { "type": "string" },
+      "maxItems": 256,
       "description": "Reindex only these files of the collection (see Path-Level Reindex); requires collection"
     }
   }

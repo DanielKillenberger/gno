@@ -1252,7 +1252,7 @@ gno index [collection] [--path <path...>] [--no-embed] [--models-pull] [--git-pu
 | Option | Type | Description |
 |--------|------|-------------|
 | `--collection` | string | Scope to single collection |
-| `--path <path...>` | string[] | Reindex only these files of the collection (relative to its root, or absolute inside it); requires a collection, not combinable with `--git-pull` |
+| `--path <path...>` | string[] | Reindex only these files of the collection (relative to its root, or absolute inside it); at most 256, not directories; requires a collection, not combinable with `--git-pull` |
 | `--no-embed` | boolean | Run ingestion only, skip embedding |
 | `--models-pull` | boolean | Download models if missing (prompts unless `--yes`) |
 | `--git-pull` | boolean | Run `git pull` in git repositories |

@@ -151,6 +151,41 @@ test("many requests for one collection make one more pass over the union of path
   expect(calls[1]?.paths).toEqual(["doc-0.md", "doc-1.md", "doc-2.md"]);
 });
 
+test("a path-only job past MAX_REINDEX_PATHS files becomes one plain whole-collection pass", async () => {
+  const { calls, run, step } = gatedRun();
+  const first = step(0);
+  const second = step(1);
+  await submit(request(run, "other"));
+  await first.started;
+  const batch = (from: number) =>
+    Array.from({ length: 100 }, (_, i) => `doc-${from + i}.md`);
+  const ids = new Set<string>();
+  for (const from of [0, 100, 200]) {
+    // A path request's options never reach the pass, even once it widens.
+    const accepted = await submit(
+      request(run, "notes", batch(from), WITH_UPDATE)
+    );
+    ids.add(accepted.jobId);
+  }
+  expect(ids.size).toBe(1);
+  const [jobId] = [...ids];
+  expect(manager.getJob(jobId!)?.scope).toEqual({
+    collection: "notes",
+    paths: null,
+  });
+  // A whole-collection request with no update command joins the widened job.
+  expect((await submit(request(run, "notes"))).jobId).toBe(jobId!);
+  first.release();
+  await second.started;
+  second.release();
+  await settle(jobId!);
+  expect(calls[1]).toEqual({
+    collection: "notes",
+    paths: null,
+    options: PLAIN,
+  });
+});
+
 test("a whole-collection request absorbs path requests and sets the pass options", async () => {
   const { calls, run, step } = gatedRun();
   const first = step(0);

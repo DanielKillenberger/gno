@@ -6,7 +6,10 @@ import { join } from "node:path";
 
 import type { Collection } from "../../src/config/types";
 
-import { resolveReindexPaths } from "../../src/core/reindex-paths";
+import {
+  MAX_REINDEX_PATHS,
+  resolveReindexPaths,
+} from "../../src/core/reindex-paths";
 import { safeRm } from "../helpers/cleanup";
 
 let root = "";
@@ -56,4 +59,24 @@ test("eligible paths, including a deleted one, are accepted", async () => {
     "a.md",
     "gone.md",
   ]);
+});
+
+test("a directory is rejected with a message that says so", async () => {
+  await mkdir(join(root, "docs", "sub"));
+  expect(await rejection(["sub"])).toBe(
+    "INVALID_PATH: sub is a directory; list the files in it, or reindex the whole collection"
+  );
+});
+
+test("more than MAX_REINDEX_PATHS paths are rejected before any is resolved", async () => {
+  const paths = Array.from(
+    { length: MAX_REINDEX_PATHS + 1 },
+    (_, i) => `doc-${i}.md`
+  );
+  expect(await rejection(paths)).toStartWith(
+    `INVALID_INPUT: paths lists ${MAX_REINDEX_PATHS + 1} paths (at most ${MAX_REINDEX_PATHS})`
+  );
+  expect(
+    await resolveReindexPaths(collection, paths.slice(0, MAX_REINDEX_PATHS))
+  ).toHaveLength(MAX_REINDEX_PATHS);
 });
