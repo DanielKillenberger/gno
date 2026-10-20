@@ -287,20 +287,12 @@ export class JobManager {
     lock: { release: () => Promise<void> }
   ): Promise<void> {
     try {
-      const release = await this.#toolMutex.acquire();
-      try {
-        this.#assertAuthorizationEpoch(job);
-        assertInferenceActive();
-        const result = await fn(this.#jobControllers.get(job.id)!.signal);
-        assertInferenceActive();
-        job.status = "completed";
-        job.result = result;
-      } catch (e) {
-        job.status = "failed";
-        job.error = e instanceof Error ? e.message : String(e);
-      } finally {
-        release();
-      }
+      await this.#admit(job);
+      assertInferenceActive();
+      const result = await fn(this.#jobControllers.get(job.id)!.signal);
+      assertInferenceActive();
+      job.status = "completed";
+      job.result = result;
     } catch (e) {
       job.status = "failed";
       job.error = e instanceof Error ? e.message : String(e);
@@ -378,20 +370,12 @@ export class JobManager {
     lock: { release: () => Promise<void> }
   ): Promise<void> {
     try {
-      const release = await this.#toolMutex.acquire();
-      try {
-        this.#assertAuthorizationEpoch(job);
-        assertInferenceActive();
-        const result = await fn(this.#jobControllers.get(job.id)!.signal);
-        assertInferenceActive();
-        job.status = "completed";
-        job.typedResult = result;
-      } catch (e) {
-        job.status = "failed";
-        job.error = e instanceof Error ? e.message : String(e);
-      } finally {
-        release();
-      }
+      await this.#admit(job);
+      assertInferenceActive();
+      const result = await fn(this.#jobControllers.get(job.id)!.signal);
+      assertInferenceActive();
+      job.status = "completed";
+      job.typedResult = result;
     } catch (e) {
       job.status = "failed";
       job.error = e instanceof Error ? e.message : String(e);
@@ -432,6 +416,20 @@ export class JobManager {
         this.#jobs.delete(job.id);
         this.#jobAuthorizationEpochs.delete(job.id);
       }
+    }
+  }
+
+  /**
+   * Wait for the tool call in progress, then re-check authorization. The
+   * mutex is released before the job's work runs, so reads are not held
+   * behind a long sync or embed; writers stay serialized by the write lease.
+   */
+  async #admit(job: JobRecord): Promise<void> {
+    const release = await this.#toolMutex.acquire();
+    try {
+      this.#assertAuthorizationEpoch(job);
+    } finally {
+      release();
     }
   }
 

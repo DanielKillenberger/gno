@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP searches and reads no longer wait for a running sync, embed or index job to finish, over stdio or the `gno serve` / `gno daemon` `/mcp` endpoint.
+
 ## [2.12.1] - 2026-10-19
 
 ### Added

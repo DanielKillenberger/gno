@@ -3105,7 +3105,7 @@ Clients should check schema version for compatibility.
 - DB connection kept open for server lifetime
 - No persistent state between tool calls
 - Each tool call is independent
-- Server handles concurrent requests sequentially
+- Server handles concurrent tool calls sequentially; an accepted background job (`gno_sync`, `gno_embed`, `gno_index`) waits for the call in progress, then runs without holding that queue, so reads are not blocked while it runs
 
 ---
 
