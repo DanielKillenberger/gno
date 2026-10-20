@@ -622,7 +622,13 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   private activeTransaction?: {
     token: { revoked: boolean };
     release: () => void;
+    db: Database;
   };
+  /** Connection a background job writes on; reads elsewhere stay committed. */
+  private readonly jobConnection = new AsyncLocalStorage<{
+    db: Database;
+    open: boolean;
+  }>();
   private shutdownFenced = false;
   private shutdownDeadline?: number;
   private contextGeneration = 0;
@@ -791,13 +797,53 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     // JS cannot interleave this synchronous rollback with a running callback.
     // A callback suspended at await must never commit or use the store again.
     transaction.token.revoked = true;
-    this.db?.exec("ROLLBACK");
+    transaction.db.exec("ROLLBACK");
     transaction.release();
     this.activeTransaction = undefined;
   }
 
   isOpen(): boolean {
     return this.db !== null;
+  }
+
+  /**
+   * Run a background job on its own connection to the same index, so its
+   * open batch transactions stay invisible to reads on the shared connection
+   * (WAL gives each connection the last committed state). Transactions on
+   * both connections still serialize through the same writer queue. An
+   * in-memory index has no second connection and runs on the shared one.
+   */
+  async withJobConnection<T>(fn: () => Promise<T>): Promise<T> {
+    const main = this.ensureOpen();
+    if (
+      this.jobConnection.getStore()?.open ||
+      this.dbPath === "" ||
+      this.dbPath === ":memory:"
+    ) {
+      return fn();
+    }
+    const db = new Database(this.dbPath);
+    const scope = { db, open: true };
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      const busyTimeout =
+        main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()
+          ?.timeout ?? DEFAULT_BUSY_TIMEOUT_MS;
+      db.exec(`PRAGMA busy_timeout = ${busyTimeout}`);
+      if (process.env.CI) {
+        db.exec("PRAGMA synchronous = OFF");
+        db.exec("PRAGMA temp_store = MEMORY");
+      }
+      if (this.ftsTokenizer.startsWith("snowball")) {
+        const snowball = loadFts5Snowball(db);
+        if (!snowball.loaded)
+          throw new Error(`Failed to load fts5-snowball: ${snowball.error}`);
+      }
+      return await this.jobConnection.run(scope, fn);
+    } finally {
+      scope.open = false;
+      db.close(false);
+    }
   }
 
   /**
@@ -826,7 +872,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       if (isOuter) {
         // IMMEDIATE reduces lock churn for bulk writes
         db.exec("BEGIN IMMEDIATE");
-        this.activeTransaction = { token, release: releaseWriter! };
+        this.activeTransaction = { token, release: releaseWriter!, db };
       } else {
         db.exec(`SAVEPOINT ${savepoint}`);
       }
@@ -913,8 +959,11 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     if (!this.db) {
       throw new Error("Database not open");
     }
-    this.capShutdownBusyWait(this.db);
-    return this.db;
+    // Work the job scheduled to outlive it falls back to the shared connection.
+    const job = this.jobConnection.getStore();
+    const db = job?.open ? job.db : this.db;
+    this.capShutdownBusyWait(db);
+    return db;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

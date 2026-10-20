@@ -61,6 +61,8 @@ export interface JobManagerOptions {
     acquire: () => Promise<() => void>;
   };
   lockTimeoutMs?: number;
+  /** Runs a job's work on its own store connection (keeps reads committed). */
+  runOnJobConnection?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 export class JobError extends Error {
@@ -78,6 +80,7 @@ export class JobManager {
   #serverInstanceId: string;
   #toolMutex: JobManagerOptions["toolMutex"];
   #lockTimeoutMs: number;
+  #runOnJobConnection: <T>(fn: () => Promise<T>) => Promise<T>;
   #activeJobId: string | null = null;
   #jobs = new Map<string, JobRecord>();
   #jobAuthorizationEpochs = new Map<string, string>();
@@ -92,6 +95,7 @@ export class JobManager {
     this.#serverInstanceId = options.serverInstanceId;
     this.#toolMutex = options.toolMutex;
     this.#lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+    this.#runOnJobConnection = options.runOnJobConnection ?? ((fn) => fn());
   }
 
   async startJob(
@@ -289,7 +293,8 @@ export class JobManager {
     try {
       await this.#admit(job);
       assertInferenceActive();
-      const result = await fn(this.#jobControllers.get(job.id)!.signal);
+      const signal = this.#jobControllers.get(job.id)!.signal;
+      const result = await this.#runOnJobConnection(() => fn(signal));
       assertInferenceActive();
       job.status = "completed";
       job.result = result;
@@ -372,7 +377,8 @@ export class JobManager {
     try {
       await this.#admit(job);
       assertInferenceActive();
-      const result = await fn(this.#jobControllers.get(job.id)!.signal);
+      const signal = this.#jobControllers.get(job.id)!.signal;
+      const result = await this.#runOnJobConnection(() => fn(signal));
       assertInferenceActive();
       job.status = "completed";
       job.typedResult = result;

@@ -1,12 +1,28 @@
 import { expect, test } from "bun:test";
+// node:fs/promises, node:os, and node:path provide temporary index structure.
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { ToolContext } from "../../src/mcp/server";
 
 import { JobManager } from "../../src/core/job-manager";
 import { Mutex } from "../../src/mcp/context";
 import { runTool } from "../../src/mcp/tools/index";
+import { SqliteAdapter } from "../../src/store";
+import { safeRm } from "../helpers/cleanup";
 
 const READ_DEADLINE_MS = 1000;
+
+const emptySync = {
+  collections: [],
+  totalDurationMs: 0,
+  totalFilesProcessed: 0,
+  totalFilesAdded: 0,
+  totalFilesUpdated: 0,
+  totalFilesErrored: 0,
+  totalFilesSkipped: 0,
+};
 
 test("a read tool completes while an index job is still running", async () => {
   const toolMutex = new Mutex();
@@ -86,4 +102,87 @@ test("a job waits for the tool call in progress before it starts", async () => {
   await manager.shutdown();
   expect(started).toBeTrue();
   expect(manager.getJob(jobId)?.status).toBe("completed");
+});
+
+test("reads during a job see only committed rows, including after a rollback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gno-job-reads-"));
+  const store = new SqliteAdapter();
+  try {
+    expect(
+      (await store.open(join(root, "index-test.sqlite"), "unicode61")).ok
+    ).toBeTrue();
+    expect(
+      (
+        await store.syncCollections([
+          {
+            name: "notes",
+            path: root,
+            pattern: "**/*",
+            include: [],
+            exclude: [],
+          },
+        ])
+      ).ok
+    ).toBeTrue();
+    const manager = new JobManager({
+      lockPath: join(root, "write.lock"),
+      serverInstanceId: "test",
+      toolMutex: new Mutex(),
+      runOnJobConnection: (fn) => store.withJobConnection(fn),
+    });
+    const document = (title: string) => ({
+      collection: "notes",
+      relPath: "note.md",
+      sourceHash: title,
+      sourceMime: "text/markdown",
+      sourceExt: ".md",
+      sourceSize: 1,
+      sourceMtime: "2026-10-20T00:00:00.000Z",
+      mirrorHash: title,
+      title,
+    });
+    const readTitle = async () => {
+      const read = await store.getDocument("notes", "note.md");
+      return read.ok ? read.value?.title : "read failed";
+    };
+
+    const written = Promise.withResolvers<void>();
+    const rollback = Promise.withResolvers<void>();
+    const failing = await manager.startJob("sync", async () => {
+      const tx = await store.withTransaction(async () => {
+        expect(
+          (await store.upsertDocument(document("Uncommitted"))).ok
+        ).toBeTrue();
+        written.resolve();
+        await rollback.promise;
+        throw new Error("batch failed");
+      });
+      expect(tx.ok).toBeFalse();
+      return emptySync;
+    });
+    await written.promise;
+    expect(await readTitle()).toBeUndefined();
+    rollback.resolve();
+    await manager.shutdown();
+    expect(manager.getJob(failing)?.status).toBe("completed");
+    expect(await readTitle()).toBeUndefined();
+
+    const next = new JobManager({
+      lockPath: join(root, "write.lock"),
+      serverInstanceId: "test",
+      toolMutex: new Mutex(),
+      runOnJobConnection: (fn) => store.withJobConnection(fn),
+    });
+    await next.startJob("sync", async () => {
+      await store.withTransaction(async () => {
+        await store.upsertDocument(document("Committed"));
+      });
+      return emptySync;
+    });
+    await next.shutdown();
+    expect(await readTitle()).toBe("Committed");
+  } finally {
+    await store.close();
+    await safeRm(root);
+  }
 });
