@@ -949,10 +949,9 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   /**
    * Get raw SQLite database handle for vector operations.
    * Part of SqliteDbProvider interface - use with isSqliteDbProvider() type guard.
-   * Always the shared connection: vector ports may create their tables.
    */
   getRawDb(): Database {
-    return this.readScope.exit(() => this.ensureOpen());
+    return this.ensureOpen();
   }
 
   graphReferenceStore() {

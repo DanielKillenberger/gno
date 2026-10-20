@@ -262,3 +262,118 @@ test("writes outside a transaction during a job batch do not fail as locked", as
     await safeRm(root);
   }
 });
+
+test("vector search on the read connection during a batch ranks and filters committed rows", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gno-job-vectors-"));
+  const store = new SqliteAdapter();
+  try {
+    expect(
+      (await store.open(join(root, "index-test.sqlite"), "unicode61")).ok
+    ).toBeTrue();
+    expect(
+      (
+        await store.syncCollections([
+          {
+            name: "notes",
+            path: root,
+            pattern: "**/*",
+            include: [],
+            exclude: [],
+          },
+        ])
+      ).ok
+    ).toBeTrue();
+    const mirror = async (name: string) => {
+      const hash = new Bun.CryptoHasher("sha256").update(name).digest("hex");
+      expect((await store.upsertContent(hash, `# ${name}\n`)).ok).toBeTrue();
+      expect(
+        (
+          await store.upsertChunks(hash, [
+            { seq: 0, pos: 0, text: name, startLine: 1, endLine: 1 },
+          ])
+        ).ok
+      ).toBeTrue();
+      return hash;
+    };
+    const committed = await mirror("committed");
+    const pending = await mirror("pending");
+    expect(
+      (
+        await store.upsertDocument({
+          ...document("Note"),
+          mirrorHash: committed,
+        })
+      ).ok
+    ).toBeTrue();
+    const model = "test-model";
+    const writer = await createVectorIndexPort(store.getRawDb(), {
+      model,
+      dimensions: 4,
+    });
+    if (!writer.ok) throw new Error(writer.error.message);
+    const embedding = new Float32Array([1, 0, 0, 0]);
+    for (const mirrorHash of [committed, pending]) {
+      expect(
+        (
+          await writer.value.upsertVectors([
+            { mirrorHash, seq: 0, model, embedFingerprint: "f", embedding },
+          ])
+        ).ok
+      ).toBeTrue();
+    }
+
+    const inTransaction = Promise.withResolvers<void>();
+    const rollback = Promise.withResolvers<void>();
+    const batch = store.withTransaction(async () => {
+      // The batch moves the note to new content, then fails.
+      await store.upsertDocument({ ...document("Note"), mirrorHash: pending });
+      inTransaction.resolve();
+      await rollback.promise;
+      throw new Error("batch failed");
+    });
+    await inTransaction.promise;
+
+    const hits = await store.withReadConnection(async () => {
+      const port = await createVectorIndexPort(store.getRawDb(), {
+        model,
+        dimensions: 4,
+      });
+      if (!port.ok) throw new Error(port.error.message);
+      return port.value.searchNearest(embedding, 5, {
+        eligibility: { collection: "notes" },
+      });
+    });
+    rollback.resolve();
+    await batch;
+
+    expect(hits.ok ? hits.value.map((hit) => hit.mirrorHash) : hits).toEqual([
+      committed,
+    ]);
+  } finally {
+    await store.close();
+    await safeRm(root);
+  }
+});
+
+test("vector search on a read connection with no table yet finds nothing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gno-job-novec-"));
+  const store = new SqliteAdapter();
+  try {
+    expect(
+      (await store.open(join(root, "index-test.sqlite"), "unicode61")).ok
+    ).toBeTrue();
+    const hits = await store.withReadConnection(async () => {
+      const port = await createVectorIndexPort(store.getRawDb(), {
+        model: "never-embedded",
+        dimensions: 4,
+      });
+      if (!port.ok) throw new Error(port.error.message);
+      expect(port.value.searchAvailable).toBeTrue();
+      return port.value.searchNearest(new Float32Array([1, 0, 0, 0]), 5);
+    });
+    expect(hits).toEqual({ ok: true, value: [] });
+  } finally {
+    await store.close();
+    await safeRm(root);
+  }
+});
