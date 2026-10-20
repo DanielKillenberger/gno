@@ -13,6 +13,7 @@ import { buildEligibleDocumentQuery } from "../sqlite/eligibility";
 import {
   embeddingPartitionIdentity,
   identityPartitionId,
+  isPartitionActivated,
   resolveRuntimePartition,
   retrievalUse,
 } from "./runtime-compat";
@@ -66,6 +67,22 @@ export async function resolveVectorSearchIdentity(
   );
   if (use.kind === "unavailable")
     return { unavailable: { reason: use.reason, building: use.building } };
+  // A first query on an upgraded index can migrate its legacy partition inside
+  // a sync batch still open on the shared connection; the read connection sees
+  // it only once that batch commits.
+  const partitionId = identityPartitionId(resolved.identity);
+  if (
+    indexDb !== db &&
+    isPartitionActivated(db, partitionId) &&
+    !isPartitionActivated(indexDb, partitionId)
+  )
+    return {
+      unavailable: {
+        reason:
+          "its vector partition is being migrated while the index syncs; retry shortly",
+        building: false,
+      },
+    };
   return { identity: resolved.identity };
 }
 

@@ -671,3 +671,35 @@ test("vector search resolved from a read connection records its runtime on the s
       .get("runtime-b")
   ).toEqual({ verdict: "compatible" });
 });
+
+test("a legacy migration inside an open sync batch makes vector search wait, then resolves", async () => {
+  const f = await fixture();
+  await legacyPartition(f, "gpu-bun-a", 12, true);
+  const runtime = port("cpu-bun-c");
+  const resolveFromReadConnection = () =>
+    f.store.withReadConnection(async () => {
+      const index = await createVectorIndexPort(f.store.getRawDb(), {
+        model: MODEL,
+        dimensions: DIMS,
+      });
+      if (!index.ok) throw new Error(index.error.message);
+      return resolveVectorSearchIdentity(runtime.embedPort, index.value);
+    });
+
+  const inBatch = Promise.withResolvers<void>();
+  const commit = Promise.withResolvers<void>();
+  const batch = f.store.withTransaction(async () => {
+    inBatch.resolve();
+    await commit.promise;
+  });
+  await inBatch.promise;
+  const during = await resolveFromReadConnection();
+  commit.resolve();
+  expect((await batch).ok).toBe(true);
+
+  expect(during.identity).toBeUndefined();
+  expect(during.unavailable?.reason).toContain("retry shortly");
+  const after = await resolveFromReadConnection();
+  expect(after.unavailable).toBeUndefined();
+  expect(after.identity).toBeDefined();
+});
