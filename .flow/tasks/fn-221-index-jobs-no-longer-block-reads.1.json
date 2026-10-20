@@ -9,7 +9,7 @@
   "priority": null,
   "spec": "fn-221-index-jobs-no-longer-block-reads",
   "spec_path": ".flow/tasks/fn-221-index-jobs-no-longer-block-reads.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Implement Index jobs no longer block reads",
   "updated_at": "2026-10-20T15:40:51.680783Z"
 }

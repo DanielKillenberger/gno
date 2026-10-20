@@ -1,5 +1,5 @@
 {
-  "branch_name": "fn-221-index-jobs-no-longer-block-reads",
+  "branch_name": "reindex-write-queue",
   "completion_review_status": "not_required",
   "completion_reviewed_at": "2026-10-20T15:46:39.918865Z",
   "created_at": "2026-10-20T15:38:19.552534Z",
@@ -15,7 +15,7 @@
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-221-index-jobs-no-longer-block-reads.md",
-  "status": "open",
+  "status": "done",
   "title": "Index jobs no longer block reads",
   "tracker": {
     "baseHashFlow": null,
@@ -28,5 +28,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-20T15:46:39.918877Z"
+  "updated_at": "2026-10-20T15:57:59.048210Z"
 }
