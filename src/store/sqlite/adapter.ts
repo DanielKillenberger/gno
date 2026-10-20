@@ -164,7 +164,7 @@ import {
 import { getSchemaVersion, migrations, runMigrations } from "../migrations";
 import { err, ok } from "../types";
 import { getStoredEmbeddingFingerprint } from "../vector/freshness";
-import { modelTableName } from "../vector/sqlite-vec";
+import { bindReadConnection, modelTableName } from "../vector/sqlite-vec";
 import {
   getVariantStatus,
   listVectorPartitions,
@@ -840,6 +840,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       db.close(false);
       throw cause;
     }
+    bindReadConnection(db, main);
     this.readDb = db;
     return db;
   }

@@ -650,3 +650,24 @@ test("an index already at schema 31 gains the runtime caller table", () => {
     db.close();
   }
 });
+
+test("vector search resolved from a read connection records its runtime on the shared connection", async () => {
+  const f = await fixture();
+  expect((await f.embed(port("runtime-a").embedPort)).ok).toBe(true);
+  const b = port("runtime-b");
+  const partition = await f.store.withReadConnection(async () => {
+    const index = await createVectorIndexPort(f.store.getRawDb(), {
+      model: MODEL,
+      dimensions: DIMS,
+    });
+    if (!index.ok) throw new Error(index.error.message);
+    return resolveVectorSearchIdentity(b.embedPort, index.value);
+  });
+  expect(partition.unavailable).toBeUndefined();
+  expect(partition.identity).toBeDefined();
+  expect(
+    f.db
+      .query("SELECT verdict FROM vector_runtime_verdicts WHERE runtime = ?")
+      .get("runtime-b")
+  ).toEqual({ verdict: "compatible" });
+});

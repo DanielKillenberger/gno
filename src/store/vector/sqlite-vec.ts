@@ -68,6 +68,22 @@ export function modelTableName(modelUri: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const indexDatabases = new WeakMap<VectorIndexPort, Database>();
+/** Query-only read connections, mapped to the shared connection that writes. */
+const writerDatabases = new WeakMap<Database, Database>();
+
+/** Register `reader` as a query-only connection whose writes go to `writer`. */
+export function bindReadConnection(reader: Database, writer: Database): void {
+  writerDatabases.set(reader, writer);
+}
+
+/**
+ * The connection to write on for `db`: itself, or for a query-only read
+ * connection, the shared connection behind it. Partition resolution records
+ * runtime callers and migrates legacy partitions, so it runs there.
+ */
+export function writerConnection(db: Database): Database {
+  return writerDatabases.get(db) ?? db;
+}
 
 /** Partition resolution needs the database behind a vector index port. */
 export function getVectorIndexDatabase(

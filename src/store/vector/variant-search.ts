@@ -16,7 +16,11 @@ import {
   resolveRuntimePartition,
   retrievalUse,
 } from "./runtime-compat";
-import { encodeEmbedding, getVectorIndexDatabase } from "./sqlite-vec";
+import {
+  encodeEmbedding,
+  getVectorIndexDatabase,
+  writerConnection,
+} from "./sqlite-vec";
 import { embeddingInputHash } from "./variants";
 
 /** Fallback/warning code: this runtime may not read the activated vectors. */
@@ -40,8 +44,9 @@ export async function resolveVectorSearchIdentity(
   vectorIndex: VectorIndexPort
 ): Promise<SearchPartition> {
   const primary = embeddingPartitionIdentity(port);
-  const db = getVectorIndexDatabase(vectorIndex);
-  if (!primary || !db) return { identity: primary };
+  const indexDb = getVectorIndexDatabase(vectorIndex);
+  if (!primary || !indexDb) return { identity: primary };
+  const db = writerConnection(indexDb);
   let resolved;
   try {
     resolved = await resolveRuntimePartition(db, port, primary);
