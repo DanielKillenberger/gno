@@ -18,6 +18,6 @@ stage: impl-review - skipped(config: repository instructions say "Skip all revie
 
 stage: plan-sync - skipped(config: planSync.enabled != true)
 ## Evidence
-- Commits: a037dd5464f7555c3d5763a55292c18ec94b66a7
+- Commits: aae84e2f87e95385f661406ca7d471c8be995384
 - Tests: bun test test/core test/mcp
 - PRs:
