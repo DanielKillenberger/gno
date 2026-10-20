@@ -840,7 +840,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
       db.close(false);
       throw cause;
     }
-    bindReadConnection(db, main);
+    bindReadConnection(db, main, async () => {
+      const release = await this.acquireTransactionWriter();
+      release();
+    });
     this.readDb = db;
     return db;
   }

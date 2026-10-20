@@ -21,6 +21,7 @@ import {
   encodeEmbedding,
   getVectorIndexDatabase,
   writerConnection,
+  writerIdle,
 } from "./sqlite-vec";
 import { embeddingInputHash } from "./variants";
 
@@ -40,9 +41,17 @@ export type SearchPartition =
  * an activated partition gets a reason instead of an identity; vector spaces
  * are never mixed.
  */
-export async function resolveVectorSearchIdentity(
+export function resolveVectorSearchIdentity(
   port: EmbeddingPort,
   vectorIndex: VectorIndexPort
+): Promise<SearchPartition> {
+  return resolveSearchPartition(port, vectorIndex, false);
+}
+
+async function resolveSearchPartition(
+  port: EmbeddingPort,
+  vectorIndex: VectorIndexPort,
+  waited: boolean
 ): Promise<SearchPartition> {
   const primary = embeddingPartitionIdentity(port);
   const indexDb = getVectorIndexDatabase(vectorIndex);
@@ -69,13 +78,18 @@ export async function resolveVectorSearchIdentity(
     return { unavailable: { reason: use.reason, building: use.building } };
   // A first query on an upgraded index can migrate its legacy partition inside
   // a sync batch still open on the shared connection; the read connection sees
-  // it only once that batch commits.
+  // it only once that batch commits. Wait for that one batch, then resolve
+  // again (the migration commits with it, or reruns if the batch rolled back).
   const partitionId = identityPartitionId(resolved.identity);
   if (
     indexDb !== db &&
     isPartitionActivated(db, partitionId) &&
     !isPartitionActivated(indexDb, partitionId)
-  )
+  ) {
+    if (!waited) {
+      await writerIdle(indexDb);
+      return resolveSearchPartition(port, vectorIndex, true);
+    }
     return {
       unavailable: {
         reason:
@@ -83,6 +97,7 @@ export async function resolveVectorSearchIdentity(
         building: false,
       },
     };
+  }
   return { identity: resolved.identity };
 }
 

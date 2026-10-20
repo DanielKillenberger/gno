@@ -672,20 +672,10 @@ test("vector search resolved from a read connection records its runtime on the s
   ).toEqual({ verdict: "compatible" });
 });
 
-test("a legacy migration inside an open sync batch makes vector search wait, then resolves", async () => {
+test("a legacy migration inside an open sync batch waits for that batch, then searches", async () => {
   const f = await fixture();
   await legacyPartition(f, "gpu-bun-a", 12, true);
   const runtime = port("cpu-bun-c");
-  const resolveFromReadConnection = () =>
-    f.store.withReadConnection(async () => {
-      const index = await createVectorIndexPort(f.store.getRawDb(), {
-        model: MODEL,
-        dimensions: DIMS,
-      });
-      if (!index.ok) throw new Error(index.error.message);
-      return resolveVectorSearchIdentity(runtime.embedPort, index.value);
-    });
-
   const inBatch = Promise.withResolvers<void>();
   const commit = Promise.withResolvers<void>();
   const batch = f.store.withTransaction(async () => {
@@ -693,13 +683,29 @@ test("a legacy migration inside an open sync batch makes vector search wait, the
     await commit.promise;
   });
   await inBatch.promise;
-  const during = await resolveFromReadConnection();
+
+  let settled = false;
+  const resolving = f.store
+    .withReadConnection(async () => {
+      const index = await createVectorIndexPort(f.store.getRawDb(), {
+        model: MODEL,
+        dimensions: DIMS,
+      });
+      if (!index.ok) throw new Error(index.error.message);
+      return resolveVectorSearchIdentity(runtime.embedPort, index.value);
+    })
+    .finally(() => {
+      settled = true;
+    });
+  await Bun.sleep(100);
+  // It waits for the open batch instead of failing or using unseen state.
+  expect(settled).toBe(false);
   commit.resolve();
   expect((await batch).ok).toBe(true);
 
-  expect(during.identity).toBeUndefined();
-  expect(during.unavailable?.reason).toContain("retry shortly");
-  const after = await resolveFromReadConnection();
-  expect(after.unavailable).toBeUndefined();
-  expect(after.identity).toBeDefined();
+  const resolved = await resolving;
+  expect(resolved.unavailable).toBeUndefined();
+  expect(resolved.identity).toEqual(
+    embeddingPartitionIdentity(runtime.embedPort)
+  );
 });

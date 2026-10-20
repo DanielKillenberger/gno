@@ -69,11 +69,21 @@ export function modelTableName(modelUri: string): string {
 
 const indexDatabases = new WeakMap<VectorIndexPort, Database>();
 /** Query-only read connections, mapped to the shared connection that writes. */
-const writerDatabases = new WeakMap<Database, Database>();
+const writerDatabases = new WeakMap<
+  Database,
+  { writer: Database; idle: () => Promise<void> }
+>();
 
-/** Register `reader` as a query-only connection whose writes go to `writer`. */
-export function bindReadConnection(reader: Database, writer: Database): void {
-  writerDatabases.set(reader, writer);
+/**
+ * Register `reader` as a query-only connection whose writes go to `writer`;
+ * `idle` resolves once no write transaction is open on `writer`.
+ */
+export function bindReadConnection(
+  reader: Database,
+  writer: Database,
+  idle: () => Promise<void>
+): void {
+  writerDatabases.set(reader, { writer, idle });
 }
 
 /**
@@ -82,7 +92,12 @@ export function bindReadConnection(reader: Database, writer: Database): void {
  * runtime callers and migrates legacy partitions, so it runs there.
  */
 export function writerConnection(db: Database): Database {
-  return writerDatabases.get(db) ?? db;
+  return writerDatabases.get(db)?.writer ?? db;
+}
+
+/** Wait until the shared connection behind `db` has committed its open batch. */
+export function writerIdle(db: Database): Promise<void> {
+  return writerDatabases.get(db)?.idle() ?? Promise.resolve();
 }
 
 /** Partition resolution needs the database behind a vector index port. */
