@@ -9,7 +9,7 @@
   "depends_on_epics": [],
   "id": "fn-221-index-jobs-no-longer-block-reads",
   "impl_review_rounds": {
-    "fn-221-index-jobs-no-longer-block-reads.1": 4
+    "fn-221-index-jobs-no-longer-block-reads.1": 5
   },
   "next_task": 1,
   "no_plan": true,
@@ -452,6 +452,98 @@
       "task": "fn-221-index-jobs-no-longer-block-reads.1",
       "timestamp": "2026-10-20T19:25:56.709917Z",
       "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "caab10ea9c529c6d79e128dfc8a3b581938a3f5b75354f94c4211874253c2cc1",
+      "backend": "codex",
+      "base_sha": "791058e3a9662a8a14c95b42d600bc955c31e6dd",
+      "counter_kind": "impl",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-2e05607bb03fba68706fd1f8336ac61d",
+            "classification": "introduced",
+            "findingId": "finding-2e05607bb03fba68706fd1f8336ac61d",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-f6303c41fbe6ff79c3af13e506b7cca4",
+            "classification": "introduced",
+            "findingId": "finding-f6303c41fbe6ff79c3af13e506b7cca4",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-88b8fce0381d1f48a0a67f8473614aaa",
+            "classification": "introduced",
+            "findingId": "finding-88b8fce0381d1f48a0a67f8473614aaa",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-835def40249c9e8ced9edc340fc94324",
+            "classification": "introduced",
+            "findingId": "finding-835def40249c9e8ced9edc340fc94324",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "not_fixed"
+          },
+          {
+            "chainRoot": "finding-b650722612c0bb26b548a31b259bfdc9",
+            "classification": "introduced",
+            "findingId": "finding-b650722612c0bb26b548a31b259bfdc9",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-0e83778bfaf72e9bcf48530fd7e5660d",
+            "classification": "introduced",
+            "findingId": "finding-0e83778bfaf72e9bcf48530fd7e5660d",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-086d76f37f590d4a3c8e2aa8d74c4691",
+            "classification": "introduced",
+            "findingId": "finding-086d76f37f590d4a3c8e2aa8d74c4691",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 1,
+      "head_sha": "2f9942bc0387a2b855c43d001e65ebf1d73f2c35",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "gpt-6.1-sol",
+      "outcome": "verdict",
+      "output_bytes": 1561,
+      "output_sha256": "77c4e1dbfb6b0ce6162a719786a70fdb918e5a36346c1e2ef6cf4e6c698a8cc1",
+      "reservation_id": "43318867e93d471a895f73e99f88e8d7",
+      "round_consumed": true,
+      "scope": "impl:fn-221-index-jobs-no-longer-block-reads.1",
+      "superseded_by": null,
+      "task": "fn-221-index-jobs-no-longer-block-reads.1",
+      "timestamp": "2026-10-20T19:35:52.550188Z",
+      "verdict": "NEEDS_WORK"
     }
   ],
   "review_hash_epoch": {
@@ -476,5 +568,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-20T19:25:56.713290Z"
+  "updated_at": "2026-10-20T19:35:52.554187Z"
 }
