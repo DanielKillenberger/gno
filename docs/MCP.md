@@ -1243,6 +1243,7 @@ BM25 keyword search.
 ```
 Query: "authentication"
 Collection: (optional)
+collections: ["work", "ops"] # Optional: only these collections (1-256); not with collection
 since: "last month"         # Optional temporal lower bound
 until: "today"              # Optional temporal upper bound
 categories: ["meeting"]     # Optional category/content-type filters
@@ -1251,6 +1252,16 @@ tagsAll: ["backend"]        # Optional: must have ALL tags
 tagsAny: ["urgent"]         # Optional: must have ANY tag
 Limit: 5 (default)
 ```
+
+`collections` searches several collections at once and applies before the
+result limit, so other collections never take result slots. Responses echo the
+normalized list in `meta.collections`. Sending both `collection` and
+`collections`, an empty list or more than 256 names is a `VALIDATION` error;
+unknown names are listed in the error. Over HTTP the egress check covers just
+the listed collections; it runs before the tool, so a malformed or empty list
+from a non-loopback client is checked against every collection and may be
+refused by egress policy before the `VALIDATION` error is reached. `gno_vsearch` and `gno_query` accept the same
+`collections` input; `gno_query_diagnose` does not.
 
 Structured search results include per-result `contentType` and `categories`
 fields, alongside `tags`, `docid`, `uri`, scores, and source metadata. Use those
