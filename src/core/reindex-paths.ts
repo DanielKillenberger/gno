@@ -5,11 +5,13 @@
  */
 
 // node:fs/promises realpath and node:path have no Bun equivalent.
-import { realpath } from "node:fs/promises";
+import { lstat, readlink, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { Collection } from "../config/types";
 
+import { collectionToWalkConfig } from "../ingestion/types";
+import { matchesWalkPath } from "../ingestion/walker";
 import { MCP_ERRORS } from "./errors";
 
 const escapes = (rel: string): boolean =>
@@ -23,10 +25,17 @@ const missing = (error: unknown): boolean =>
   "code" in error &&
   (error.code === "ENOENT" || error.code === "ENOTDIR");
 
-/** Realpath of `path`, or of its nearest existing ancestor below `root`. */
+const MAX_SYMLINK_HOPS = 32;
+
+/**
+ * Realpath of `path`, or of its nearest existing ancestor below `root`. A
+ * dangling symlink on the way resolves to where it points, so a missing file
+ * cannot leave the root through a link whose target does not exist.
+ */
 async function nearestRealpath(
   path: string,
-  root: string
+  root: string,
+  hops = 0
 ): Promise<string | null> {
   let current = path;
   for (;;) {
@@ -34,6 +43,15 @@ async function nearestRealpath(
       return await realpath(current);
     } catch (error) {
       if (!missing(error)) throw error;
+    }
+    const isLink = await lstat(current).then(
+      (stats) => stats.isSymbolicLink(),
+      () => false
+    );
+    if (isLink) {
+      const target = resolve(dirname(current), await readlink(current));
+      if (hops >= MAX_SYMLINK_HOPS) return target;
+      return (await nearestRealpath(target, root, hops + 1)) ?? target;
     }
     const parent = dirname(current);
     if (parent === current || relative(root, parent) === "") return null;
@@ -88,6 +106,13 @@ export async function resolveReindexPaths(
     ) {
       throw new Error(
         `${MCP_ERRORS.INVALID_PATH.code}: ${path} resolves outside collection ${collection.name}`
+      );
+    }
+    // A listed path obeys the collection's own pattern, include and exclude
+    // rules: an excluded file must not become searchable by naming it.
+    if (!matchesWalkPath(toPosix(rel), collectionToWalkConfig(collection, 0))) {
+      throw new Error(
+        `${MCP_ERRORS.INVALID_PATH.code}: ${path} is not part of collection ${collection.name} (its pattern, include or exclude rules leave it out)`
       );
     }
     resolved.add(toPosix(rel));

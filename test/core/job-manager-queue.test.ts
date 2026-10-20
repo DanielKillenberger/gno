@@ -324,3 +324,22 @@ test("queued work accepted before a policy change fails instead of running", asy
       "STALE_EGRESS_POLICY: collection policy changed; retry to re-authorize",
   });
 });
+
+test("a request after a policy change does not join work accepted under the old policy", async () => {
+  const { calls, run, step } = gatedRun();
+  const first = step(0);
+  manager.setAuthorizationEpoch("before");
+  await submit(request(run, "a"));
+  await first.started;
+  const stale = await submit(request(run, "b"));
+  manager.setAuthorizationEpoch("after");
+  const fresh = await submit(request(run, "b"));
+  expect(fresh.jobId).not.toBe(stale.jobId);
+  first.release();
+  step(1).release();
+  await settle(stale.jobId);
+  await settle(fresh.jobId);
+  expect(manager.getJob(stale.jobId)?.status).toBe("failed");
+  expect(manager.getJob(fresh.jobId)?.status).toBe("completed");
+  expect(calls).toHaveLength(2);
+});

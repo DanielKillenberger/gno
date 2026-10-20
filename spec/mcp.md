@@ -265,7 +265,8 @@ it, and only those files are re-read. A listed file that no longer exists is
 marked inactive. `paths` requires `collection` and cannot be combined with
 `gitPull` or `runUpdateCmd`; an empty list, a path outside the root
 (including through a symlink) or a non-string entry is rejected before
-anything is queued (`INVALID_INPUT` / `INVALID_PATH`).
+anything is queued (`INVALID_INPUT` / `INVALID_PATH`), and so is a path the
+collection's own `pattern`, `include` or `exclude` rules leave out.
 
 `gno_remember` is the one write tool whose adapter takes no lock of its own:
 the core memory service acquires the same `.mcp-write.lock` lease for every

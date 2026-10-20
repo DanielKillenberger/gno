@@ -236,7 +236,14 @@ export class JobManager {
     this.#assertAccepting();
     this.#cleanupExpiredJobs();
 
-    const pending = this.#pending.find((entry) => joins(entry, request));
+    // Only join work accepted under the current egress policy: a stale entry
+    // fails at admission and must not swallow a freshly authorized request.
+    const pending = this.#pending.find(
+      (entry) =>
+        joins(entry, request) &&
+        this.#jobAuthorizationEpochs.get(entry.job.id) ===
+          this.#authorizationEpoch
+    );
     if (pending) {
       if (request.paths === null) {
         pending.paths = null;
