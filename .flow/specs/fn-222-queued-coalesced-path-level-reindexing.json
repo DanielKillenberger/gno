@@ -198,7 +198,7 @@
     "impl:fn-222-queued-coalesced-path-level-reindexing.1": 0
   },
   "spec_path": ".flow/specs/fn-222-queued-coalesced-path-level-reindexing.md",
-  "status": "open",
+  "status": "done",
   "title": "Queued, coalesced, path-level reindexing",
   "tracker": {
     "baseHashFlow": null,
@@ -211,5 +211,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-20T17:27:21.585275Z"
+  "updated_at": "2026-10-20T17:42:13.659732Z"
 }

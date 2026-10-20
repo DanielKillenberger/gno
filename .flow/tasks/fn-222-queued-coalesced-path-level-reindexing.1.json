@@ -9,7 +9,7 @@
   "priority": null,
   "spec": "fn-222-queued-coalesced-path-level-reindexing",
   "spec_path": ".flow/tasks/fn-222-queued-coalesced-path-level-reindexing.1.md",
-  "status": "todo",
+  "status": "done",
   "title": "Implement Queued, coalesced, path-level reindexing",
   "updated_at": "2026-10-20T16:33:24.057949Z"
 }
