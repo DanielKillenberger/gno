@@ -44,7 +44,6 @@ beforeEach(async () => {
     lockPath: join(root, ".mcp-write.lock"),
     serverInstanceId: "test",
     toolMutex,
-    runOnJobConnection: (fn) => store.withJobConnection(fn),
   });
   ctx = {
     indexName: "default",

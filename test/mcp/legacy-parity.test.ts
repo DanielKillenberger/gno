@@ -471,7 +471,9 @@ function normalizeToolsList(line: string): string {
                 withoutTypedFilterExtension(
                   withoutRequestIdExtension(
                     withoutReindexPathsExtension(
-                      withoutAuditCapExtension(withoutCollectionsAllowlist(tool))
+                      withoutAuditCapExtension(
+                        withoutCollectionsAllowlist(tool)
+                      )
                     )
                   )
                 )
