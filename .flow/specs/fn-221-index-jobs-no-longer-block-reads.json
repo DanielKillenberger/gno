@@ -1,0 +1,32 @@
+{
+  "branch_name": "reindex-write-queue",
+  "completion_review_status": "not_required",
+  "completion_reviewed_at": "2026-10-20T15:46:39.918865Z",
+  "created_at": "2026-10-20T15:38:19.552534Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-221-index-jobs-no-longer-block-reads",
+  "impl_review_rounds": {},
+  "next_task": 1,
+  "no_plan": true,
+  "plan_review_rounds": 0,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-221-index-jobs-no-longer-block-reads.md",
+  "status": "done",
+  "title": "Index jobs no longer block reads",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "depRelations": [],
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-10-20T15:57:59.048210Z"
+}
