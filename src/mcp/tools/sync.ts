@@ -9,9 +9,9 @@ import type { CollectionSyncResult, SyncResult } from "../../ingestion";
 import type { ToolContext } from "../server";
 
 import { MCP_ERRORS } from "../../core/errors";
-import { acquireWriteLock, type WriteLockHandle } from "../../core/file-lock";
-import { JobError } from "../../core/job-manager";
+import { JobError, reindexKey } from "../../core/job-manager";
 import { recordContentMutation } from "../../core/mutation-generations";
+import { resolveReindexScope } from "../../core/reindex-paths";
 import { normalizeCollectionName } from "../../core/validation";
 import { defaultSyncService, withContentTypeRules } from "../../ingestion";
 import { enforceSyncCommandEgress } from "../sync-egress";
@@ -21,12 +21,14 @@ interface SyncInput {
   collection?: string;
   gitPull?: boolean;
   runUpdateCmd?: boolean;
+  paths?: string[];
 }
 
 interface SyncResultOutput {
   jobId: string;
   collections: string[];
-  status: "started";
+  status: "started" | "queued";
+  paths?: string[];
   options: {
     gitPull: boolean;
     runUpdateCmd: boolean;
@@ -38,6 +40,7 @@ function formatSyncResult(result: SyncResultOutput): string {
   lines.push(`Job: ${result.jobId}`);
   lines.push(`Status: ${result.status}`);
   lines.push(`Collections: ${result.collections.join(", ") || "(none)"}`);
+  if (result.paths) lines.push(`Paths: ${result.paths.join(", ")}`);
   lines.push(`Git pull: ${result.options.gitPull ? "yes" : "no"}`);
   lines.push(`Run update cmd: ${result.options.runUpdateCmd ? "yes" : "no"}`);
   return lines.join("\n");
@@ -77,73 +80,72 @@ export function handleSync(
         throw new Error("Write tools disabled. Start MCP with --enable-write.");
       }
 
-      let lock: WriteLockHandle | null = null;
-      let handedOff = false;
+      const requestedCollection = args.collection?.trim();
+      const collection = requestedCollection
+        ? resolveCollection(requestedCollection, ctx.collections)
+        : null;
 
-      try {
-        lock = await acquireWriteLock(ctx.writeLockPath);
-        if (!lock) {
-          throw new Error(
-            `${MCP_ERRORS.LOCKED.code}: ${MCP_ERRORS.LOCKED.message}`
-          );
-        }
-
-        const requestedCollection = args.collection?.trim();
-        const collection = requestedCollection
-          ? resolveCollection(requestedCollection, ctx.collections)
-          : null;
-
-        if (requestedCollection && !collection) {
-          throw new Error(
-            `${MCP_ERRORS.NOT_FOUND.code}: Collection not found: ${requestedCollection}`
-          );
-        }
-
-        const collections = collection
-          ? [collection.name]
-          : ctx.collections.map((entry) => entry.name);
-
-        const options = withContentTypeRules(
-          {
-            gitPull: args.gitPull ?? false,
-            runUpdateCmd: args.runUpdateCmd ?? false,
-          },
-          ctx.config
+      if (requestedCollection && !collection) {
+        throw new Error(
+          `${MCP_ERRORS.NOT_FOUND.code}: Collection not found: ${requestedCollection}`
         );
-        enforceSyncCommandEgress(ctx, {
-          collectionNames: collections,
-          gitPull: options.gitPull,
-          runUpdateCmd: options.runUpdateCmd,
-        });
+      }
 
-        const jobId = await ctx.jobManager.startJobWithLock(
-          "sync",
-          lock,
-          async () => {
+      const collections = collection
+        ? [collection.name]
+        : ctx.collections.map((entry) => entry.name);
+
+      const options = withContentTypeRules(
+        {
+          gitPull: args.gitPull ?? false,
+          runUpdateCmd: args.runUpdateCmd ?? false,
+        },
+        ctx.config
+      );
+      const paths = await resolveReindexScope(collection, args.paths, options);
+      enforceSyncCommandEgress(ctx, {
+        collectionNames: collections,
+        gitPull: options.gitPull,
+        runUpdateCmd: options.runUpdateCmd,
+      });
+
+      const allCollections = ctx.collections;
+      try {
+        const accepted = await ctx.jobManager.submitReindex({
+          type: "sync",
+          key: reindexKey("sync", collection?.name ?? null, options),
+          paths,
+          run: async (scopedPaths) => {
             const result = collection
               ? wrapSingleSync(
-                  await defaultSyncService.syncCollection(
-                    collection,
-                    ctx.store,
-                    options
-                  )
+                  scopedPaths
+                    ? await defaultSyncService.syncPaths(
+                        collection,
+                        ctx.store,
+                        scopedPaths,
+                        options
+                      )
+                    : await defaultSyncService.syncCollection(
+                        collection,
+                        ctx.store,
+                        options
+                      )
                 )
               : await defaultSyncService.syncAll(
-                  ctx.collections,
+                  allCollections,
                   ctx.store,
                   options
                 );
             recordContentMutation(result, ctx.markContentMutation);
-            return result;
-          }
-        );
-
-        handedOff = true;
+            return { kind: "sync" as const, value: result };
+          },
+        });
 
         const result: SyncResultOutput = {
-          jobId,
+          jobId: accepted.jobId,
           collections,
-          status: "started",
+          status: accepted.status === "running" ? "started" : "queued",
+          ...(paths ? { paths } : {}),
           options: {
             gitPull: options.gitPull ?? false,
             runUpdateCmd: options.runUpdateCmd ?? false,
@@ -156,10 +158,6 @@ export function handleSync(
           throw new Error(`${error.code}: ${error.message}`);
         }
         throw error;
-      } finally {
-        if (lock && !handedOff) {
-          await lock.release();
-        }
       }
     },
     formatSyncResult

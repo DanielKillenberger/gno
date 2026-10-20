@@ -16,7 +16,7 @@ export interface JobProgress {
 export interface JobStatus {
   id: string;
   type: JobType;
-  status: "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed";
   createdAt: number;
   progress?: JobProgress;
   result?: SyncResult;

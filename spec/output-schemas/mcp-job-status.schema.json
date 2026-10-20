@@ -223,7 +223,7 @@
     "status": {
       "type": "string",
       "description": "Job status",
-      "enum": ["running", "completed", "failed"]
+      "enum": ["queued", "running", "completed", "failed"]
     },
     "startedAt": {
       "type": "string",

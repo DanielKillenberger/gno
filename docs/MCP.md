@@ -1774,6 +1774,16 @@ Add a folder to the index (requires `--enable-write`).
 
 Reindex one or all collections (requires `--enable-write`). FTS sync only (no embedding).
 
+```yaml
+collection: "notes" # Optional: limit to one collection
+paths: ["a.md", "sub/b.md"] # Optional: re-read only these files (needs collection)
+```
+
+While another job runs, the sync is queued (`status: queued`) instead of
+refused. Syncs for the same collection and options that arrive while one waits
+join it and share its `jobId`, so many requests cause at most one more pass.
+Too many distinct waiting syncs return `QUEUE_FULL`.
+
 ### gno_embed
 
 Generate embeddings for unembedded chunks (requires `--enable-write`). Runs as background job.
@@ -1793,9 +1803,11 @@ Full index: sync files + generate embeddings (requires `--enable-write`). Runs a
 ```
 collection: "notes"  # Optional: limit to one collection
 gitPull: false       # Optional: run git pull before sync
+paths: ["a.md"]      # Optional: re-read only these files (needs collection)
 ```
 
-Equivalent to CLI `gno index`. Runs sync then embed as single job.
+Equivalent to CLI `gno index`. Runs sync then embed as single job. Queues and
+merges with other requests the same way as `gno_sync`.
 
 ### gno_remove_collection
 

@@ -1226,36 +1226,40 @@ remain owner-specific even when documents share a canonical mirror.
 ```json
 {
   "collection": "notes",
-  "gitPull": false
+  "gitPull": false,
+  "paths": ["meeting-notes.md", "projects/plan.md"]
 }
 ```
 
-| Field        | Type    | Required | Description                                    |
-| :----------- | :------ | :------- | :--------------------------------------------- |
-| `collection` | string  | No       | Specific collection to sync (case-insensitive) |
-| `gitPull`    | boolean | No       | Run `git pull` before sync                     |
+| Field        | Type     | Required | Description                                                                                                                       |
+| :----------- | :------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------- |
+| `collection` | string   | No       | Specific collection to sync (case-insensitive)                                                                                    |
+| `gitPull`    | boolean  | No       | Run `git pull` before sync                                                                                                        |
+| `paths`      | string[] | No       | Re-read only these files of `collection` (relative to its root, or absolute inside it). Requires `collection`; not with `gitPull` |
 
 **Response** (202 Accepted):
 
 ```json
 {
-  "jobId": "550e8400-e29b-41d4-a716-446655440000"
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "queued"
 }
 ```
 
-**Error** (sync already running):
+`status` is `running` when the sync starts at once, or `queued` when another
+job is running or waiting. A sync that arrives while one for the same
+collection and options waits joins it and returns the same `jobId`, so many
+requests cause at most one more pass (over all the files they listed). A
+listed file that no longer exists is removed from the index.
 
-```json
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "Job 550e8400-e29b-41d4-a716-446655440000 already running",
-    "details": {
-      "activeJobId": "550e8400-e29b-41d4-a716-446655440000"
-    }
-  }
-}
-```
+**Errors**:
+
+| Status | Code           | When                                                                              |
+| :----- | :------------- | :-------------------------------------------------------------------------------- |
+| 400    | `VALIDATION`   | Bad body, empty `paths`, `paths` without `collection` or with `gitPull`           |
+| 400    | `INVALID_PATH` | A path is outside the collection root (including through a symlink)               |
+| 409    | `CONFLICT`     | Another process holds the index write lease when the sync would start at once     |
+| 429    | `QUEUE_FULL`   | Too many distinct syncs are already waiting; retry after the running job finishes |
 
 **Example**:
 
@@ -1267,6 +1271,11 @@ curl -X POST http://localhost:3000/api/sync
 curl -X POST http://localhost:3000/api/sync \
   -H "Content-Type: application/json" \
   -d '{"collection": "notes"}'
+
+# Re-read two files only
+curl -X POST http://localhost:3000/api/sync \
+  -H "Content-Type: application/json" \
+  -d '{"collection": "notes", "paths": ["a.md", "sub/b.md"]}'
 ```
 
 ---

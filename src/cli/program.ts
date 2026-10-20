@@ -1655,6 +1655,10 @@ function wireOnboardingCommands(program: Command): void {
     program
       .command("index [collection]")
       .description("Index files from collections")
+      .option(
+        "--path <path...>",
+        "reindex only these files of the collection (relative to its root)"
+      )
       .option("--no-embed", "skip embedding after sync")
       .option("--git-pull", "run git pull in git repositories")
       .option("--models-pull", "download models if missing")
@@ -1671,6 +1675,7 @@ function wireOnboardingCommands(program: Command): void {
         configPath: globals.config,
         indexName: globals.index,
         collection,
+        paths: cmdOpts.path as string[] | undefined,
         noEmbed: cmdOpts.embed === false,
         gitPull: Boolean(cmdOpts.gitPull),
         modelsPull: Boolean(cmdOpts.modelsPull),

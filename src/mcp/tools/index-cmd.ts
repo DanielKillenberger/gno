@@ -8,12 +8,12 @@ import type { Collection } from "../../config/types";
 import type { ToolContext } from "../server";
 
 import { MCP_ERRORS } from "../../core/errors";
-import { acquireWriteLock, type WriteLockHandle } from "../../core/file-lock";
-import { JobError } from "../../core/job-manager";
+import { JobError, reindexKey } from "../../core/job-manager";
 import {
   recordContentMutation,
   recordIndexMutation,
 } from "../../core/mutation-generations";
+import { resolveReindexScope } from "../../core/reindex-paths";
 import { normalizeCollectionName } from "../../core/validation";
 import { embedBacklog } from "../../embed";
 import { defaultSyncService, withContentTypeRules } from "../../ingestion";
@@ -29,12 +29,14 @@ import { runTool, type ToolResult } from "./index";
 interface IndexInput {
   collection?: string;
   gitPull?: boolean;
+  paths?: string[];
 }
 
 interface IndexResultOutput {
   jobId: string;
-  status: "started";
+  status: "started" | "queued";
   collections: string[];
+  paths?: string[];
   phases: ["sync", "embed"];
   options: {
     gitPull: boolean;
@@ -47,6 +49,7 @@ function formatIndexResult(result: IndexResultOutput): string {
   lines.push(`Job: ${result.jobId}`);
   lines.push(`Status: ${result.status}`);
   lines.push(`Collections: ${result.collections.join(", ") || "(none)"}`);
+  if (result.paths) lines.push(`Paths: ${result.paths.join(", ")}`);
   lines.push(`Phases: ${result.phases.join(" → ")}`);
   lines.push(`Git pull: ${result.options.gitPull ? "yes" : "no"}`);
   return lines.join("\n");
@@ -74,17 +77,7 @@ export function handleIndex(
         throw new Error("Write tools disabled. Start MCP with --enable-write.");
       }
 
-      let lock: WriteLockHandle | null = null;
-      let handedOff = false;
-
       try {
-        lock = await acquireWriteLock(ctx.writeLockPath);
-        if (!lock) {
-          throw new Error(
-            `${MCP_ERRORS.LOCKED.code}: ${MCP_ERRORS.LOCKED.message}`
-          );
-        }
-
         const requestedCollection = args.collection?.trim();
         const collection = requestedCollection
           ? resolveCollection(requestedCollection, ctx.collections)
@@ -108,6 +101,11 @@ export function handleIndex(
           },
           ctx.config
         );
+        const paths = await resolveReindexScope(
+          collection,
+          args.paths,
+          options
+        );
         enforceSyncCommandEgress(ctx, {
           collectionNames: collections,
           gitPull: options.gitPull,
@@ -121,27 +119,40 @@ export function handleIndex(
           collection?.name
         );
 
-        const jobId = await ctx.jobManager.startTypedJobWithLock(
-          "index",
-          lock,
-          async () => {
+        const allCollections = ctx.collections;
+        const accepted = await ctx.jobManager.submitReindex({
+          type: "index",
+          key: reindexKey("index", collection?.name ?? null, options),
+          paths,
+          run: async (scopedPaths) => {
             const lease = ctx.acquireModelLease?.();
             try {
               // Phase 1: Sync
               const syncResult = collection
-                ? await defaultSyncService
-                    .syncCollection(collection, ctx.store, options)
-                    .then((r) => ({
-                      collections: [r],
-                      totalDurationMs: r.durationMs,
-                      totalFilesProcessed: r.filesProcessed,
-                      totalFilesAdded: r.filesAdded,
-                      totalFilesUpdated: r.filesUpdated,
-                      totalFilesErrored: r.filesErrored,
-                      totalFilesSkipped: r.filesSkipped,
-                    }))
+                ? await (
+                    scopedPaths
+                      ? defaultSyncService.syncPaths(
+                          collection,
+                          ctx.store,
+                          scopedPaths,
+                          options
+                        )
+                      : defaultSyncService.syncCollection(
+                          collection,
+                          ctx.store,
+                          options
+                        )
+                  ).then((r) => ({
+                    collections: [r],
+                    totalDurationMs: r.durationMs,
+                    totalFilesProcessed: r.filesProcessed,
+                    totalFilesAdded: r.filesAdded,
+                    totalFilesUpdated: r.filesUpdated,
+                    totalFilesErrored: r.filesErrored,
+                    totalFilesSkipped: r.filesSkipped,
+                  }))
                 : await defaultSyncService.syncAll(
-                    ctx.collections,
+                    allCollections,
                     ctx.store,
                     options
                   );
@@ -217,15 +228,14 @@ export function handleIndex(
             } finally {
               lease?.release();
             }
-          }
-        );
-
-        handedOff = true;
+          },
+        });
 
         const result: IndexResultOutput = {
-          jobId,
+          jobId: accepted.jobId,
           collections,
-          status: "started",
+          status: accepted.status === "running" ? "started" : "queued",
+          ...(paths ? { paths } : {}),
           phases: ["sync", "embed"],
           options: {
             gitPull: options.gitPull ?? false,
@@ -239,10 +249,6 @@ export function handleIndex(
           throw new Error(`${error.code}: ${error.message}`);
         }
         throw error;
-      } finally {
-        if (lock && !handedOff) {
-          await lock.release();
-        }
       }
     },
     formatIndexResult

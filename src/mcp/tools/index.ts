@@ -443,6 +443,12 @@ const syncInputSchema = z.object({
     .boolean()
     .default(false)
     .describe("Run the collection's configured update command before syncing"),
+  paths: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Reindex only these files (relative to the collection root, or absolute inside it). Requires collection"
+    ),
 });
 
 const embedInputSchema = z.object({
@@ -458,6 +464,12 @@ const indexInputSchema = z.object({
     .optional()
     .describe("Collection name to index. Omit to index all collections"),
   gitPull: z.boolean().default(false).describe("Run git pull before indexing"),
+  paths: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Reindex only these files (relative to the collection root, or absolute inside it). Requires collection"
+    ),
 });
 
 const removeCollectionInputSchema = z.object({
