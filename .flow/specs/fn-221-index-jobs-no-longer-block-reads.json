@@ -8,12 +8,66 @@
   "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-221-index-jobs-no-longer-block-reads",
-  "impl_review_rounds": {},
+  "impl_review_rounds": {
+    "fn-221-index-jobs-no-longer-block-reads.1": 1
+  },
   "next_task": 1,
   "no_plan": true,
   "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
+  "review_attempts": [
+    {
+      "artifact_sha256": "ee7e6ff710aa9c222016d740b143902bdbd307699741c276202ff517c49564bb",
+      "backend": "codex",
+      "base_sha": "f04b33ca979e7d9f5f5ceb688abbc392962a7b64",
+      "counter_kind": "impl",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-2e05607bb03fba68706fd1f8336ac61d",
+            "classification": "introduced",
+            "findingId": "finding-2e05607bb03fba68706fd1f8336ac61d",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "9f7d7c16517a2720b98707fd832c9c9c738c9cd6",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "gpt-6.1-sol",
+      "outcome": "verdict",
+      "output_bytes": 1132,
+      "output_sha256": "cdb491fd652da2cdae7518a18199c53ebad5a3f24ad06d3ba8cc154a958253b3",
+      "reservation_id": "89abee6237f843be98a316862724c4df",
+      "round_consumed": true,
+      "scope": "impl:fn-221-index-jobs-no-longer-block-reads.1",
+      "superseded_by": null,
+      "task": "fn-221-index-jobs-no-longer-block-reads.1",
+      "timestamp": "2026-10-20T16:02:33.074050Z",
+      "verdict": "NEEDS_WORK"
+    }
+  ],
+  "review_hash_epoch": {},
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "impl:fn-221-index-jobs-no-longer-block-reads.1": 0
+  },
   "spec_path": ".flow/specs/fn-221-index-jobs-no-longer-block-reads.md",
   "status": "done",
   "title": "Index jobs no longer block reads",
@@ -28,5 +82,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-20T15:57:59.048210Z"
+  "updated_at": "2026-10-20T16:02:33.078047Z"
 }
