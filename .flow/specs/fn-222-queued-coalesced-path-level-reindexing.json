@@ -10,13 +10,107 @@
     "fn-221-index-jobs-no-longer-block-reads"
   ],
   "id": "fn-222-queued-coalesced-path-level-reindexing",
-  "impl_review_rounds": {},
+  "impl_review_rounds": {
+    "fn-222-queued-coalesced-path-level-reindexing.1": 1
+  },
   "next_task": 1,
   "no_plan": true,
   "plan_review_rounds": 0,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "ready": true,
+  "review_attempts": [
+    {
+      "artifact_sha256": "37915e09b728c182677a1c5dd4fc08dacc1c5ab25faf3d865123834c848960d2",
+      "backend": "codex",
+      "base_sha": "78a621663011c88f6f98d83aa3d61c10c2dad17b",
+      "counter_kind": "impl",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-ee229b0b07e162f6377fdcc1026da53c",
+            "classification": "introduced",
+            "findingId": "finding-ee229b0b07e162f6377fdcc1026da53c",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-a55c9ebd4b36d069332b80a601abd5a5",
+            "classification": "introduced",
+            "findingId": "finding-a55c9ebd4b36d069332b80a601abd5a5",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-308a0111616aad2895bb210805b5e636",
+            "classification": "introduced",
+            "findingId": "finding-308a0111616aad2895bb210805b5e636",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-f3602cb07b0de816de37e148a6b88a22",
+            "classification": "introduced",
+            "findingId": "finding-f3602cb07b0de816de37e148a6b88a22",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-0f1d6c17e0ce6bd90ae4ab1f6457315b",
+            "classification": "introduced",
+            "findingId": "finding-0f1d6c17e0ce6bd90ae4ab1f6457315b",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          },
+          {
+            "chainRoot": "finding-ae4e3d6d529c4d3624a41bd5222f15b3",
+            "classification": "introduced",
+            "findingId": "finding-ae4e3d6d529c4d3624a41bd5222f15b3",
+            "firstSeenThisRound": true,
+            "severity": "P2",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "6a99bf26871d9509225ee870b5d99e243449427e",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "gpt-6.1-sol",
+      "outcome": "verdict",
+      "output_bytes": 4959,
+      "output_sha256": "68831f3a1e426ad207bfbcfc347f7dd938ff7b4527e16d784d2f79da3d0f9245",
+      "reservation_id": "3ce07492750f451595e967e78131ae2e",
+      "round_consumed": true,
+      "scope": "impl:fn-222-queued-coalesced-path-level-reindexing.1",
+      "superseded_by": null,
+      "task": "fn-222-queued-coalesced-path-level-reindexing.1",
+      "timestamp": "2026-10-20T17:10:17.809009Z",
+      "verdict": "NEEDS_WORK"
+    }
+  ],
+  "review_hash_epoch": {},
+  "review_pending_rounds": {},
+  "review_reservations": {},
+  "review_transport_failures": {
+    "impl:fn-222-queued-coalesced-path-level-reindexing.1": 0
+  },
   "spec_path": ".flow/specs/fn-222-queued-coalesced-path-level-reindexing.md",
   "status": "open",
   "title": "Queued, coalesced, path-level reindexing",
@@ -31,5 +125,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-20T16:33:15.147289Z"
+  "updated_at": "2026-10-20T17:10:17.814252Z"
 }

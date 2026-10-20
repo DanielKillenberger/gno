@@ -21,6 +21,8 @@ export interface JobStatus {
   progress?: JobProgress;
   result?: SyncResult;
   error?: string;
+  /** Reindex jobs: the collection (null = all) and merged paths (null = whole). */
+  scope?: JobRecord["scope"];
 }
 
 export interface StartJobSuccess {
@@ -49,6 +51,7 @@ const fromResidentRecord = (record: JobRecord): JobStatus => ({
   progress: record.progress,
   result: record.result,
   error: record.error,
+  ...(record.scope ? { scope: record.scope } : {}),
 });
 
 function cleanupExpiredJobs(now = Date.now()): void {

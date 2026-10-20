@@ -82,7 +82,7 @@ import {
   planCreateFolder,
   planDuplicateRefactor,
 } from "../../core/file-refactors";
-import { JobError, reindexKey, type JobManager } from "../../core/job-manager";
+import { JobError, type JobManager } from "../../core/job-manager";
 import {
   MemoryError,
   type MemoryErrorCode,
@@ -1872,7 +1872,12 @@ export async function handleSync(
     );
   }
 
-  const runSync = async (scopedPaths: string[] | null): Promise<SyncResult> => {
+  // Captured now: a queued pass runs after this request's context is gone.
+  const config = ctxHolder.config;
+  const runSync = async (
+    scopedPaths: string[] | null,
+    passOptions: { gitPull?: boolean; runUpdateCmd?: boolean }
+  ): Promise<SyncResult> => {
     const collection = collections[0];
     const result =
       scopedPaths && collection
@@ -1881,10 +1886,14 @@ export async function handleSync(
               collection,
               store,
               scopedPaths,
-              withContentTypeRules({}, ctxHolder.config)
+              withContentTypeRules({}, config)
             )
           )
-        : await defaultSyncService.syncAll(collections, store, options);
+        : await defaultSyncService.syncAll(
+            collections,
+            store,
+            withContentTypeRules({ ...passOptions }, config)
+          );
     recordContentMutation(result, ctxHolder.markContentMutation);
     if (hasContentMutation(result)) {
       if (ctxHolder.scheduler) {
@@ -1899,15 +1908,13 @@ export async function handleSync(
     try {
       const accepted = await manager.submitReindex({
         type: "sync",
-        key: reindexKey(
-          "sync",
-          body.collection ? (collections[0]?.name ?? null) : null,
-          { gitPull: body.gitPull, runUpdateCmd: paths === null }
-        ),
+        collection: body.collection ? (collections[0]?.name ?? null) : null,
         paths,
-        run: async (scopedPaths) => ({
+        // A whole sync over REST always runs the collection's update command.
+        options: { gitPull: body.gitPull ?? false, runUpdateCmd: true },
+        run: async (scope) => ({
           kind: "sync",
-          value: await runSync(scopedPaths),
+          value: await runSync(scope.paths, scope.options),
         }),
       });
       return jsonResponse(
@@ -1928,7 +1935,7 @@ export async function handleSync(
   }
 
   // Standalone fallback (unit fixtures without a resident job manager).
-  const jobResult = startJob("sync", () => runSync(paths));
+  const jobResult = startJob("sync", () => runSync(paths, options));
 
   if (!jobResult.ok) {
     return jobConflictResponse(jobResult);

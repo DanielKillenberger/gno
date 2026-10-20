@@ -8,7 +8,7 @@ import type { Collection } from "../../config/types";
 import type { ToolContext } from "../server";
 
 import { MCP_ERRORS } from "../../core/errors";
-import { JobError, reindexKey } from "../../core/job-manager";
+import { JobError } from "../../core/job-manager";
 import {
   recordContentMutation,
   recordIndexMutation,
@@ -119,28 +119,39 @@ export function handleIndex(
           collection?.name
         );
 
+        // Captured now: a queued pass runs after this call's context is gone.
+        const config = ctx.config;
+        const modelAdapter = ctx.getModelAdapter?.();
         const allCollections = ctx.collections;
         const accepted = await ctx.jobManager.submitReindex({
           type: "index",
-          key: reindexKey("index", collection?.name ?? null, options),
+          collection: collection?.name ?? null,
           paths,
-          run: async (scopedPaths) => {
+          options: {
+            gitPull: options.gitPull ?? false,
+            runUpdateCmd: options.runUpdateCmd ?? false,
+          },
+          run: async (scope) => {
             const lease = ctx.acquireModelLease?.();
+            const passOptions = withContentTypeRules(
+              { ...scope.options },
+              config
+            );
             try {
               // Phase 1: Sync
               const syncResult = collection
                 ? await (
-                    scopedPaths
+                    scope.paths
                       ? defaultSyncService.syncPaths(
                           collection,
                           ctx.store,
-                          scopedPaths,
-                          options
+                          scope.paths,
+                          passOptions
                         )
                       : defaultSyncService.syncCollection(
                           collection,
                           ctx.store,
-                          options
+                          passOptions
                         )
                   ).then((r) => ({
                     collections: [r],
@@ -154,12 +165,12 @@ export function handleIndex(
                 : await defaultSyncService.syncAll(
                     allCollections,
                     ctx.store,
-                    options
+                    passOptions
                   );
               recordContentMutation(syncResult, ctx.markContentMutation);
 
               // Phase 2: Embed
-              const llm = ctx.getModelAdapter?.() ?? new LlmAdapter(ctx.config);
+              const llm = modelAdapter ?? new LlmAdapter(config);
               const embedResult = await llm.createEmbeddingPort(modelUri, {
                 egressCollections: collections,
                 policy: { offline: true, allowDownload: false },

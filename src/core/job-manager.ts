@@ -1,9 +1,12 @@
-import type { SyncResult } from "../ingestion";
+// node:async_hooks: Bun has no separate async-context snapshot API.
+import { AsyncLocalStorage } from "node:async_hooks";
 /**
  * Background job manager for MCP write operations.
  *
  * @module src/core/job-manager
  */
+
+import type { SyncResult } from "../ingestion";
 
 import {
   assertInferenceActive,
@@ -53,18 +56,33 @@ export interface JobRecord {
   typedResult?: JobResult;
   error?: string;
   progress?: { current: number; total: number; currentFile?: string };
+  /** Reindex jobs: the collection (null = all) and merged paths (null = whole). */
+  scope?: { collection: string | null; paths: string[] | null };
   serverInstanceId: string;
 }
 
+export interface ReindexOptions {
+  gitPull: boolean;
+  runUpdateCmd: boolean;
+}
+
+/** What one reindex pass covers; `paths` null means the whole collection. */
+export interface ReindexScope {
+  collection: string | null;
+  paths: string[] | null;
+  options: ReindexOptions;
+}
+
 /**
- * A reindex request. Requests with the same `key` (type, collection and
- * options) coalesce into one pending job; `paths` null means the whole scope.
+ * A reindex request. `run` must honour the scope it is given: when requests
+ * merge, the pass runs the latest request's `run` over the merged scope.
  */
 export interface ReindexRequest {
   type: "sync" | "index";
-  key: string;
+  collection: string | null;
   paths: string[] | null;
-  run: (paths: string[] | null, signal: AbortSignal) => Promise<JobResult>;
+  options: ReindexOptions;
+  run: (scope: ReindexScope, signal: AbortSignal) => Promise<JobResult>;
 }
 
 export interface ReindexAccepted {
@@ -72,25 +90,20 @@ export interface ReindexAccepted {
   status: "running" | "queued";
 }
 
-/** Requests share a key, and so coalesce, only when they would run the same pass. */
-export function reindexKey(
-  type: ReindexRequest["type"],
-  collection: string | null,
-  options: { gitPull?: boolean; runUpdateCmd?: boolean }
-): string {
-  return JSON.stringify([
-    type,
-    collection,
-    Boolean(options.gitPull),
-    Boolean(options.runUpdateCmd),
-  ]);
-}
-
 interface PendingReindex {
   job: JobRecord;
+  type: ReindexRequest["type"];
+  collection: string | null;
   paths: Set<string> | null;
+  /** null while only path requests joined: options come from a whole request. */
+  options: ReindexOptions | null;
   run: ReindexRequest["run"];
 }
+
+const NO_REINDEX_OPTIONS: ReindexOptions = {
+  gitPull: false,
+  runUpdateCmd: false,
+};
 
 export interface JobManagerOptions {
   lockPath: string;
@@ -126,8 +139,10 @@ export class JobManager {
   #authorizationEpoch = "egress-epoch-uninitialized";
   #accepting = true;
   #releaseJobLocks = new Map<string, () => Promise<void>>();
-  /** Pending reindex jobs in arrival order, one per request key. */
-  #pending = new Map<string, PendingReindex>();
+  /** Pending reindex jobs in arrival order. */
+  #pending: PendingReindex[] = [];
+  /** Context captured at construction; queued jobs start here, not in the previous job's. */
+  #rootContext = AsyncLocalStorage.snapshot();
 
   constructor(options: JobManagerOptions) {
     this.#lockPath = options.lockPath;
@@ -208,28 +223,35 @@ export class JobManager {
 
   /**
    * Start a reindex now when nothing else is running or waiting; otherwise
-   * queue it. A request whose key already waits merges its paths into that
-   * job and shares its id, so any number of requests for one scope cause at
-   * most one more pass. Throws `LOCKED` when another process holds the write
-   * lease at an immediate start, and `QUEUE_FULL` at the pending bound.
+   * queue it. A request joins a waiting job for the same type and collection
+   * when that cannot change what the job is allowed to do: a path request
+   * joins any of them, and a whole-collection request joins a path-only job
+   * (setting its options) or a whole job with the same options. Joined
+   * requests share one job id, so any number of them cause at most one more
+   * pass. Throws `LOCKED` when another process holds the write lease at an
+   * immediate start, and `QUEUE_FULL` at the pending bound.
    */
   async submitReindex(request: ReindexRequest): Promise<ReindexAccepted> {
     assertInferenceActive();
     this.#assertAccepting();
     this.#cleanupExpiredJobs();
 
-    const pending = this.#pending.get(request.key);
+    const pending = this.#pending.find((entry) => joins(entry, request));
     if (pending) {
-      if (pending.paths && request.paths) {
-        for (const path of request.paths) pending.paths.add(path);
-      } else {
+      if (request.paths === null) {
         pending.paths = null;
+        pending.options = request.options;
+      } else if (pending.paths) {
+        for (const path of request.paths) pending.paths.add(path);
       }
+      pending.run = request.run;
+      pending.job.scope = scopeRecord(pending.collection, pending.paths);
       return { jobId: pending.job.id, status: "queued" };
     }
 
-    if (!this.#activeJobId && this.#pending.size === 0) {
+    if (!this.#activeJobId && this.#pending.length === 0) {
       const job = this.#newJob(request.type, "running");
+      job.scope = scopeRecord(request.collection, request.paths);
       this.#activeJobId = job.id;
       const lock = await acquireWriteLock(this.#lockPath, this.#lockTimeoutMs);
       if (!lock || !this.#accepting) {
@@ -241,24 +263,29 @@ export class JobManager {
         this.#assertAccepting();
         throw new JobError("LOCKED", MCP_ERRORS.LOCKED.message);
       }
-      this.#launchTyped(
-        job,
-        (signal) => request.run(request.paths, signal),
-        lock
-      );
+      const scope: ReindexScope = {
+        collection: request.collection,
+        paths: request.paths,
+        options: request.options,
+      };
+      this.#launchTyped(job, (signal) => request.run(scope, signal), lock);
       return { jobId: job.id, status: "running" };
     }
 
-    if (this.#pending.size >= MAX_PENDING_REINDEX_JOBS) {
+    if (this.#pending.length >= MAX_PENDING_REINDEX_JOBS) {
       throw new JobError(
         "QUEUE_FULL",
         `${MCP_ERRORS.QUEUE_FULL.message} (${MAX_PENDING_REINDEX_JOBS} waiting)`
       );
     }
     const job = this.#newJob(request.type, "queued");
-    this.#pending.set(request.key, {
+    job.scope = scopeRecord(request.collection, request.paths);
+    this.#pending.push({
       job,
+      type: request.type,
+      collection: request.collection,
       paths: request.paths ? new Set(request.paths) : null,
+      options: request.paths ? null : request.options,
       run: request.run,
     });
     return { jobId: job.id, status: "queued" };
@@ -302,7 +329,7 @@ export class JobManager {
   }
 
   clear(): void {
-    this.#pending.clear();
+    this.#pending = [];
     this.#jobs.clear();
     this.#jobAuthorizationEpochs.clear();
     this.#activeJobId = null;
@@ -339,9 +366,9 @@ export class JobManager {
 
   stop(): void {
     this.#accepting = false;
-    for (const { job } of this.#pending.values())
+    for (const { job } of this.#pending)
       failJob(job, "Resident runtime is shutting down");
-    this.#pending.clear();
+    this.#pending = [];
   }
 
   cancel(): void {
@@ -486,10 +513,8 @@ export class JobManager {
   /** Start waiting reindex jobs, in arrival order, while nothing is running. */
   async #drainPending(): Promise<void> {
     while (!this.#activeJobId) {
-      const next = this.#pending.entries().next();
-      if (next.done) return;
-      const [key, entry] = next.value;
-      this.#pending.delete(key);
+      const entry = this.#pending.shift();
+      if (!entry) return;
       this.#activeJobId = entry.job.id;
       const lock = await acquireWriteLock(this.#lockPath, this.#lockTimeoutMs);
       if (!lock || !this.#accepting) {
@@ -503,8 +528,14 @@ export class JobManager {
         );
         continue;
       }
-      const paths = entry.paths ? [...entry.paths] : null;
-      this.#launchTyped(entry.job, (signal) => entry.run(paths, signal), lock);
+      const scope: ReindexScope = {
+        collection: entry.collection,
+        paths: entry.paths ? [...entry.paths].sort() : null,
+        options: entry.options ?? NO_REINDEX_OPTIONS,
+      };
+      this.#rootContext(() =>
+        this.#launchTyped(entry.job, (signal) => entry.run(scope, signal), lock)
+      );
     }
   }
 
@@ -587,6 +618,25 @@ export class JobManager {
       "STALE_EGRESS_POLICY: collection policy changed; retry to re-authorize"
     );
   }
+}
+
+function joins(entry: PendingReindex, request: ReindexRequest): boolean {
+  if (entry.type !== request.type || entry.collection !== request.collection)
+    return false;
+  if (request.paths !== null) return true;
+  if (entry.options === null) return true;
+  return (
+    entry.paths === null &&
+    entry.options.gitPull === request.options.gitPull &&
+    entry.options.runUpdateCmd === request.options.runUpdateCmd
+  );
+}
+
+function scopeRecord(
+  collection: string | null,
+  paths: Iterable<string> | null
+): NonNullable<JobRecord["scope"]> {
+  return { collection, paths: paths ? [...paths].sort() : null };
 }
 
 const isUnfinished = (job: JobRecord): boolean =>

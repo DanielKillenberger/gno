@@ -11,7 +11,6 @@ import {
   type JobResult,
   JobManager,
   MAX_PENDING_REINDEX_JOBS,
-  reindexKey,
 } from "../../src/core/job-manager";
 import { withInferenceScope } from "../../src/llm/inference-scope";
 import { Mutex } from "../../src/mcp/context";
@@ -71,8 +70,9 @@ beforeEach(async () => {
   await withInferenceScope({}, () =>
     manager.submitReindex({
       type: "index",
-      key: "running",
+      collection: null,
       paths: null,
+      options: { gitPull: false, runUpdateCmd: false },
       run: async () => {
         await gate.promise;
         return done;
@@ -111,6 +111,16 @@ test("syncs behind a running job are queued and merge per collection", async () 
     firstBody.jobId
   );
   expect(manager.getJob(firstBody.jobId)?.status).toBe("queued");
+
+  // A whole-collection sync joins the waiting path sync and widens it.
+  const whole = await post({ collection: "notes" });
+  expect(((await whole.json()) as { jobId: string }).jobId).toBe(
+    firstBody.jobId
+  );
+  expect(manager.getJob(firstBody.jobId)?.scope).toEqual({
+    collection: "notes",
+    paths: null,
+  });
 });
 
 test("path errors are rejected before queueing", async () => {
@@ -136,8 +146,9 @@ test("a full queue answers 429 QUEUE_FULL", async () => {
     for (let i = 0; i < MAX_PENDING_REINDEX_JOBS; i += 1) {
       await manager.submitReindex({
         type: "sync",
-        key: reindexKey("sync", `c${i}`, {}),
+        collection: `c${i}`,
         paths: null,
+        options: { gitPull: false, runUpdateCmd: false },
         run: async () => done,
       });
     }

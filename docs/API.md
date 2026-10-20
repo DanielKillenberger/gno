@@ -1248,9 +1248,12 @@ remain owner-specific even when documents share a canonical mirror.
 
 `status` is `running` when the sync starts at once, or `queued` when another
 job is running or waiting. A sync that arrives while one for the same
-collection and options waits joins it and returns the same `jobId`, so many
-requests cause at most one more pass (over all the files they listed). A
-listed file that no longer exists is removed from the index.
+collection waits joins it and returns the same `jobId`, so many requests cause
+at most one more pass: listed files are added to it, and a whole-collection
+sync widens it to the whole collection. `GET /api/jobs/:id` reports `queued`
+until the pass starts, plus its `scope` (`collection`, and `paths` or `null`
+for the whole collection). A listed file that no longer exists is removed from
+the index.
 
 **Errors**:
 

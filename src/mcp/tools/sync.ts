@@ -9,7 +9,7 @@ import type { CollectionSyncResult, SyncResult } from "../../ingestion";
 import type { ToolContext } from "../server";
 
 import { MCP_ERRORS } from "../../core/errors";
-import { JobError, reindexKey } from "../../core/job-manager";
+import { JobError } from "../../core/job-manager";
 import { recordContentMutation } from "../../core/mutation-generations";
 import { resolveReindexScope } from "../../core/reindex-paths";
 import { normalizeCollectionName } from "../../core/validation";
@@ -109,32 +109,42 @@ export function handleSync(
         runUpdateCmd: options.runUpdateCmd,
       });
 
+      // Captured now: a queued pass runs after this call's context is gone.
+      const config = ctx.config;
       const allCollections = ctx.collections;
       try {
         const accepted = await ctx.jobManager.submitReindex({
           type: "sync",
-          key: reindexKey("sync", collection?.name ?? null, options),
+          collection: collection?.name ?? null,
           paths,
-          run: async (scopedPaths) => {
+          options: {
+            gitPull: options.gitPull ?? false,
+            runUpdateCmd: options.runUpdateCmd ?? false,
+          },
+          run: async (scope) => {
+            const passOptions = withContentTypeRules(
+              { ...scope.options },
+              config
+            );
             const result = collection
               ? wrapSingleSync(
-                  scopedPaths
+                  scope.paths
                     ? await defaultSyncService.syncPaths(
                         collection,
                         ctx.store,
-                        scopedPaths,
-                        options
+                        scope.paths,
+                        passOptions
                       )
                     : await defaultSyncService.syncCollection(
                         collection,
                         ctx.store,
-                        options
+                        passOptions
                       )
                 )
               : await defaultSyncService.syncAll(
                   allCollections,
                   ctx.store,
-                  options
+                  passOptions
                 );
             recordContentMutation(result, ctx.markContentMutation);
             return { kind: "sync" as const, value: result };

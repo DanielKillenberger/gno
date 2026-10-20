@@ -1780,9 +1780,12 @@ paths: ["a.md", "sub/b.md"] # Optional: re-read only these files (needs collecti
 ```
 
 While another job runs, the sync is queued (`status: queued`) instead of
-refused. Syncs for the same collection and options that arrive while one waits
-join it and share its `jobId`, so many requests cause at most one more pass.
-Too many distinct waiting syncs return `QUEUE_FULL`.
+refused. Syncs for the same collection that arrive while one waits join it and
+share its `jobId`, so many requests cause at most one more pass: listed files
+are added to it, and a whole-collection sync widens it (whole-collection syncs
+with different `gitPull` / `runUpdateCmd` stay separate). `gno_job_status`
+reports the merged `scope`. Too many distinct waiting syncs return
+`QUEUE_FULL`.
 
 ### gno_embed
 

@@ -6,7 +6,7 @@
 
 // node:fs/promises realpath and node:path have no Bun equivalent.
 import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { Collection } from "../config/types";
 
@@ -22,6 +22,24 @@ const missing = (error: unknown): boolean =>
   typeof error === "object" &&
   "code" in error &&
   (error.code === "ENOENT" || error.code === "ENOTDIR");
+
+/** Realpath of `path`, or of its nearest existing ancestor below `root`. */
+async function nearestRealpath(
+  path: string,
+  root: string
+): Promise<string | null> {
+  let current = path;
+  for (;;) {
+    try {
+      return await realpath(current);
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+    const parent = dirname(current);
+    if (parent === current || relative(root, parent) === "") return null;
+    current = parent;
+  }
+}
 
 /**
  * Resolve paths (relative to the collection root, or absolute inside it) to
@@ -60,15 +78,17 @@ export async function resolveReindexPaths(
         `${MCP_ERRORS.INVALID_PATH.code}: ${path} is outside collection ${collection.name}`
       );
     }
-    try {
-      const real = await realpath(absolute);
-      if (escapes(relative(realRoot, real))) {
-        throw new Error(
-          `${MCP_ERRORS.INVALID_PATH.code}: ${path} resolves outside collection ${collection.name}`
-        );
-      }
-    } catch (error) {
-      if (!missing(error)) throw error;
+    // A missing file is checked through its nearest existing folder, so a
+    // deletion path cannot leave the root through a symlinked parent.
+    const real = await nearestRealpath(absolute, root);
+    if (
+      real !== null &&
+      escapes(relative(realRoot, real)) &&
+      real !== realRoot
+    ) {
+      throw new Error(
+        `${MCP_ERRORS.INVALID_PATH.code}: ${path} resolves outside collection ${collection.name}`
+      );
     }
     resolved.add(toPosix(rel));
   }

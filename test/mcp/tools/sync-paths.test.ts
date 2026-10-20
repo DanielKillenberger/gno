@@ -115,6 +115,10 @@ test("invalid path lists are rejected before anything is queued", async () => {
     [{ collection: "notes", paths: ["../outside.md"] }, "INVALID_PATH"],
     [{ collection: "notes", paths: ["/etc/hosts"] }, "INVALID_PATH"],
     [{ collection: "notes", paths: ["escape/index.sqlite"] }, "INVALID_PATH"],
+    [
+      { collection: "notes", paths: ["escape/missing/gone.md"] },
+      "INVALID_PATH",
+    ],
   ];
   for (const [args, code] of cases) {
     const result = await sync(args);

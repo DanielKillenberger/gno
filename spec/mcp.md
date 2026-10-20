@@ -241,10 +241,16 @@ because another job in the same server is running:
 - Otherwise it is queued (`status: "queued"`) and starts when the jobs ahead
   of it finish, taking the write lock then. A queued job that cannot get the
   lock fails with `LOCKED` in its job status.
-- Requests for the same scope (tool, collection and options) that arrive
-  while one waits merge into that waiting job and return its `jobId`: any
-  number of requests cause at most one more pass, over the union of their
-  `paths` (a request without `paths` widens it to the whole scope).
+- A request joins a waiting job of the same tool and collection and returns
+  its `jobId`, so any number of requests cause at most one more pass:
+  - a request with `paths` joins any such job (its files are added to the
+    pass, or covered by a whole-collection pass);
+  - a whole-collection request joins a job that only has path requests
+    (widening it and setting its options) or a whole-collection job with the
+    same `gitPull` / `runUpdateCmd`. Whole-collection requests with different
+    options stay separate passes, and a path-only pass never runs `gitPull`
+    or an update command.
+- A queued pass uses the configuration of the latest request that joined it.
 - At most 64 distinct scopes wait at once; a new scope beyond that returns
   `QUEUE_FULL`. Retry after the running job finishes.
 - The queue lives in the server process. Jobs still waiting when it stops are
@@ -2976,7 +2982,9 @@ Get status of a background job.
 **Output Schema:** `gno://schemas/mcp-job-status@1.0`
 
 `status` is `queued` while a reindex job waits behind another job, then
-`running`, `completed` or `failed`.
+`running`, `completed` or `failed`. Reindex jobs also report `scope`: the
+collection (`null` for all) and the merged `paths` (`null` for the whole
+collection).
 
 ---
 
