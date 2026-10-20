@@ -624,11 +624,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     release: () => void;
     db: Database;
   };
-  /** Connection a background job writes on; reads elsewhere stay committed. */
-  private readonly jobConnection = new AsyncLocalStorage<{
-    db: Database;
-    open: boolean;
-  }>();
+  /** Set while a read-only caller runs; its reads use `readDb`. */
+  private readonly readScope = new AsyncLocalStorage<true>();
+  /** Second connection for read-only callers, opened on first use. */
+  private readDb: Database | null = null;
   private shutdownFenced = false;
   private shutdownDeadline?: number;
   private contextGeneration = 0;
@@ -747,6 +746,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
 
   async close(): Promise<void> {
     this.fenceForShutdown();
+    this.readDb?.close(false);
+    this.readDb = null;
     if (this.db) {
       try {
         // Current Bun finalizes all statements and releases Windows handles now.
@@ -807,43 +808,40 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   }
 
   /**
-   * Run a background job on its own connection to the same index, so its
-   * open batch transactions stay invisible to reads on the shared connection
-   * (WAL gives each connection the last committed state). Transactions on
-   * both connections still serialize through the same writer queue. An
-   * in-memory index has no second connection and runs on the shared one.
+   * Run a read-only caller on a second connection to the same index. All
+   * writes stay on the shared connection, so a write transaction there (a
+   * sync batch held open across file conversions) is never visible to these
+   * reads: WAL gives this connection the last committed state. An in-memory
+   * index has no second connection and reads on the shared one.
    */
-  async withJobConnection<T>(fn: () => Promise<T>): Promise<T> {
-    const main = this.ensureOpen();
-    if (
-      this.jobConnection.getStore()?.open ||
-      this.dbPath === "" ||
-      this.dbPath === ":memory:"
-    ) {
-      return fn();
-    }
+  withReadConnection<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.dbPath === "" || this.dbPath === ":memory:") return fn();
+    return this.readScope.run(true, fn);
+  }
+
+  private openReadDb(main: Database): Database {
+    if (this.readDb) return this.readDb;
     const db = new Database(this.dbPath);
-    const scope = { db, open: true };
     try {
+      // A write here would wait out the busy timeout while the shared
+      // connection's batch, on the same event loop, cannot commit: fail fast.
+      db.exec("PRAGMA query_only = ON");
       db.exec("PRAGMA foreign_keys = ON");
       const busyTimeout =
         main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()
           ?.timeout ?? DEFAULT_BUSY_TIMEOUT_MS;
       db.exec(`PRAGMA busy_timeout = ${busyTimeout}`);
-      if (process.env.CI) {
-        db.exec("PRAGMA synchronous = OFF");
-        db.exec("PRAGMA temp_store = MEMORY");
-      }
       if (this.ftsTokenizer.startsWith("snowball")) {
         const snowball = loadFts5Snowball(db);
         if (!snowball.loaded)
           throw new Error(`Failed to load fts5-snowball: ${snowball.error}`);
       }
-      return await this.jobConnection.run(scope, fn);
-    } finally {
-      scope.open = false;
+    } catch (cause) {
       db.close(false);
+      throw cause;
     }
+    this.readDb = db;
+    return db;
   }
 
   /**
@@ -854,6 +852,9 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
    * explicit BEGIN/COMMIT to support async callbacks.
    */
   async withTransaction<T>(fn: () => Promise<T>): Promise<StoreResult<T>> {
+    // Writes always run on the shared connection, even from a read scope.
+    if (this.readScope.getStore())
+      return this.readScope.exit(() => this.withTransaction(fn));
     const parent = this.txContext.getStore();
     const connection = this.ensureOpen();
     const isOuter = parent === undefined;
@@ -918,23 +919,9 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     }
   }
 
-  /**
-   * Write outside a transaction. While a background job holds a write
-   * transaction on its own connection, wait for it in the writer queue instead
-   * of SQLite's synchronous busy wait, which would block the job from
-   * committing.
-   */
+  /** Write outside a transaction, on the shared connection even from a read scope. */
   private async admitWrite<T>(write: (db: Database) => T): Promise<T> {
-    const db = this.ensureOpen();
-    const active = this.activeTransaction;
-    if (this.txContext.getStore() || !active || active.db === db)
-      return write(db);
-    const release = await this.acquireTransactionWriter();
-    try {
-      return write(this.ensureOpen());
-    } finally {
-      release();
-    }
+    return this.readScope.exit(() => write(this.ensureOpen()));
   }
 
   private async acquireTransactionWriter(): Promise<() => void> {
@@ -962,9 +949,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   /**
    * Get raw SQLite database handle for vector operations.
    * Part of SqliteDbProvider interface - use with isSqliteDbProvider() type guard.
+   * Always the shared connection: vector ports may create their tables.
    */
   getRawDb(): Database {
-    return this.ensureOpen();
+    return this.readScope.exit(() => this.ensureOpen());
   }
 
   graphReferenceStore() {
@@ -978,9 +966,10 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     if (!this.db) {
       throw new Error("Database not open");
     }
-    // Work the job scheduled to outlive it falls back to the shared connection.
-    const job = this.jobConnection.getStore();
-    const db = job?.open ? job.db : this.db;
+    const db =
+      this.readScope.getStore() && !this.txContext.getStore()
+        ? this.openReadDb(this.db)
+        : this.db;
     this.capShutdownBusyWait(db);
     return db;
   }

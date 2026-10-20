@@ -1039,7 +1039,8 @@ export async function runTool<T>(
   try {
     assertConfiguredCollections(ctx, name);
     assertInferenceActive();
-    const raw = await (ctx.runWithSnapshot?.(fn) ?? fn());
+    const read = READ_CONNECTION_TOOLS.has(name) ? readConnection(ctx, fn) : fn;
+    const raw = await (ctx.runWithSnapshot?.(read) ?? read());
     assertInferenceActive();
     const traceMetadata =
       raw !== null && typeof raw === "object"
@@ -1066,6 +1067,34 @@ export async function runTool<T>(
   } finally {
     release();
   }
+}
+
+/**
+ * Read-only retrieval tools. They read on the store's read connection, so a
+ * sync batch that is still writing is never visible to them.
+ */
+const READ_CONNECTION_TOOLS = new Set([
+  "gno_search",
+  "gno_vsearch",
+  "gno_query",
+  "gno_get",
+  "gno_multi_get",
+  "gno_status",
+  "gno_list_tags",
+  "gno_links",
+  "gno_backlinks",
+  "gno_similar",
+]);
+
+/** Store test doubles may lack the read connection; they read as before. */
+function readConnection<T>(
+  ctx: ToolContext,
+  fn: () => Promise<T>
+): () => Promise<T> {
+  const store = ctx.store as Partial<ToolContext["store"]> | undefined;
+  return typeof store?.withReadConnection === "function"
+    ? () => ctx.store.withReadConnection(fn)
+    : fn;
 }
 
 /**

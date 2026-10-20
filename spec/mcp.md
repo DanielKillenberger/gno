@@ -3134,6 +3134,7 @@ Clients should check schema version for compatibility.
 - No persistent state between tool calls
 - Each tool call is independent
 - Server handles concurrent tool calls sequentially; an accepted background job (`gno_sync`, `gno_embed`, `gno_index`) waits for the call in progress, then runs without holding that queue, so reads are not blocked while it runs
+- The retrieval tools (`gno_search`, `gno_vsearch`, `gno_query`, `gno_get`, `gno_multi_get`, `gno_status`, `gno_list_tags`, `gno_links`, `gno_backlinks`, `gno_similar`) read on a second connection, so they see only committed index data, never a sync batch still being written; vector rows are read on the shared connection
 
 ---
 

@@ -418,7 +418,6 @@ export async function startResidentRuntime(
     lockPath: writeLockPath,
     serverInstanceId,
     toolMutex,
-    runOnJobConnection: (fn) => store.withJobConnection(fn),
   });
   let authorizationEpoch = collectionEgressPolicyEpoch(initialConfig);
   jobManager.setAuthorizationEpoch(authorizationEpoch);

@@ -109,7 +109,6 @@ export async function startMcpServer(options: McpServerOptions): Promise<void> {
     lockPath: writeLockPath,
     serverInstanceId,
     toolMutex,
-    runOnJobConnection: (fn) => store.withJobConnection(fn),
   });
 
   // Shutdown state

@@ -10,9 +10,22 @@ import { JobManager } from "../../src/core/job-manager";
 import { Mutex } from "../../src/mcp/context";
 import { runTool } from "../../src/mcp/tools/index";
 import { SqliteAdapter } from "../../src/store";
+import { createVectorIndexPort } from "../../src/store/vector";
 import { safeRm } from "../helpers/cleanup";
 
 const READ_DEADLINE_MS = 1000;
+
+const document = (title: string) => ({
+  collection: "notes",
+  relPath: "note.md",
+  sourceHash: title,
+  sourceMime: "text/markdown",
+  sourceExt: ".md",
+  sourceSize: 1,
+  sourceMtime: "2026-10-20T00:00:00.000Z",
+  mirrorHash: title,
+  title,
+});
 
 const emptySync = {
   collections: [],
@@ -104,7 +117,7 @@ test("a job waits for the tool call in progress before it starts", async () => {
   expect(manager.getJob(jobId)?.status).toBe("completed");
 });
 
-test("reads during a job see only committed rows, including after a rollback", async () => {
+test("reads on the read connection during a job see only committed rows, including after a rollback", async () => {
   const root = await mkdtemp(join(tmpdir(), "gno-job-reads-"));
   const store = new SqliteAdapter();
   try {
@@ -128,23 +141,12 @@ test("reads during a job see only committed rows, including after a rollback", a
       lockPath: join(root, "write.lock"),
       serverInstanceId: "test",
       toolMutex: new Mutex(),
-      runOnJobConnection: (fn) => store.withJobConnection(fn),
     });
-    const document = (title: string) => ({
-      collection: "notes",
-      relPath: "note.md",
-      sourceHash: title,
-      sourceMime: "text/markdown",
-      sourceExt: ".md",
-      sourceSize: 1,
-      sourceMtime: "2026-10-20T00:00:00.000Z",
-      mirrorHash: title,
-      title,
-    });
-    const readTitle = async () => {
-      const read = await store.getDocument("notes", "note.md");
-      return read.ok ? read.value?.title : "read failed";
-    };
+    const readTitle = () =>
+      store.withReadConnection(async () => {
+        const read = await store.getDocument("notes", "note.md");
+        return read.ok ? read.value?.title : "read failed";
+      });
 
     const written = Promise.withResolvers<void>();
     const rollback = Promise.withResolvers<void>();
@@ -171,7 +173,6 @@ test("reads during a job see only committed rows, including after a rollback", a
       lockPath: join(root, "write.lock"),
       serverInstanceId: "test",
       toolMutex: new Mutex(),
-      runOnJobConnection: (fn) => store.withJobConnection(fn),
     });
     await next.startJob("sync", async () => {
       await store.withTransaction(async () => {
@@ -187,23 +188,16 @@ test("reads during a job see only committed rows, including after a rollback", a
   }
 });
 
-test("a trace write during a job transaction waits for the commit instead of failing busy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "gno-job-trace-"));
+test("writes outside a transaction during a job batch do not fail as locked", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gno-job-writes-"));
   const store = new SqliteAdapter();
   try {
+    // A short busy timeout, as in the resident, so a lock wait fails fast.
     expect(
       (await store.open(join(root, "index-test.sqlite"), "unicode61", 200)).ok
     ).toBeTrue();
-    const manager = new JobManager({
-      lockPath: join(root, "write.lock"),
-      serverInstanceId: "test",
-      toolMutex: new Mutex(),
-      runOnJobConnection: (fn) => store.withJobConnection(fn),
-    });
-    const inTransaction = Promise.withResolvers<void>();
-    const commit = Promise.withResolvers<void>();
-    const jobId = await manager.startJob("sync", async () => {
-      await store.withTransaction(async () => {
+    expect(
+      (
         await store.syncCollections([
           {
             name: "notes",
@@ -212,7 +206,19 @@ test("a trace write during a job transaction waits for the commit instead of fai
             include: [],
             exclude: [],
           },
-        ]);
+        ])
+      ).ok
+    ).toBeTrue();
+    const manager = new JobManager({
+      lockPath: join(root, "write.lock"),
+      serverInstanceId: "test",
+      toolMutex: new Mutex(),
+    });
+    const inTransaction = Promise.withResolvers<void>();
+    const commit = Promise.withResolvers<void>();
+    const jobId = await manager.startJob("sync", async () => {
+      await store.withTransaction(async () => {
+        await store.upsertDocument({ ...document("Batch"), relPath: "b.md" });
         inTransaction.resolve();
         await commit.promise;
       });
@@ -220,11 +226,35 @@ test("a trace write during a job transaction waits for the commit instead of fai
     });
     await inTransaction.promise;
 
-    const traceWrite = store.purgeRetrievalTraces();
+    // A capture-style direct write and a read tool's trace write, while the
+    // batch stays open past the busy timeout.
+    const direct = store.upsertDocument(document("Captured"));
+    const trace = store.withReadConnection(() => store.purgeRetrievalTraces());
+    // A read tool can open a new model's vector tables while the batch writes.
+    const vectors = await store.withReadConnection(() =>
+      createVectorIndexPort(store.getRawDb(), {
+        model: "test-model",
+        dimensions: 4,
+      })
+    );
+    expect(vectors.ok && vectors.value.searchAvailable).toBeTrue();
+    // A stray write on the read connection fails at once instead of waiting.
+    const stray = await store.withReadConnection(async () =>
+      store.recordError({
+        collection: "notes",
+        relPath: "x.md",
+        code: "TEST",
+        message: "stray",
+      })
+    );
+    expect(stray).toMatchObject({ ok: false });
     await Bun.sleep(400);
     commit.resolve();
 
-    expect((await traceWrite).ok).toBeTrue();
+    const directResult = await direct;
+    const traceResult = await trace;
+    expect(directResult.ok ? "ok" : directResult.error.message).toBe("ok");
+    expect(traceResult.ok ? "ok" : traceResult.error.message).toBe("ok");
     await manager.shutdown();
     expect(manager.getJob(jobId)?.status).toBe("completed");
   } finally {
