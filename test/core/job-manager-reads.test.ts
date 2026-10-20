@@ -186,3 +186,49 @@ test("reads during a job see only committed rows, including after a rollback", a
     await safeRm(root);
   }
 });
+
+test("a trace write during a job transaction waits for the commit instead of failing busy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "gno-job-trace-"));
+  const store = new SqliteAdapter();
+  try {
+    expect(
+      (await store.open(join(root, "index-test.sqlite"), "unicode61", 200)).ok
+    ).toBeTrue();
+    const manager = new JobManager({
+      lockPath: join(root, "write.lock"),
+      serverInstanceId: "test",
+      toolMutex: new Mutex(),
+      runOnJobConnection: (fn) => store.withJobConnection(fn),
+    });
+    const inTransaction = Promise.withResolvers<void>();
+    const commit = Promise.withResolvers<void>();
+    const jobId = await manager.startJob("sync", async () => {
+      await store.withTransaction(async () => {
+        await store.syncCollections([
+          {
+            name: "notes",
+            path: root,
+            pattern: "**/*",
+            include: [],
+            exclude: [],
+          },
+        ]);
+        inTransaction.resolve();
+        await commit.promise;
+      });
+      return emptySync;
+    });
+    await inTransaction.promise;
+
+    const traceWrite = store.purgeRetrievalTraces();
+    await Bun.sleep(400);
+    commit.resolve();
+
+    expect((await traceWrite).ok).toBeTrue();
+    await manager.shutdown();
+    expect(manager.getJob(jobId)?.status).toBe("completed");
+  } finally {
+    await store.close();
+    await safeRm(root);
+  }
+});

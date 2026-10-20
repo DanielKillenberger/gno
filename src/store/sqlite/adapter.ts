@@ -918,6 +918,25 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     }
   }
 
+  /**
+   * Write outside a transaction. While a background job holds a write
+   * transaction on its own connection, wait for it in the writer queue instead
+   * of SQLite's synchronous busy wait, which would block the job from
+   * committing.
+   */
+  private async admitWrite<T>(write: (db: Database) => T): Promise<T> {
+    const db = this.ensureOpen();
+    const active = this.activeTransaction;
+    if (this.txContext.getStore() || !active || active.db === db)
+      return write(db);
+    const release = await this.acquireTransactionWriter();
+    try {
+      return write(this.ensureOpen());
+    } finally {
+      release();
+    }
+  }
+
   private async acquireTransactionWriter(): Promise<() => void> {
     const previous = this.txTail;
     let release!: () => void;
@@ -1556,14 +1575,16 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   async createRetrievalTrace(
     input: RetrievalTraceInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return createStoredTrace(this.ensureOpen(), input);
+    return this.admitWrite((db) => createStoredTrace(db, input));
   }
 
   async mergeRetrievalTraceEgressLineage(
     traceId: string,
     lineage: EgressLineage
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return mergeStoredTraceEgressLineage(this.ensureOpen(), traceId, lineage);
+    return this.admitWrite((db) =>
+      mergeStoredTraceEgressLineage(db, traceId, lineage)
+    );
   }
 
   async getRetrievalTrace(
@@ -1591,37 +1612,39 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     status: RetrievalTraceTerminalStatus,
     updatedAtMs: number
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return finalizeStoredTrace(this.ensureOpen(), traceId, status, updatedAtMs);
+    return this.admitWrite((db) =>
+      finalizeStoredTrace(db, traceId, status, updatedAtMs)
+    );
   }
 
   async appendRetrievalTraceRun(
     input: RetrievalTraceRunInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceRun(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceRun(db, input));
   }
 
   async appendRetrievalTraceEvent(
     input: RetrievalTraceEventInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceEvent(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceEvent(db, input));
   }
 
   async appendRetrievalTraceJudgment(
     input: RetrievalTraceJudgmentInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceJudgment(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceJudgment(db, input));
   }
 
   async appendRetrievalTraceExport(
     input: RetrievalTraceExportInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceExport(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceExport(db, input));
   }
 
   async appendRetrievalTraceExportManifest(
     input: RetrievalTraceExportManifestInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredTraceExportManifest(this.ensureOpen(), input);
+    return this.admitWrite((db) => appendStoredTraceExportManifest(db, input));
   }
 
   async getRetrievalTraceExportManifest(
@@ -1639,32 +1662,34 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   async getOrCreateRetrievalTraceRedactionSecret(): Promise<
     StoreResult<string>
   > {
-    return getOrCreateStoredTraceRedactionSecret(this.ensureOpen());
+    return this.admitWrite((db) => getOrCreateStoredTraceRedactionSecret(db));
   }
 
   async deleteRetrievalTrace(
     traceId: string
   ): Promise<StoreResult<RetrievalTraceDeleteCounts>> {
-    return deleteStoredTrace(this.ensureOpen(), traceId);
+    return this.admitWrite((db) => deleteStoredTrace(db, traceId));
   }
 
   async purgeRetrievalTraces(): Promise<
     StoreResult<RetrievalTracePurgeResult>
   > {
-    return purgeStoredTraces(this.ensureOpen());
+    return this.admitWrite((db) => purgeStoredTraces(db));
   }
 
   async enforceRetrievalTraceRetention(
     policy: RetrievalTraceRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceRetentionResult>> {
-    return enforceStoredTraceRetention(this.ensureOpen(), policy, nowMs);
+    return this.admitWrite((db) =>
+      enforceStoredTraceRetention(db, policy, nowMs)
+    );
   }
 
   async appendEgressAuditReceipt(
     receipt: EgressAuditReceiptInput
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredEgressAuditReceipt(this.ensureOpen(), receipt);
+    return this.admitWrite((db) => appendStoredEgressAuditReceipt(db, receipt));
   }
 
   async appendEgressAuditReceiptWithRetention(
@@ -1672,11 +1697,8 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     policy: EgressAuditRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<RetrievalTraceAppendResult>> {
-    return appendStoredEgressAuditReceiptWithRetention(
-      this.ensureOpen(),
-      receipt,
-      policy,
-      nowMs
+    return this.admitWrite((db) =>
+      appendStoredEgressAuditReceiptWithRetention(db, receipt, policy, nowMs)
     );
   }
 
@@ -1696,7 +1718,7 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
   async deleteEgressAuditReceipt(
     auditId: string
   ): Promise<StoreResult<EgressAuditDeleteResult>> {
-    return deleteStoredEgressAuditReceipt(this.ensureOpen(), auditId);
+    return this.admitWrite((db) => deleteStoredEgressAuditReceipt(db, auditId));
   }
 
   async getEgressAuditStatus(): Promise<StoreResult<EgressAuditStatusResult>> {
@@ -1707,13 +1729,15 @@ export class SqliteAdapter implements StorePort, SqliteDbProvider {
     policy: EgressAuditRetentionPolicy,
     nowMs: number
   ): Promise<StoreResult<EgressAuditRetentionResult>> {
-    return enforceStoredEgressAuditRetention(this.ensureOpen(), policy, nowMs);
+    return this.admitWrite((db) =>
+      enforceStoredEgressAuditRetention(db, policy, nowMs)
+    );
   }
 
   async purgeEgressAuditReceipts(): Promise<
     StoreResult<EgressAuditPurgeResult>
   > {
-    return purgeStoredEgressAuditReceipts(this.ensureOpen());
+    return this.admitWrite((db) => purgeStoredEgressAuditReceipts(db));
   }
 
   getContextGeneration(): number {

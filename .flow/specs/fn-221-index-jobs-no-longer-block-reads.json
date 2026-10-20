@@ -9,7 +9,7 @@
   "depends_on_epics": [],
   "id": "fn-221-index-jobs-no-longer-block-reads",
   "impl_review_rounds": {
-    "fn-221-index-jobs-no-longer-block-reads.1": 1
+    "fn-221-index-jobs-no-longer-block-reads.1": 2
   },
   "next_task": 1,
   "no_plan": true,
@@ -60,6 +60,58 @@
       "task": "fn-221-index-jobs-no-longer-block-reads.1",
       "timestamp": "2026-10-20T16:02:33.074050Z",
       "verdict": "NEEDS_WORK"
+    },
+    {
+      "artifact_sha256": "52bd972256e9f3b61099021045c65645c0ec98414269d5943f1fe24d1b7ca765",
+      "backend": "codex",
+      "base_sha": "f04b33ca979e7d9f5f5ceb688abbc392962a7b64",
+      "counter_kind": "impl",
+      "effort": "high",
+      "failure_class": null,
+      "finalized": {
+        "digest": "complete",
+        "receipt": "complete",
+        "status": "not_applicable"
+      },
+      "findings_digest": {
+        "backend": "codex",
+        "digest_truncated": false,
+        "items": [
+          {
+            "chainRoot": "finding-2e05607bb03fba68706fd1f8336ac61d",
+            "classification": "introduced",
+            "findingId": "finding-2e05607bb03fba68706fd1f8336ac61d",
+            "firstSeenThisRound": false,
+            "severity": "P1",
+            "status": "fixed"
+          },
+          {
+            "chainRoot": "finding-f6303c41fbe6ff79c3af13e506b7cca4",
+            "classification": "introduced",
+            "findingId": "finding-f6303c41fbe6ff79c3af13e506b7cca4",
+            "firstSeenThisRound": true,
+            "severity": "P1",
+            "status": "open"
+          }
+        ],
+        "reviewKind": "implementation"
+      },
+      "forced": false,
+      "hash_epoch": 0,
+      "head_sha": "34ec2652ae20c8e37a3ec093528ed66250a885e4",
+      "head_sha_observed": true,
+      "kind": "impl",
+      "model": "gpt-6.1-sol",
+      "outcome": "verdict",
+      "output_bytes": 1595,
+      "output_sha256": "96c247ab815f8b8b6c6f208adb5471d03204970a26f03b11037f94e291973632",
+      "reservation_id": "96b8de1b59ea4c23994e9f1e5b497a2f",
+      "round_consumed": true,
+      "scope": "impl:fn-221-index-jobs-no-longer-block-reads.1",
+      "superseded_by": null,
+      "task": "fn-221-index-jobs-no-longer-block-reads.1",
+      "timestamp": "2026-10-20T16:16:33.058843Z",
+      "verdict": "NEEDS_WORK"
     }
   ],
   "review_hash_epoch": {},
@@ -82,5 +134,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-10-20T16:02:33.078047Z"
+  "updated_at": "2026-10-20T16:16:33.061634Z"
 }
