@@ -2,14 +2,15 @@
   "branch": "fn-222-queued-coalesced-path-level-reindexing",
   "findings": {
     "backend": "interactive",
-    "headSha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+    "headSha": "d80ef45797692f580b996923e570be60c4243fcf",
     "items": [],
     "reviewKind": "qa",
-    "round": 1,
+    "round": 2,
     "schemaVersion": 1,
-    "sourceReceiptId": "review-1df9c394693af132626e06fab8647a9b7a5d71a57a7f954db85b523c197dccdc"
+    "sourceReceiptId": "review-3a0a85f77fb901ba283d1ded4930f5dcc4eb90348bf543edb3d8b86d6fa44524",
+    "supersedesReceiptId": "review-1df9c394693af132626e06fab8647a9b7a5d71a57a7f954db85b523c197dccdc"
   },
-  "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+  "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
   "id": "fn-222-queued-coalesced-path-level-reindexing",
   "mode": "interactive",
   "open_p0p1": [],
@@ -43,9 +44,9 @@
   "scenarios": [
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s1-single.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s1-single.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S1",
       "outcome": "PASS",
       "rids": [
@@ -55,9 +56,9 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s2-queue.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s2-queue.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S2",
       "outcome": "PASS",
       "rids": [
@@ -67,9 +68,9 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s3-coalesce.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s3-coalesce.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S3",
       "outcome": "PASS",
       "rids": [
@@ -79,9 +80,9 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s4-paths.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s4-paths.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S4",
       "outcome": "PASS",
       "rids": [
@@ -92,11 +93,23 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s5-desktop-queued.png",
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s5-desktop-done.png",
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s5-desktop-console.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s8-path-rules.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
+      "id": "S8",
+      "outcome": "PASS",
+      "rids": [
+        "R3"
+      ],
+      "run": "live"
+    },
+    {
+      "evidence": [
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s5-desktop-queued.png",
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s5-desktop-done.png",
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s5-desktop-console.log"
+      ],
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S5-desktop",
       "outcome": "PASS",
       "rids": [
@@ -106,11 +119,11 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s5-mobile-queued.png",
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s5-mobile-done.png",
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s5-mobile-console.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s5-mobile-queued.png",
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s5-mobile-done.png",
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s5-mobile-console.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S5-mobile",
       "outcome": "PASS",
       "rids": [
@@ -120,9 +133,9 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s6-restart.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s6-restart.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S6",
       "outcome": "PASS",
       "rids": [
@@ -132,9 +145,9 @@
     },
     {
       "evidence": [
-        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing/s7-cli.log"
+        ".flow/tmp/qa-fn-222-queued-coalesced-path-level-reindexing-v2/s7-cli.log"
       ],
-      "head_sha": "3fa6797bbda722ebef03d75ebd18bd66a5864388",
+      "head_sha": "d80ef45797692f580b996923e570be60c4243fcf",
       "id": "S7",
       "outcome": "PASS",
       "rids": [
@@ -144,7 +157,7 @@
       "run": "live"
     }
   ],
-  "timestamp": "2026-10-20T17:41:45Z",
+  "timestamp": "2026-10-20T21:13:12Z",
   "type": "qa_verdict",
   "verdict": "SHIP"
 }
